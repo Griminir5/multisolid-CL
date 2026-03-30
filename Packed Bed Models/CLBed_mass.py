@@ -14,7 +14,7 @@ from cycle_program import *
 from pyUnits import m, s, K, kmol, Pa, GW # this will not show up because pylance cannot get to .pyd files
 
 #
-molar_flux_type = daeVariableType(name="molar_flux_type", units=kmol/m**2/s,
+molar_flux_type = daeVariableType(name="molar_flux_type", units=kmol/(s*m**2),
                                   lowerBound=-100, upperBound=100, initialGuess=0, absTolerance=1e-5)
 molar_flow_type = daeVariableType(name="molar_flow_type", units=kmol/s,
                                   lowerBound=-10, upperBound=10, initialGuess=0, absTolerance=1e-5)
@@ -198,35 +198,26 @@ class CLBed_mass(daeModel):
         eq.Residual = self.Dax(idx_face) - Abs(self.u_s(idx_face)) * 0.5 * self.d_p()
 
         # Flux calculation on interior faces
-        eq = self.CreateEquation("face_flux")
-        idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, 'i')
-        idx_face = eq.DistributeOnDomain(self.x_faces, eOpenOpen, 'x_f')
-
-        cL = Constant(0 * kmol / m**3)
-        cR = Constant(0 * kmol / m**3)
-        yL = Constant(0 * dimless)
-        yR = Constant(0 * dimless)
-        ct_face = Constant(0 * kmol / m**3)
-        inv_dx = Constant(0 * m**(-1))
-
-        for face_index in range(1, Nf-1):
+        zero_velocity = Constant(0 * m/s)
+        for face_index in range(1, Nf - 1):
             cell_L = face_index - 1
             cell_R = face_index
             dx = center_coords[cell_R] - center_coords[cell_L]
-            selector = 1 - (idx_face() - face_index) / (idx_face() - face_index + 1E-15)
             ct_L = Sum(self.c_gas.array('*', cell_L))
             ct_R = Sum(self.c_gas.array('*', cell_R))
+            ct_face = 0.5 * (ct_L + ct_R)
 
-            cL += selector * self.c_gas(idx_gas, cell_L)
-            cR += selector * self.c_gas(idx_gas, cell_R)
-            yL += selector * self.y_gas(idx_gas, cell_L)
-            yR += selector * self.y_gas(idx_gas, cell_R)
-            ct_face += selector * 0.5 * (ct_L + ct_R)
-            inv_dx += selector / dx
+            eq = self.CreateEquation(f"face_flux_{face_index}")
+            idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, 'i')
 
-        uplus  = Max(self.u_s(idx_face), 0) # this is for switching which face is "upwind" when velocity goes negative
-        uminus = Min(self.u_s(idx_face), 0) # same as above, maybe should be replaced with an approximation
-        eq.Residual = self.N_gas_face(idx_gas, idx_face) - uplus*cL - uminus*cR + self.Dax(idx_face)*ct_face*(yR-yL)*inv_dx
+            uplus  = Max(self.u_s(face_index), zero_velocity) # this is for switching which face is "upwind" when velocity goes negative
+            uminus = Min(self.u_s(face_index), zero_velocity) # same as above, maybe should be replaced with an approximation
+            eq.Residual = (
+                self.N_gas_face(idx_gas, face_index)
+                - uplus * self.c_gas(idx_gas, cell_L)
+                - uminus * self.c_gas(idx_gas, cell_R)
+                + self.Dax(face_index) * ct_face * (self.y_gas(idx_gas, cell_R) - self.y_gas(idx_gas, cell_L)) / dx
+            )
         
         # Cell species balances
 
@@ -236,7 +227,7 @@ class CLBed_mass(daeModel):
             eq = self.CreateEquation(f"species_balance_cell_{idx_cell}")
             idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, 'i')
             eq.Residual = dt(self.c_gas(idx_gas, idx_cell)) + (self.N_gas_face(idx_gas, idx_cell+1) - self.N_gas_face(idx_gas, idx_cell))/dx
-
+            # eq.Residual = (self.N_gas_face(idx_gas, idx_cell+1) - self.N_gas_face(idx_gas, idx_cell))/dx # Steady-state version
         # Mass transfer RHS boundary
 
         eq = self.CreateEquation("rhs_boundary_flux")
@@ -279,9 +270,9 @@ class simBed(daeSimulation):
 
         self.model.c_in.SetValue(0.025 * kmol/m**3)
         self.model.F_in_const.SetValue(.0006 * kmol/s)
-        self.model.SetUniformAxialGrid(10)
+        self.model.SetUniformAxialGrid(3)
 
-        self.model.y_in_const.SetValue(np.array([0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0]))
+        self.model.y_in_const.SetValues(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]))
 
     
     def SetUpVariables(self):
@@ -295,9 +286,9 @@ class simBed(daeSimulation):
             specifying the indexes in the domains. In this example we loop over the open x and y domains,
             thus we start the loop with 1 and end with NumberOfPoints-1 (for both domains)
         """
-        for y in range(self.model.N_gas.NumberOfPoints1):
-            for x in range (self.model.x_centers.NumberOfPoints):
-                self.model.c_gas.SetInitialCondition(x, y, 0.025 * kmol/m**3)
+        for gas_idx in range(self.model.N_gas.NumberOfPoints):
+            for cell_idx in range(self.model.x_centers.NumberOfPoints):
+                self.model.c_gas.SetInitialCondition(gas_idx, cell_idx, 0.00278 * kmol/m**3)
 
 def guiRun(qtApp):
     # Interpolation functions are runtime/external nodes in DAETOOLS.
