@@ -19,9 +19,9 @@ molar_flux_type = daeVariableType(name="molar_flux_type", units=kmol/m**2/s,
 molar_flow_type = daeVariableType(name="molar_flow_type", units=kmol/s,
                                   lowerBound=-10, upperBound=10, initialGuess=0, absTolerance=1e-5)
 molar_conc_type = daeVariableType(name="molar_conc_type", units=kmol/m**3,
-                                  lowerBound=0, upperBound=10, initialGuess=0, absTolerance=1e-5)
+                                  lowerBound=0, upperBound=100, initialGuess=0, absTolerance=1e-5)
 molar_conc_sol_type = daeVariableType(name="molar_conc_sol_type", units=kmol/m**3,
-                                  lowerBound=0, upperBound=10, initialGuess=0, absTolerance=1e-5, valueConstraint=eValueGTEQ)
+                                  lowerBound=0, upperBound=1000, initialGuess=0, absTolerance=1e-5, valueConstraint=eValueGTEQ)
 molar_frac_type = daeVariableType(name="molar_frac_type", units=dimless,
                                   lowerBound=-0.1, upperBound=1.1, initialGuess=0, absTolerance=1e-5)
 dispersion_type = daeVariableType(name="dispersion_type", units=m**2/s,
@@ -42,7 +42,7 @@ fraction_type = daeVariableType(name="fraction_type", units=dimless,
                                 lowerBound=0, upperBound=1, initialGuess=0, absTolerance=1e-5)
 
 VALID_GAS_SPECIES = ["AR", "CH4", "CO", "CO2", "H2", "H2O", "HE", "N2", "O2"]
-#VALID_SOLID_SPECIES = ["CaAl:A-01", "Ni", "NiO"]
+#VALID_SOLID_SPECIES = ["CaAl:A-01", "Ni", "NiO","Fe","FeO","Fe3O4","Fe2O3", "Ca", "CaO", "CaCO3", "CaSO4"]
 
 class CLBed_mass(daeModel):
     def __init__(self, Name, gas_species, Parent = None, Description = "Simple gas mass balance-only bed"):
@@ -110,23 +110,12 @@ class CLBed_mass(daeModel):
         self.u_s = daeVariable("u_s", velocity_type, self, "Face superficial velocity", [self.x_faces])
 
         ## Input data at the inlet
-        self.F_in = daeParameter("F_in", molar_flow_type.Units, self, "Total molar flow at the inlet")
-        self.y_in = daeParameter("y_in", molar_frac_type.Units, self, "Molar fraction of component i at the inlet", [self.N_gas])
+        self.F_in_const = daeParameter("F_in_const", molar_flow_type.Units, self, "Fixed total molar flow at the inlet")
+        self.y_in_const = daeParameter("y_in_const", molar_frac_type.Units, self, "Fixed molar fraction of component i at the inlet", [self.N_gas])
 
-    def SetInletProgram(self, inlet_program, repeat=False, time_horizon=None):
-        if set(inlet_program.gas_species) != set(self.gas_species):
-            raise ValueError(
-                f"InletProgram gas species {inlet_program.gas_species} do not match model gas species {tuple(self.gas_species)}."
-            )
-
-        self._inlet_program = inlet_program
-        self._compiled_inlet_program = inlet_program.build(repeat=repeat, time_horizon=time_horizon)
-        return self._compiled_inlet_program
-
-    def ClearInletProgram(self):
-        self._inlet_program = None
-        self._compiled_inlet_program = None
-        self._inlet_program_functions = {}
+        ## Input data at the inlet
+        self.F_in = daeVariable("F_in", molar_flow_type, self, "Total molar flow at the inlet")
+        self.y_in = daeVariable("y_in", molar_frac_type, self, "Molar fraction of component i at the inlet", [self.N_gas])
 
     def SetAxialGridFromFaces(self, face_locations):
         face_locations = np.asarray(face_locations, dtype=float)
@@ -179,40 +168,14 @@ class CLBed_mass(daeModel):
         center_coords = [self.xval_cells(idx_cell) for idx_cell in range(Nc)]
         face_coords = [self.xval_faces(idx_face) for idx_face in range(Nf)]
 
-        inlet_flow_expr = self.F_in()
-        inlet_y_expr = None
+        #Setting the inlet flow expression, later will also have a way to use scheduled flowrate
+        eq = self.CreateEquation("Active_inlet_flow")
+        eq.Residual = self.F_in() - self.F_in_const()
 
-        if self._compiled_inlet_program is not None:
-            schedule = self._compiled_inlet_program
-            time_points = list(schedule["times"])
-            self._inlet_program_functions = {}
-
-            self._inlet_program_functions["F_in"] = daeLinearInterpolationFunction(
-                "F_in_schedule",
-                self,
-                molar_flow_type.Units,
-                time_points,
-                list(schedule["F_in"]),
-                Time(),
-            )
-            inlet_flow_expr = self._inlet_program_functions["F_in"]()
-
-            self._inlet_program_functions["y_in"] = {}
-            for idx_gas, species in enumerate(self.gas_species):
-                function_name = f"y_in_schedule_{species}"
-                schedule_values = list(schedule["y_in"][species])
-                schedule_fn = daeLinearInterpolationFunction(
-                    function_name,
-                    self,
-                    molar_frac_type.Units,
-                    time_points,
-                    schedule_values,
-                    Time(),
-                )
-                self._inlet_program_functions["y_in"][species] = schedule_fn
-        else:
-            inlet_y_expr = None
-
+        #Setting the inlet composition expression, later will also have a way to use scheduled composition
+        eq = self.CreateEquation("Active_inlet_composition")
+        idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, 'i')
+        eq.Residual = self.y_in(idx_gas) - self.y_in_const(idx_gas)
 
         # Cell closure and mole fraction (gas) calculations
         eq = self.CreateEquation("total_concentration_closure")
@@ -227,14 +190,7 @@ class CLBed_mass(daeModel):
         # Mass Transfer LHS boundary
         eq = self.CreateEquation("lhs_boundary_flux")
         idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, 'i')
-        if self._compiled_inlet_program is not None:
-            inlet_y_expr = Constant(0 * dimless)
-            for gas_index, species in enumerate(self.gas_species):
-                selector = 1 - (idx_gas() - gas_index) / (idx_gas() - gas_index + 1E-15)
-                inlet_y_expr += selector * self._inlet_program_functions["y_in"][species]()
-        else:
-            inlet_y_expr = self.y_in(idx_gas)
-        eq.Residual = inlet_y_expr * inlet_flow_expr / (self.pi() * self.R_bed()**2) - self.N_gas_face(idx_gas, 0)
+        eq.Residual = self.y_in(idx_gas)*self.F_in() / (self.pi() * self.R_bed()**2) - self.N_gas_face(idx_gas, 0)
 
         # Axial Dispersion coefficient calculation
         eq = self.CreateEquation("axial_dispersion_face")
@@ -292,4 +248,69 @@ class CLBed_mass(daeModel):
 
         eq = self.CreateEquation("plug_flow_spec_face")
         idx_face = eq.DistributeOnDomain(self.x_faces, eClosedClosed, 'x_f')
-        eq.Residual = self.u_s(idx_face) - inlet_flow_expr / (self.c_in() * self.pi() * self.R_bed()**2)
+        eq.Residual = self.u_s(idx_face) - self.F_in() / (self.c_in() * self.pi() * self.R_bed()**2)
+
+
+class simBed(daeSimulation):
+    def __init__(self):
+        """
+        4.1 First, the base class constructor has to be called, and then the model for simulation instantiated.
+            daeSimulation class has three properties used to store the model: 'Model', 'model' and 'm'.
+            They are absolutely equivalent, and user can choose which one to use.
+            For clarity, here the shortest one will be used: m.
+        """
+        daeSimulation.__init__(self)
+
+        self.model = CLBed_mass("MassTrsf", VALID_GAS_SPECIES)
+
+    def SetUpParametersAndDomains(self):
+        """
+        4.2 Initialize domains and parameters
+            Every simulation class must implement SetUpParametersAndDomains method, even if it is empty.
+            It is used to set the values of the parameters, initialize domains etc.
+        """
+
+        self.model.R_gas.SetValue(8314.462 * (Pa*m**3)/(kmol* K))
+        self.model.pi.SetValue(3.14)
+
+        self.model.L_bed.SetValue(2.5 * m)
+        self.model.R_bed.SetValue(0.1 * m)
+        self.model.d_p.SetValue(0.01 * m)
+
+        self.model.c_in.SetValue(0.025 * kmol/m**3)
+        self.model.F_in_const.SetValue(.0006 * kmol/s)
+        self.model.SetUniformAxialGrid(10)
+
+        self.model.y_in_const.SetValue(np.array([0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0]))
+
+    
+    def SetUpVariables(self):
+        """
+        4.3 Set initial conditions, initial guesses, fix degreees of freedom, etc.
+            Every simulation class must implement SetUpVariables method, even if it is empty.
+            In this example the only thing needed to be done is to set the initial condition for the variable tau.
+            That can be done using the SetInitialCondition function.
+        
+            SetInitialCondition function in the case of distributed variables can accept additional arguments
+            specifying the indexes in the domains. In this example we loop over the open x and y domains,
+            thus we start the loop with 1 and end with NumberOfPoints-1 (for both domains)
+        """
+        for y in range(self.model.N_gas.NumberOfPoints1):
+            for x in range (self.model.x_centers.NumberOfPoints):
+                self.model.c_gas.SetInitialCondition(x, y, 0.025 * kmol/m**3)
+
+def guiRun(qtApp):
+    # Interpolation functions are runtime/external nodes in DAETOOLS.
+    # They are not supported by the default compute-stack evaluation mode.
+
+    simulation = simBed()
+    simulation.model.SetReportingOn(True)
+    simulation.ReportTimeDerivatives = True
+    simulation.ReportingInterval = 5
+    simulation.TimeHorizon = 1000
+    simulator  = daeSimulator(qtApp, simulation = simulation)
+    simulator.exec()
+
+if __name__ == "__main__":
+    qtApp = daeCreateQtApplication(sys.argv)
+    guiRun(qtApp)

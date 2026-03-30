@@ -237,8 +237,6 @@ class SimpleTankPiecewise(SimpleTankBase):
             return start_value
 
         duration = segment.end_time - segment.start_time
-        if duration <= 0:
-            raise RuntimeError("Invalid inlet-program segment with non-positive duration")
 
         return start_value + (end_value - start_value) * (
             (Time() - Constant(segment.start_time * s)) / Constant(duration * s)
