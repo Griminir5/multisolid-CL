@@ -268,11 +268,11 @@ class simBed(daeSimulation):
         self.model.R_bed.SetValue(0.1 * m)
         self.model.d_p.SetValue(0.01 * m)
 
-        self.model.c_in.SetValue(0.025 * kmol/m**3)
-        self.model.F_in_const.SetValue(.0006 * kmol/s)
-        self.model.SetUniformAxialGrid(3)
+        self.model.c_in.SetValue(0.050 * kmol/m**3)
+        self.model.F_in_const.SetValue(.000785 * kmol/s)
+        self.model.SetUniformAxialGrid(10)
 
-        self.model.y_in_const.SetValues(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]))
+        self.model.y_in_const.SetValues(np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
 
     
     def SetUpVariables(self):
@@ -286,9 +286,47 @@ class simBed(daeSimulation):
             specifying the indexes in the domains. In this example we loop over the open x and y domains,
             thus we start the loop with 1 and end with NumberOfPoints-1 (for both domains)
         """
-        for gas_idx in range(self.model.N_gas.NumberOfPoints):
-            for cell_idx in range(self.model.x_centers.NumberOfPoints):
-                self.model.c_gas.SetInitialCondition(gas_idx, cell_idx, 0.00278 * kmol/m**3)
+        ng = self.model.N_gas.NumberOfPoints
+        nc = self.model.x_centers.NumberOfPoints
+        nf = self.model.x_faces.NumberOfPoints
+
+        # Seed the bed with a uniform N2 inventory so the algebraic variables can be
+        # initialized from a physically consistent state instead of the variable-type defaults.
+        c0 = np.zeros((ng, nc), dtype=float)
+        c0[7, :] = 0.025
+        ct0 = c0.sum(axis=0)
+
+        inlet_y = np.asarray(self.model.y_in_const.npyValues, dtype=float)
+        area = self.model.pi.GetValue() * self.model.R_bed.GetValue()**2
+        fin = self.model.F_in_const.GetValue()
+        u0 = fin / (self.model.c_in.GetValue() * area)
+        dax0 = 0.5 * abs(u0) * self.model.d_p.GetValue()
+
+        for gas_idx in range(ng):
+            self.model.y_in.SetInitialGuess(gas_idx, inlet_y[gas_idx])
+            for cell_idx in range(nc):
+                self.model.c_gas.SetInitialCondition(gas_idx, cell_idx, c0[gas_idx, cell_idx] * kmol/m**3)
+                y0 = 0.0 if ct0[cell_idx] <= 0.0 else c0[gas_idx, cell_idx] / ct0[cell_idx]
+                self.model.y_gas.SetInitialGuess(gas_idx, cell_idx, y0)
+
+        self.model.F_in.SetInitialGuess(fin * kmol/s)
+
+        for cell_idx in range(nc):
+            self.model.ct_gas.SetInitialGuess(cell_idx, ct0[cell_idx] * kmol/m**3)
+
+        for face_idx in range(nf):
+            self.model.u_s.SetInitialGuess(face_idx, u0 * m/s)
+            self.model.Dax.SetInitialGuess(face_idx, dax0 * m**2/s)
+
+            if face_idx == 0:
+                face_flux = inlet_y * fin / area
+            elif u0 >= 0.0:
+                face_flux = u0 * c0[:, face_idx - 1]
+            else:
+                face_flux = u0 * c0[:, min(face_idx, nc - 1)]
+
+            for gas_idx in range(ng):
+                self.model.N_gas_face.SetInitialGuess(gas_idx, face_idx, face_flux[gas_idx] * kmol/(s*m**2))
 
 def guiRun(qtApp):
     # Interpolation functions are runtime/external nodes in DAETOOLS.
@@ -297,8 +335,8 @@ def guiRun(qtApp):
     simulation = simBed()
     simulation.model.SetReportingOn(True)
     simulation.ReportTimeDerivatives = True
-    simulation.ReportingInterval = 5
-    simulation.TimeHorizon = 1000
+    simulation.ReportingInterval = 0.1
+    simulation.TimeHorizon = 10
     simulator  = daeSimulator(qtApp, simulation = simulation)
     simulator.exec()
 
