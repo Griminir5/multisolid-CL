@@ -158,32 +158,8 @@ Sum(self.c_gas.array('*', cell_index))
 
 This was more robust than building a manual Python sum over `self.c_gas(gas_index, cell_index)`.
 
-### 3.3 Treat inlet data as parameters if it is external input
 
-The inlet flow rate and inlet composition are currently inputs, not states. Making them parameters was much more robust than making them DAETOOLS variables.
-
-Current pattern:
-
-```python
-self.F_in = daeParameter("F_in", molar_flow_type.Units, self, "Total molar flow at the inlet")
-self.y_in = daeParameter("y_in", molar_frac_type.Units, self, "Molar fraction of component i at the inlet", [self.N_gas])
-```
-
-This also fits the model structure better:
-
-- fixed inlet values can be assigned directly,
-- scheduled inlet values can be injected via interpolation functions,
-- no extra algebraic equations are needed just to copy input data into variables.
-
-### 3.4 Use schedule functions directly in residual expressions
-
-For scheduled inlet data, the robust pattern was:
-
-- build `daeLinearInterpolationFunction`,
-- use its expression directly in the residual,
-- do not try to assign the scheduled value to an intermediate DAETOOLS variable unless there is a real modeling reason.
-
-### 3.5 `SetValues(...)` on distributed parameters should use a NumPy array
+### 3.3 `SetValues(...)` on distributed parameters should use a NumPy array
 
 For example:
 
@@ -217,16 +193,6 @@ for idx_cell in range(Nc):
     for idx_gas in range(Ng):
         expr = self.c_gas(idx_gas, idx_cell)
 ```
-
-- direct use of a scalar inlet variable expression in distributed residuals:
-
-```python
-self.F_in()
-```
-
-when `F_in` was defined as a `daeVariable`.
-
-This does not mean DAETOOLS can never handle these patterns. It means they were fragile enough here that they should be avoided unless there is a strong reason and a verified test case.
 
 ## 5. Current interior-face pattern
 

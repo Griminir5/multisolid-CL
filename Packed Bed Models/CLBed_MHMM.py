@@ -1,6 +1,6 @@
 __doc__ = """
 This file is means as the very first step towards a model for chemical looping in packed-bed reactors.
-This file implements a simple gas-phase mass balance with a temporary plug-flow velocity closure.
+This file implements a gas/solid mass-balance skeleton with a temporary plug-flow velocity closure.
 """
 
 # 1. Import the modules
@@ -27,7 +27,7 @@ dispersion_type = daeVariableType(name="dispersion_type", units=m**2/s,
                                   lowerBound=0, upperBound=100, initialGuess=0, absTolerance=1e-5)
 
 length_type = daeVariableType(name="length_type", units=m,
-                              lowerBound=0, upperBound=100, initialGuess=0, absTolerance=1e-5)
+                              lowerBound=0, upperBound=20, initialGuess=0, absTolerance=1e-5)
 
 temp_type = daeVariableType(name="temp_type", units=K,
                             lowerBound=100, upperBound=2000, initialGuess=500, absTolerance=1e-5)
@@ -38,19 +38,21 @@ velocity_type = daeVariableType(name="velocity_type", units=m/s,
                                 lowerBound=-100, upperBound=100, initialGuess=1, absTolerance=1e-5)
 
 fraction_type = daeVariableType(name="fraction_type", units=dimless,
-                                lowerBound=0, upperBound=1, initialGuess=0, absTolerance=1e-5)
+                                lowerBound=-0.1, upperBound=1.1, initialGuess=0, absTolerance=1e-5)
+molar_source_type = daeVariableType(name="molar_source_type", units=mol/(m**3*s),
+                                    lowerBound=-1000000, upperBound=1000000, initialGuess=0, absTolerance=1e-5)
 
 VALID_GAS_SPECIES = ["AR", "CH4", "CO", "CO2", "H2", "H2O", "HE", "N2", "O2"]
-#VALID_SOLID_SPECIES = ["CaAl:A-01", "Ni", "NiO","Fe","FeO","Fe3O4","Fe2O3", "Ca", "CaO", "CaCO3", "CaSO4"]
+VALID_SOLID_SPECIES = ["Solid"]
+# Example real solid lists can replace the placeholder above, e.g.
+# ["CaAl:A-01", "Ni", "NiO", "Fe", "FeO", "Fe3O4", "Fe2O3", "Ca", "CaO", "CaCO3", "CaSO4"]
 
 class CLBed_mass(daeModel):
-    def __init__(self, Name, gas_species, Parent = None, Description = "Simple gas mass balance-only bed"):
+    def __init__(self, Name, gas_species, solid_species, Parent = None, Description = "Gas/solid mass balance-only bed"):
         daeModel.__init__(self, Name, Parent, Description)
         # Fixed Parameters; some will not be necessary for this simple model, but keeping them for posterity
         self.gas_species = gas_species
-        self._inlet_program = None
-        self._compiled_inlet_program = None
-        self._inlet_program_functions = {}
+        self.solid_species = solid_species
 
         self.R_gas = daeParameter("R_gas", (Pa*m**3)/(mol* K), self, "Gas constant")
         self.pi = daeParameter("&pi;", dimless, self, "Circle constant")
@@ -75,8 +77,9 @@ class CLBed_mass(daeModel):
         self.x_centers = daeDomain("Cell_centers",  self, m, "Axial cell centers domain over the packed bed")
         self.x_faces = daeDomain("Cell_faces",  self, m, "Axial cell faces domain over the packed bed")
         self.N_gas = daeDomain("Gas_comps",  self, dimless, "Number of gaseous components")
-        # self.N_sol = daeDomain("Solid_comps",  self, dimless, "Number of solid components")
+        self.N_sol = daeDomain("Solid_comps",  self, dimless, "Number of solid components")
         self.N_gas.CreateArray(len(self.gas_species))
+        self.N_sol.CreateArray(len(self.solid_species))
 
         self.xval_cells = daeParameter("xval_cells", m, self, "Coordinate of cell centers")
         self.xval_faces = daeParameter("xval_faces", m, self, "Coordinate of cell faces")
@@ -88,14 +91,15 @@ class CLBed_mass(daeModel):
         ## Variables distributed over cell centers
         ### State cell variables
         self.c_gas = daeVariable("c_gas", molar_conc_type, self, "Concentration of gaseous component i per total bed volume", [self.N_gas, self.x_centers]) # mol_i / m_bed^3
-        #self.c_sol = daeVariable("c_sol", molar_conc_sol_type, self, "Concentration of solid component i per total bed volume", [self.N_sol, self.x_centers]) # mol_i / m_bed^3
+        self.c_sol = daeVariable("c_sol", molar_conc_sol_type, self, "Concentration of solid component i per total bed volume", [self.N_sol, self.x_centers]) # mol_i / m_bed^3
 
         ### Algebraic cell variables
         self.ct_gas = daeVariable("c_gas_tot", molar_conc_type, self, "Total concentration of gas per total bed volume", [self.x_centers]) # mol_mix / m_bed^3
-        #self.ct_sol = daeVariable("c_sol_tot", molar_conc_sol_type, self, "Total concentration of solid per total bed volume", [self.x_centers]) # mol_mix / m_bed^3
+        self.ct_sol = daeVariable("c_sol_tot", molar_conc_sol_type, self, "Total concentration of solid per total bed volume", [self.x_centers]) # mol_mix / m_bed^3
 
         self.y_gas = daeVariable("y_gas", molar_frac_type, self, "Molar fraction of gaseous component i", [self.N_gas, self.x_centers])
-        #self.y_sol = daeVariable("y_sol", molar_frac_type, self, "Molar fraction of solid component i", [self.N_sol, self.x_centers])
+        self.y_sol = daeVariable("y_sol", molar_frac_type, self, "Molar fraction of solid component i", [self.N_sol, self.x_centers])
+        self.S_sol = daeVariable("S_sol", molar_source_type, self, "Net source of solid component i per total bed volume", [self.N_sol, self.x_centers]) # mol_i / s*m_bed^3
 
         #self.T = daeVariable("temp_bed", temp_type, self, "Temperature of a cell (gas and solid are in LTE)", [self.x_centers])
         #self.P = daeVariable("pres_bed", pres_type, self, "Pressure of a cell", [self.x_centers])
@@ -158,9 +162,12 @@ class CLBed_mass(daeModel):
         Nc = self.x_centers.NumberOfPoints
         Nf = self.x_faces.NumberOfPoints
         Ng = self.N_gas.NumberOfPoints
+        Ns = self.N_sol.NumberOfPoints
 
         if Ng != len(self.gas_species):
             raise RuntimeError("Gas component domain size must match gas_species.")
+        if Ns != len(self.solid_species):
+            raise RuntimeError("Solid component domain size must match solid_species.")
         if Nf != Nc + 1:
             raise RuntimeError("The axial grid must have exactly one more face than cell center.")
 
@@ -185,6 +192,23 @@ class CLBed_mass(daeModel):
         idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, 'i')
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, 'x')
         eq.Residual = self.y_gas(idx_gas, idx_cell) * self.ct_gas(idx_cell) - self.c_gas(idx_gas, idx_cell)
+
+        # Cell closure and mole fraction (solid) calculations
+        eq = self.CreateEquation("solid_total_concentration_closure")
+        idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, 'x')
+        eq.Residual = self.ct_sol(idx_cell) - Sum(self.c_sol.array('*', idx_cell))
+
+        eq = self.CreateEquation("solid_molar_fraction_calc")
+        idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, 'j')
+        idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, 'x')
+        eq.Residual = self.y_sol(idx_sol, idx_cell) * self.ct_sol(idx_cell) - self.c_sol(idx_sol, idx_cell)
+
+        # Placeholder solid source term. Replace this closure with
+        # S_sol = sum_j nu_ij * r_j once the heterogeneous reaction set is defined.
+        eq = self.CreateEquation("solid_source_term_placeholder")
+        idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, 'j')
+        idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, 'x')
+        eq.Residual = self.S_sol(idx_sol, idx_cell)
         
         # Mass Transfer LHS boundary
         eq = self.CreateEquation("lhs_boundary_flux")
@@ -227,6 +251,10 @@ class CLBed_mass(daeModel):
             idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, 'i')
             eq.Residual = dt(self.c_gas(idx_gas, idx_cell)) + (self.N_gas_face(idx_gas, idx_cell+1) - self.N_gas_face(idx_gas, idx_cell))/dx
             # eq.Residual = (self.N_gas_face(idx_gas, idx_cell+1) - self.N_gas_face(idx_gas, idx_cell))/dx # Steady-state version
+
+            eq = self.CreateEquation(f"solid_species_balance_cell_{idx_cell}")
+            idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, 'j')
+            eq.Residual = dt(self.c_sol(idx_sol, idx_cell)) - self.S_sol(idx_sol, idx_cell)
         # Mass transfer RHS boundary
 
         eq = self.CreateEquation("rhs_boundary_flux")
@@ -251,7 +279,7 @@ class simBed(daeSimulation):
         """
         daeSimulation.__init__(self)
 
-        self.model = CLBed_mass("MassTrsf", VALID_GAS_SPECIES)
+        self.model = CLBed_mass("MassTrsf", VALID_GAS_SPECIES, VALID_SOLID_SPECIES)
 
     def SetUpParametersAndDomains(self):
         """
@@ -286,6 +314,7 @@ class simBed(daeSimulation):
             thus we start the loop with 1 and end with NumberOfPoints-1 (for both domains)
         """
         ng = self.model.N_gas.NumberOfPoints
+        ns = self.model.N_sol.NumberOfPoints
         nc = self.model.x_centers.NumberOfPoints
         nf = self.model.x_faces.NumberOfPoints
 
@@ -294,6 +323,12 @@ class simBed(daeSimulation):
         c0 = np.zeros((ng, nc), dtype=float)
         c0[7, :] = 25.0
         ct0 = c0.sum(axis=0)
+
+        # Seed the bed with a uniform solid inventory so the solid closure and
+        # composition variables are also initialized from a consistent state.
+        c0_sol = np.zeros((ns, nc), dtype=float)
+        c0_sol[0, :] = 100000.0
+        ct0_sol = c0_sol.sum(axis=0)
 
         inlet_y = np.asarray(self.model.y_in_const.npyValues, dtype=float)
         area = self.model.pi.GetValue() * self.model.R_bed.GetValue()**2
@@ -308,10 +343,18 @@ class simBed(daeSimulation):
                 y0 = 0.0 if ct0[cell_idx] <= 0.0 else c0[gas_idx, cell_idx] / ct0[cell_idx]
                 self.model.y_gas.SetInitialGuess(gas_idx, cell_idx, y0)
 
+        for sol_idx in range(ns):
+            for cell_idx in range(nc):
+                self.model.c_sol.SetInitialCondition(sol_idx, cell_idx, c0_sol[sol_idx, cell_idx] * mol/m**3)
+                y0_sol = 0.0 if ct0_sol[cell_idx] <= 0.0 else c0_sol[sol_idx, cell_idx] / ct0_sol[cell_idx]
+                self.model.y_sol.SetInitialGuess(sol_idx, cell_idx, y0_sol)
+                self.model.S_sol.SetInitialGuess(sol_idx, cell_idx, 0.0 * mol/(m**3*s))
+
         self.model.F_in.SetInitialGuess(fin * mol/s)
 
         for cell_idx in range(nc):
             self.model.ct_gas.SetInitialGuess(cell_idx, ct0[cell_idx] * mol/m**3)
+            self.model.ct_sol.SetInitialGuess(cell_idx, ct0_sol[cell_idx] * mol/m**3)
 
         for face_idx in range(nf):
             self.model.u_s.SetInitialGuess(face_idx, u0 * m/s)
