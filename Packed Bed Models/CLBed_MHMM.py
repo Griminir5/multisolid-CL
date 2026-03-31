@@ -360,16 +360,16 @@ class CLBed_mass(daeModel):
         for gas_idx, species_name in enumerate(self.gas_species):
             eq = self.CreateEquation(f"gas_component_enthalpy_{species_name}")
             idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-            eq.Residual = self.h_gas(gas_idx, idx_cell) - self.gas_properties.enthalpy_expression(
-                gas_idx,
+            eq.Residual = self.h_gas(gas_idx, idx_cell) - self.property_registry.enthalpy_expression(
+                species_name,
                 self.T(idx_cell),
             )
 
         for sol_idx, species_name in enumerate(self.solid_species):
             eq = self.CreateEquation(f"solid_component_enthalpy_{species_name}")
             idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-            eq.Residual = self.h_sol(sol_idx, idx_cell) - self.solid_properties.enthalpy_expression(
-                sol_idx,
+            eq.Residual = self.h_sol(sol_idx, idx_cell) - self.property_registry.enthalpy_expression(
+                species_name,
                 self.T(idx_cell),
             )
 
