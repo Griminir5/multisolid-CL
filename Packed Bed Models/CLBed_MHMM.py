@@ -12,111 +12,36 @@ from packed_bed_properties import DEFAULT_PROPERTY_REGISTRY, PropertyRegistry
 from pyUnits import GW, J, K, Pa, m, mol, s  # this will not show up because pylance cannot get to .pyd files
 
 
-molar_flux_type = daeVariableType(
-    name="molar_flux_type",
-    units=mol / (s * m**2),
-    lowerBound=-100000,
-    upperBound=100000,
-    initialGuess=0,
-    absTolerance=1e-5,
-)
-molar_flow_type = daeVariableType(
-    name="molar_flow_type",
-    units=mol / s,
-    lowerBound=-1000,
-    upperBound=1000,
-    initialGuess=0,
-    absTolerance=1e-5,
-)
-molar_conc_type = daeVariableType(
-    name="molar_conc_type",
-    units=mol / m**3,
-    lowerBound=0,
-    upperBound=100000,
-    initialGuess=0,
-    absTolerance=1e-5,
-)
-molar_conc_sol_type = daeVariableType(
-    name="molar_conc_sol_type",
-    units=mol / m**3,
-    lowerBound=0,
-    upperBound=1000000,
-    initialGuess=0,
-    absTolerance=1e-5,
-    valueConstraint=eValueGTEQ,
-)
-molar_frac_type = daeVariableType(
-    name="molar_frac_type",
-    units=dimless,
-    lowerBound=-0.1,
-    upperBound=1.1,
-    initialGuess=0,
-    absTolerance=1e-5,
-)
-dispersion_type = daeVariableType(
-    name="dispersion_type",
-    units=m**2 / s,
-    lowerBound=0,
-    upperBound=100,
-    initialGuess=0,
-    absTolerance=1e-5,
-)
-length_type = daeVariableType(
-    name="length_type",
-    units=m,
-    lowerBound=0,
-    upperBound=20,
-    initialGuess=0,
-    absTolerance=1e-5,
-)
-temp_type = daeVariableType(
-    name="temp_type",
-    units=K,
-    lowerBound=100,
-    upperBound=2000,
-    initialGuess=500,
-    absTolerance=1e-5,
-)
-pres_type = daeVariableType(
-    name="pres_type",
-    units=Pa,
-    lowerBound=1e-3,
-    upperBound=1e7,
-    initialGuess=1e5,
-    absTolerance=1e-5,
-)
-velocity_type = daeVariableType(
-    name="velocity_type",
-    units=m / s,
-    lowerBound=-100,
-    upperBound=100,
-    initialGuess=1,
-    absTolerance=1e-5,
-)
-fraction_type = daeVariableType(
-    name="fraction_type",
-    units=dimless,
-    lowerBound=-0.1,
-    upperBound=1.1,
-    initialGuess=0,
-    absTolerance=1e-5,
-)
-molar_source_type = daeVariableType(
-    name="molar_source_type",
-    units=mol / (m**3 * s),
-    lowerBound=-1000000,
-    upperBound=1000000,
-    initialGuess=0,
-    absTolerance=1e-5,
-)
-molar_enthalpy_type = daeVariableType(
-    name="molar_enthalpy_type",
-    units=J / mol,
-    lowerBound=-1e7,
-    upperBound=1e7,
-    initialGuess=0,
-    absTolerance=1e-5,
-)
+molar_flux_type =       daeVariableType(name="molar_flux_type", units=mol / (s * m**2), 
+                                        lowerBound=-100000, upperBound=100000, initialGuess=0, absTolerance=1e-5,)
+molar_flow_type =       daeVariableType(name="molar_flow_type", units=mol / s,
+                                        lowerBound=-1000, upperBound=1000, initialGuess=0, absTolerance=1e-5,)
+molar_conc_type =       daeVariableType( name="molar_conc_type", units=mol / m**3,
+                                        lowerBound=0, upperBound=100000, initialGuess=0, absTolerance=1e-5,)
+molar_conc_sol_type =   daeVariableType(name="molar_conc_sol_type", units=mol / m**3,
+                                        lowerBound=0, upperBound=1000000, initialGuess=0, absTolerance=1e-5, valueConstraint=eValueGTEQ)
+molar_frac_type =       daeVariableType(name="molar_frac_type", units=dimless,
+                                        lowerBound=-0.1, upperBound=1.1, initialGuess=0, absTolerance=1e-5,)
+dispersion_type =       daeVariableType(name="dispersion_type", units=m**2 / s,
+                                        lowerBound=0, upperBound=100, initialGuess=0, absTolerance=1e-5,)
+molar_source_type =     daeVariableType(name="molar_source_type", units=mol / (m**3 * s),
+                                        lowerBound=-1000000, upperBound=1000000, initialGuess=0, absTolerance=1e-5,)
+
+length_type =           daeVariableType(name="length_type", units=m,
+                                        lowerBound=0, upperBound=20, initialGuess=0, absTolerance=1e-5,)
+
+temp_type =              daeVariableType(name="temp_type", units=K,
+                                        lowerBound=100, upperBound=2000, initialGuess=500, absTolerance=1e-5,)
+molar_enthalpy_type =   daeVariableType(name="molar_enthalpy_type", units=J / mol,
+                                        lowerBound=-1e7, upperBound=1e7, initialGuess=0, absTolerance=1e-5,)
+
+pres_type =             daeVariableType(name="pres_type", units=Pa,
+                                        lowerBound=1e-3, upperBound=1e7, initialGuess=1e5, absTolerance=1e-5,)
+velocity_type =         daeVariableType(name="velocity_type", units=m / s,
+                                        lowerBound=-100, upperBound=100, initialGuess=1, absTolerance=1e-5,)
+
+fraction_type =         daeVariableType(name="fraction_type", units=dimless,
+                                        lowerBound=-0.1, upperBound=1.1, initialGuess=0, absTolerance=1e-5,)
 
 
 VALID_GAS_SPECIES = ["AR", "CH4", "CO", "CO2", "H2", "H2O", "HE", "N2", "O2"]
@@ -148,18 +73,8 @@ class CLBed_mass(daeModel):
         self.R_bed = daeParameter("Bed_radius", m, self, "Radius of the reactor bed")
 
         self.d_p = daeParameter("Particle_length", m, self, "Characteristic length of the solid particles")
-        self.c_in = daeParameter(
-            "conc_inlet",
-            mol / (m**3),
-            self,
-            "Temporary total molar concentration used in the plug-flow closure",
-        )
-        self.T_const = daeParameter(
-            "T_const",
-            K,
-            self,
-            "Temporary uniform bed temperature used until the energy balance is implemented",
-        )
+        self.c_in = daeParameter("conc_inlet", mol / (m**3), self, "Temporary total molar concentration used in the plug-flow closure")
+        self.T_const = daeParameter("T_const", K, self, "Temporary uniform bed temperature used until the energy balance is implemented")
 
         self.x_centers = daeDomain("Cell_centers", self, m, "Axial cell centers domain over the packed bed")
         self.x_faces = daeDomain("Cell_faces", self, m, "Axial cell faces domain over the packed bed")
@@ -174,103 +89,26 @@ class CLBed_mass(daeModel):
         self.xval_cells.DistributeOnDomain(self.x_centers)
         self.xval_faces.DistributeOnDomain(self.x_faces)
 
-        self.c_gas = daeVariable(
-            "c_gas",
-            molar_conc_type,
-            self,
-            "Concentration of gaseous component i per total bed volume",
-            [self.N_gas, self.x_centers],
-        )
-        self.c_sol = daeVariable(
-            "c_sol",
-            molar_conc_sol_type,
-            self,
-            "Concentration of solid component i per total bed volume",
-            [self.N_sol, self.x_centers],
-        )
+        self.c_gas = daeVariable("c_gas", molar_conc_type, self, "Concentration of gaseous component i per total bed volume", [self.N_gas, self.x_centers])
+        self.c_sol = daeVariable("c_sol", molar_conc_sol_type, self, "Concentration of solid component i per total bed volume", [self.N_sol, self.x_centers])
 
-        self.ct_gas = daeVariable(
-            "c_gas_tot",
-            molar_conc_type,
-            self,
-            "Total concentration of gas per total bed volume",
-            [self.x_centers],
-        )
-        self.ct_sol = daeVariable(
-            "c_sol_tot",
-            molar_conc_sol_type,
-            self,
-            "Total concentration of solid per total bed volume",
-            [self.x_centers],
-        )
+        self.ct_gas = daeVariable("c_gas_tot", molar_conc_type, self, "Total concentration of gas per total bed volume", [self.x_centers])
+        self.ct_sol = daeVariable("c_sol_tot", molar_conc_sol_type, self, "Total concentration of solid per total bed volume", [self.x_centers])
 
-        self.y_gas = daeVariable(
-            "y_gas",
-            molar_frac_type,
-            self,
-            "Molar fraction of gaseous component i",
-            [self.N_gas, self.x_centers],
-        )
-        self.y_sol = daeVariable(
-            "y_sol",
-            molar_frac_type,
-            self,
-            "Molar fraction of solid component i",
-            [self.N_sol, self.x_centers],
-        )
-        self.S_sol = daeVariable(
-            "S_sol",
-            molar_source_type,
-            self,
-            "Net source of solid component i per total bed volume",
-            [self.N_sol, self.x_centers],
-        )
-        self.T = daeVariable(
-            "temp_bed",
-            temp_type,
-            self,
-            "Temporary LTE cell temperature used by the enthalpy correlations",
-            [self.x_centers],
-        )
-        self.h_gas = daeVariable(
-            "h_gas",
-            molar_enthalpy_type,
-            self,
-            "Gas-component molar enthalpy at the cell temperature",
-            [self.N_gas, self.x_centers],
-        )
-        self.h_sol = daeVariable(
-            "h_sol",
-            molar_enthalpy_type,
-            self,
-            "Solid-component molar enthalpy at the cell temperature",
-            [self.N_sol, self.x_centers],
-        )
+        self.y_gas = daeVariable("y_gas", molar_frac_type, self, "Molar fraction of gaseous component i", [self.N_gas, self.x_centers])
+        self.y_sol = daeVariable("y_sol", molar_frac_type, self, "Molar fraction of solid component i", [self.N_sol, self.x_centers])
+        self.S_sol = daeVariable("S_sol", molar_source_type, self, "Net source of solid component i per total bed volume", [self.N_sol, self.x_centers])
 
-        self.N_gas_face = daeVariable(
-            "N_gas_face",
-            molar_flux_type,
-            self,
-            "Species i molar flux at cell faces",
-            [self.N_gas, self.x_faces],
-        )
-        self.Dax = daeVariable(
-            "Dax",
-            dispersion_type,
-            self,
-            "Face axial dispersion coefficient",
-            [self.x_faces],
-        )
+        self.T = daeVariable("temp_bed", temp_type, self, "Temporary LTE cell temperature used by the enthalpy correlations", [self.x_centers])
+        self.h_gas = daeVariable("h_gas", molar_enthalpy_type, self, "Gas-component molar enthalpy at the cell temperature", [self.N_gas, self.x_centers])
+        self.h_sol = daeVariable("h_sol", molar_enthalpy_type, self, "Solid-component molar enthalpy at the cell temperature", [self.N_sol, self.x_centers])
+
+        self.N_gas_face = daeVariable("N_gas_face", molar_flux_type, self, "Species i molar flux at cell faces", [self.N_gas, self.x_faces])
+        self.Dax = daeVariable("Dax", dispersion_type, self, "Face axial dispersion coefficient", [self.x_faces])
         self.u_s = daeVariable("u_s", velocity_type, self, "Face superficial velocity", [self.x_faces])
 
         self.F_in_const = daeParameter("F_in_const", molar_flow_type.Units, self, "Fixed total molar flow at the inlet")
-        self.y_in_const = daeParameter(
-            "y_in_const",
-            molar_frac_type.Units,
-            self,
-            "Fixed molar fraction of component i at the inlet",
-            [self.N_gas],
-        )
+        self.y_in_const = daeParameter("y_in_const", molar_frac_type.Units, self, "Fixed molar fraction of component i at the inlet", [self.N_gas])
 
         self.F_in = daeVariable("F_in", molar_flow_type, self, "Total molar flow at the inlet")
         self.y_in = daeVariable("y_in", molar_frac_type, self, "Molar fraction of component i at the inlet", [self.N_gas])
@@ -332,7 +170,7 @@ class CLBed_mass(daeModel):
         eq.Residual = self.F_in() - self.F_in_const()
 
         eq = self.CreateEquation("Active_inlet_composition")
-        idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, indexName="i")
+        idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
         eq.Residual = self.y_in(idx_gas) - self.y_in_const(idx_gas)
 
         eq = self.CreateEquation("total_concentration_closure")
@@ -492,18 +330,15 @@ class simBed(daeSimulation):
 
         inlet_y = np.asarray(self.model.y_in_const.npyValues, dtype=float)
         area = self.model.pi.GetValue() * self.model.R_bed.GetValue() ** 2
+
         fin = self.model.F_in_const.GetValue()
         u0 = fin / (self.model.c_in.GetValue() * area)
         dax0 = 0.5 * abs(u0) * self.model.d_p.GetValue()
+
         initial_temperature = self.model.T_const.GetValue()
-        gas_h0 = np.asarray(
-            [self.model.gas_properties.enthalpy_value(gas_idx, initial_temperature) for gas_idx in range(ng)],
-            dtype=float,
-        )
-        solid_h0 = np.asarray(
-            [self.model.solid_properties.enthalpy_value(sol_idx, initial_temperature) for sol_idx in range(ns)],
-            dtype=float,
-        )
+
+        gas_h0 = np.asarray([self.model.property_registry.enthalpy_value(gas_name, initial_temperature) for gas_name in self.gas_species], dtype=float)
+        solid_h0 = np.asarray([self.model.property_registry.enthalpy_value(sol_name, initial_temperature) for sol_name in self.solid_species], dtype=float)
 
         for cell_idx in range(nc):
             self.model.T.SetInitialGuess(cell_idx, initial_temperature * K)
@@ -516,7 +351,7 @@ class simBed(daeSimulation):
                 self.model.c_gas.SetInitialCondition(gas_idx, cell_idx, c0[gas_idx, cell_idx] * mol / m**3)
                 y0 = 0.0 if ct0[cell_idx] <= 0.0 else c0[gas_idx, cell_idx] / ct0[cell_idx]
                 self.model.y_gas.SetInitialGuess(gas_idx, cell_idx, y0)
-                self.model.h_gas_comp.SetInitialGuess(gas_idx, cell_idx, gas_h0[gas_idx] * J / mol)
+                self.model.h_gas.SetInitialGuess(gas_idx, cell_idx, gas_h0[gas_idx] * J / mol)
 
         for sol_idx in range(ns):
             for cell_idx in range(nc):
@@ -524,7 +359,7 @@ class simBed(daeSimulation):
                 y0_sol = 0.0 if ct0_sol[cell_idx] <= 0.0 else c0_sol[sol_idx, cell_idx] / ct0_sol[cell_idx]
                 self.model.y_sol.SetInitialGuess(sol_idx, cell_idx, y0_sol)
                 self.model.S_sol.SetInitialGuess(sol_idx, cell_idx, 0.0 * mol / (m**3 * s))
-                self.model.h_sol_comp.SetInitialGuess(sol_idx, cell_idx, solid_h0[sol_idx] * J / mol)
+                self.model.h_sol.SetInitialGuess(sol_idx, cell_idx, solid_h0[sol_idx] * J / mol)
 
         self.model.F_in.SetInitialGuess(fin * mol / s)
 
