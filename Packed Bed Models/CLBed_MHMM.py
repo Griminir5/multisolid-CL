@@ -30,7 +30,7 @@ molar_source_type =     daeVariableType(name="molar_source_type", units=mol / (m
 length_type =           daeVariableType(name="length_type", units=m,
                                         lowerBound=0, upperBound=20, initialGuess=0, absTolerance=1e-5,)
 
-temp_type =              daeVariableType(name="temp_type", units=K,
+temp_type =             daeVariableType(name="temp_type", units=K,
                                         lowerBound=100, upperBound=2000, initialGuess=500, absTolerance=1e-5,)
 molar_enthalpy_type =   daeVariableType(name="molar_enthalpy_type", units=J / mol,
                                         lowerBound=-1e7, upperBound=1e7, initialGuess=0, absTolerance=1e-5,)
@@ -45,7 +45,7 @@ fraction_type =         daeVariableType(name="fraction_type", units=dimless,
 
 
 VALID_GAS_SPECIES = ["AR", "CH4", "CO", "CO2", "H2", "H2O", "HE", "N2", "O2"]
-VALID_SOLID_SPECIES = ["Solid"]
+VALID_SOLID_SPECIES = ["Ni", "NiO", "CaAl2O4"]
 # Example real solid lists can replace the placeholder above, e.g.
 # ["CaAl:A-01", "Ni", "NiO", "Fe", "FeO", "Fe3O4", "Fe2O3", "Ca", "CaO", "CaCO3", "CaSO4"]
 

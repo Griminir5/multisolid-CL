@@ -70,7 +70,7 @@ cp_data = np.array([26.0996,
 h_ref = 0 # J/mol
 t_ref = 298.15 # K
 
-h_weight = 1
+h_weight = 10
 cp_weight = 1
 
 def fit_enthcp_poly(T_data, h_data, cp_data, t_ref, href, h_weight, cp_weight, order: int):
@@ -134,18 +134,20 @@ def h_poly_model(T, params):
     return res
 
 
-params = fit_enthcp_poly(T_data, h_data, cp_data, t_ref, h_ref, h_weight, cp_weight, 1)
+params = fit_enthcp_poly(T_data, h_data, cp_data, t_ref, h_ref, h_weight, cp_weight, 3)
 
-cp_calc = cp_poly_model(T_data, params)
-h_calc = h_poly_model(T_data, params)
+T_calc = np.linspace(300, 1500, num=2000)
+
+cp_calc = cp_poly_model(T_calc, params)
+h_calc = h_poly_model(T_calc, params)
 
 fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1)
 
 ax1.scatter(T_data, cp_data, label = "Original")
-ax1.plot(T_data, cp_calc, label = "Fitted")
+ax1.plot(T_calc, cp_calc, label = "Fitted")
 
 
 ax2.scatter(T_data, h_data, label = "Original")
-ax2.plot(T_data, h_calc, label = "Fitted")
+ax2.plot(T_calc, h_calc, label = "Fitted")
 
 plt.show()
