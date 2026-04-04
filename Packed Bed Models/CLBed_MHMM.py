@@ -444,7 +444,7 @@ class simBed(daeSimulation):
 
         self.model.c_in.SetValue(50.0 * mol / m**3)
         self.model.F_in_const.SetValue(0.785 * mol / s)
-        self.model.SetUniformAxialGrid(10)
+        self.model.SetUniformAxialGrid(20)
 
         inlet_y = np.zeros(len(self.gas_species), dtype=float)
         if "AR" in self.gas_species:
@@ -610,6 +610,8 @@ class simBed(daeSimulation):
             for gas_idx in range(ng):
                 self.model.N_gas_face.SetInitialGuess(gas_idx, face_idx, face_flux[gas_idx] * mol / (s * m**2))
                 self.model.J_gas_face.SetInitialGuess(gas_idx, face_idx, face_flux[gas_idx] * gas_h0[gas_idx] * J / (s * m**2))
+
+        self.model.T_in_const.SetValue(1500 * K) # use this to check how the transient temp profile looks like
 
 
 def guiRun(qtApp):
