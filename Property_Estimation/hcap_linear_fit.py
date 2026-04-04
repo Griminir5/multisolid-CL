@@ -2,14 +2,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-T_data = np.genfromtxt(r"Property_Estimation\comp_data\ni\temp.csv",dtype=float)[1:]
-h_data = np.genfromtxt(r"Property_Estimation\comp_data\ni\enth.csv",dtype=float)[1:]
-cp_data = np.genfromtxt(r"Property_Estimation\comp_data\ni\hcap.csv",dtype=float)[1:]
+T_data = np.genfromtxt(r"Property_Estimation\enth_hcap_data\n2\temp.csv",dtype=float)[1:]
+h_data = np.genfromtxt(r"Property_Estimation\enth_hcap_data\n2\enth.csv",dtype=float)[1:]
+cp_data = np.genfromtxt(r"Property_Estimation\enth_hcap_data\n2\hcap.csv",dtype=float)[1:]
 
 h_ref = 0  # J/mol
 t_ref = 298.15  # K
 
-h_weight = 10.0
+h_weight = 9.0
 cp_weight = 1.0
 plot_all_models = True
 
@@ -169,8 +169,8 @@ def make_log_reciprocal_basis(t_ref):
 
 def build_default_basis_sweep(t_ref, max_poly_order=5):
     bases = [make_polynomial_basis(order, t_ref) for order in range(max_poly_order + 1)]
-    bases.append(make_shomate_basis(t_ref))
-    bases.append(make_log_reciprocal_basis(t_ref))
+    # bases.append(make_shomate_basis(t_ref))
+    # bases.append(make_log_reciprocal_basis(t_ref))
     return bases
 
 
@@ -419,12 +419,15 @@ results = sweep_basis_fits(
 )
 
 best_rss = results[0]
+best2nd_rss = results[1]
 best_bic = min(results, key=lambda result: result["bic"])
 
 print("Basis sweep summary")
 print(format_sweep_table(results))
 print()
 print_fit_details(best_rss, "Best weighted residual fit")
+print()
+print_fit_details(best2nd_rss, "Second best weighted residual fit")
 print()
 print_fit_details(best_bic, "Best BIC fit")
 
