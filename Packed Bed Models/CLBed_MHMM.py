@@ -8,6 +8,7 @@ import sys
 import numpy as np
 from daetools.pyDAE import *
 
+from axial_schemes import reconstruct_face_states, validate_scheme_name
 from packed_bed_properties import DEFAULT_PROPERTY_REGISTRY, PropertyRegistry
 from pyUnits import kg, J, K, Pa, m, mol, s  # this will not show up because pylance cannot get to .pyd files
 
@@ -38,6 +39,10 @@ volum_enthaply_type =   daeVariableType(name="volum_enthaply_type", units= J / m
                                         lowerBound=-1e12, upperBound=1e12, initialGuess=0, absTolerance=1e-5,)
 heat_flux_type =        daeVariableType(name="heat_flux_type", units=J / (s * m**2),
                                         lowerBound=-1e12, upperBound=1e12, initialGuess=0, absTolerance=1e-5,)
+molar_inventory_type =  daeVariableType(name="molar_inventory_type", units=mol,
+                                        lowerBound=-1e12, upperBound=1e12, initialGuess=0, absTolerance=1e-5,)
+energy_inventory_type = daeVariableType(name="energy_inventory_type", units=J,
+                                        lowerBound=-1e20, upperBound=1e20, initialGuess=0, absTolerance=1e-2,)
 viscosity_type =        daeVariableType(name="viscosity_type", units=Pa * s,
                                         lowerBound=0, upperBound=1, initialGuess=1e-5, absTolerance=1e-8,)
 density_type =          daeVariableType(name="density_type", units=kg / m**3,
@@ -68,6 +73,8 @@ class CLBed_mass(daeModel):
         gas_species,
         solid_species,
         property_registry=DEFAULT_PROPERTY_REGISTRY,
+        mass_scheme="upwind1",
+        heat_scheme="central",
         Parent=None,
         Description="Gas/solid mass balance-only bed",
     ):
@@ -76,6 +83,8 @@ class CLBed_mass(daeModel):
         self.gas_species = list(gas_species)
         self.solid_species = list(solid_species)
         self.property_registry = property_registry
+        self.mass_scheme = validate_scheme_name(mass_scheme)
+        self.heat_scheme = validate_scheme_name(mass_scheme if heat_scheme is None else heat_scheme)
 
         self.R_gas = daeParameter("R_gas", (Pa * m**3) / (mol * K), self, "Gas constant")
         self.pi = daeParameter("&pi;", dimless, self, "Circle constant")
@@ -120,6 +129,42 @@ class CLBed_mass(daeModel):
         self.h_gas = daeVariable("h_gas", molar_enthalpy_type, self, "Moalr enthalpy of gas i in a cell", [self.N_gas, self.x_centers])
         self.h_sol = daeVariable("h_sol", molar_enthalpy_type, self, "Moalr enthalpy of solid i in a cell", [self.N_sol, self.x_centers])
         self.J_gas_face = daeVariable("J_gas_face", heat_flux_type, self, "Enthalpy flow at cell faces attributable to component i", [self.N_gas, self.x_faces])
+        self.material_in_total = daeVariable(
+            "material_in_total",
+            molar_inventory_type,
+            self,
+            "Cumulative gas-phase material that has entered the bed",
+        )
+        self.material_out_total = daeVariable(
+            "material_out_total",
+            molar_inventory_type,
+            self,
+            "Cumulative gas-phase material that has left the bed",
+        )
+        self.material_bed_total = daeVariable(
+            "material_bed_total",
+            molar_inventory_type,
+            self,
+            "Gas plus solid material currently residing in the bed",
+        )
+        self.heat_in_total = daeVariable(
+            "heat_in_total",
+            energy_inventory_type,
+            self,
+            "Cumulative gas-phase enthalpy that has entered the bed",
+        )
+        self.heat_out_total = daeVariable(
+            "heat_out_total",
+            energy_inventory_type,
+            self,
+            "Cumulative gas-phase enthalpy that has left the bed",
+        )
+        self.heat_bed_total = daeVariable(
+            "heat_bed_total",
+            energy_inventory_type,
+            self,
+            "Gas plus solid enthalpy currently residing in the bed",
+        )
 
         
         self.Dax = daeVariable("Dax", dispersion_type, self, "Face axial dispersion coefficient", [self.x_faces])
@@ -192,6 +237,8 @@ class CLBed_mass(daeModel):
         center_coords = [self.xval_cells(idx_cell) for idx_cell in range(Nc)]
         face_coords = [self.xval_faces(idx_face) for idx_face in range(Nf)]
         cross_section_area = self.pi() * self.R_bed() ** 2
+        conc_eps = Constant(1e-8 * mol / m**3)
+        enthalpy_eps = Constant(1e-8 * J / mol)
 
         eq = self.CreateEquation("Active_inlet_flow")
         eq.Residual = self.F_in() - self.F_in_const()
@@ -269,6 +316,7 @@ class CLBed_mass(daeModel):
         eq.Residual = self.Dax(idx_face) - Abs(self.u_s(idx_face)) * 0.5 * self.d_p()
 
         zero_velocity = Constant(0 * m / s)
+        zero_molar_flux = Constant(0 * mol / (s * m**2))
         for face_index in range(1, Nf - 1):
             idx_cell_L = face_index - 1
             idx_cell_R = face_index
@@ -282,10 +330,17 @@ class CLBed_mass(daeModel):
 
             uplus = Max(self.u_s(face_index), zero_velocity)
             uminus = Min(self.u_s(face_index), zero_velocity)
+            c_face_L, c_face_R = reconstruct_face_states(
+                lambda idx_cell: self.c_gas(idx_gas, idx_cell) / self.gasfrac(idx_cell),
+                face_index,
+                Nc,
+                self.mass_scheme,
+                conc_eps,
+            )
             eq.Residual = (
                 self.N_gas_face(idx_gas, face_index)
-                - uplus * self.c_gas(idx_gas, idx_cell_L) / self.gasfrac(idx_cell_L)
-                - uminus * self.c_gas(idx_gas, idx_cell_R) / self.gasfrac(idx_cell_R)
+                - uplus * c_face_L
+                - uminus * c_face_R
                 + self.Dax(face_index)
                 * ct_face
                 * (self.y_gas(idx_gas, idx_cell_R) - self.y_gas(idx_gas, idx_cell_L))
@@ -294,13 +349,19 @@ class CLBed_mass(daeModel):
 
             eq = self.CreateEquation(f"face_enthalpy_flux_{face_index}")
             idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
-
-            h_face = 0.5 * (
-                self.h_gas(idx_gas, idx_cell_L) + self.h_gas(idx_gas, idx_cell_R)
+            nplus = Max(self.N_gas_face(idx_gas, face_index), zero_molar_flux)
+            nminus = Min(self.N_gas_face(idx_gas, face_index), zero_molar_flux)
+            h_face_L, h_face_R = reconstruct_face_states(
+                lambda idx_cell: self.h_gas(idx_gas, idx_cell),
+                face_index,
+                Nc,
+                self.heat_scheme,
+                enthalpy_eps,
             )
             eq.Residual = (
                 self.J_gas_face(idx_gas, face_index)
-                - self.N_gas_face(idx_gas, face_index) * h_face
+                - nplus * h_face_L
+                - nminus * h_face_R
             )
 
         for idx_cell in range(Nc):
@@ -398,6 +459,8 @@ class CLBed_mass(daeModel):
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
         eq.Residual = self.h_cell(idx_cell) - Sum(self.c_gas.array("*", idx_cell)*self.h_gas.array("*", idx_cell)) - Sum(self.c_sol.array("*", idx_cell)*self.h_sol.array("*", idx_cell))
 
+        material_bed_total = Constant(0.0 * mol)
+        heat_bed_total = Constant(0.0 * J)
         for idx_cell in range(Nc):
             dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
 
@@ -405,6 +468,27 @@ class CLBed_mass(daeModel):
             eq.Residual = dt(self.h_cell(idx_cell)) + (
                 Sum(self.J_gas_face.array("*", idx_cell + 1)) - Sum(self.J_gas_face.array("*", idx_cell))
             ) / dx
+
+            material_bed_total = material_bed_total + cross_section_area * (self.ct_gas(idx_cell) + self.ct_sol(idx_cell)) * dx
+            heat_bed_total = heat_bed_total + cross_section_area * self.h_cell(idx_cell) * dx
+
+        eq = self.CreateEquation("material_in_total_accumulation")
+        eq.Residual = dt(self.material_in_total()) - cross_section_area * Sum(self.N_gas_face.array("*", 0))
+
+        eq = self.CreateEquation("material_out_total_accumulation")
+        eq.Residual = dt(self.material_out_total()) - cross_section_area * Sum(self.N_gas_face.array("*", Nf - 1))
+
+        eq = self.CreateEquation("material_bed_total_definition")
+        eq.Residual = self.material_bed_total() - material_bed_total
+
+        eq = self.CreateEquation("heat_in_total_accumulation")
+        eq.Residual = dt(self.heat_in_total()) - cross_section_area * Sum(self.J_gas_face.array("*", 0))
+
+        eq = self.CreateEquation("heat_out_total_accumulation")
+        eq.Residual = dt(self.heat_out_total()) - cross_section_area * Sum(self.J_gas_face.array("*", Nf - 1))
+
+        eq = self.CreateEquation("heat_bed_total_definition")
+        eq.Residual = self.heat_bed_total() - heat_bed_total
 
         eq = self.CreateEquation("solid_source_term_placeholder")
         idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, "j")
@@ -418,18 +502,24 @@ class simBed(daeSimulation):
         gas_species=None,
         solid_species=None,
         property_registry=DEFAULT_PROPERTY_REGISTRY,
+        mass_scheme="upwind1",
+        heat_scheme="central",
     ):
         daeSimulation.__init__(self)
 
         self.gas_species = list(VALID_GAS_SPECIES if gas_species is None else gas_species)
         self.solid_species = list(VALID_SOLID_SPECIES if solid_species is None else solid_species)
         self.property_registry = property_registry
+        self.mass_scheme = validate_scheme_name(mass_scheme)
+        self.heat_scheme = validate_scheme_name("central" if heat_scheme is None else heat_scheme)
 
         self.model = CLBed_mass(
             "MassTrsf",
             self.gas_species,
             self.solid_species,
             property_registry=self.property_registry,
+            mass_scheme=self.mass_scheme,
+            heat_scheme=self.heat_scheme,
         )
 
     def SetUpParametersAndDomains(self):
@@ -442,7 +532,7 @@ class simBed(daeSimulation):
         self.model.T_in_const.SetValue(500 * K)
         self.model.P_out_const.SetValue(1.01325e5 * Pa)
 
-        self.model.c_in.SetValue(50.0 * mol / m**3)
+        self.model.c_in.SetValue(500.0 * mol / m**3)
         self.model.F_in_const.SetValue(0.785 * mol / s)
         self.model.SetUniformAxialGrid(20)
 
@@ -564,6 +654,9 @@ class simBed(daeSimulation):
         mu_mix0 = np.zeros(nc, dtype=float) + mu_mix_scalar
         rho0 = p0 * mw_mix0 / (r_gas * inlet_temperature)
         h_cell0 = c0.T @ gas_h0 + c0_sol.T @ solid_h0
+        cell_widths = np.diff(face_coords)
+        material_bed_total0 = area * np.sum((ct0 + ct0_sol) * cell_widths)
+        heat_bed_total0 = area * np.sum(h_cell0 * cell_widths)
 
         face_velocity0 = np.empty(nf, dtype=float)
         face_velocity0[0] = molar_flux_in * r_gas * inlet_temperature / p_in0
@@ -602,6 +695,12 @@ class simBed(daeSimulation):
         self.model.F_in.SetInitialGuess(fin * mol / s)
         self.model.T_in.SetInitialGuess(inlet_temperature * K)
         self.model.P_in.SetInitialGuess(p_in0 * Pa)
+        self.model.material_in_total.SetInitialCondition(0.0 * mol)
+        self.model.material_out_total.SetInitialCondition(0.0 * mol)
+        self.model.material_bed_total.SetInitialGuess(material_bed_total0 * mol)
+        self.model.heat_in_total.SetInitialCondition(0.0 * J)
+        self.model.heat_out_total.SetInitialCondition(0.0 * J)
+        self.model.heat_bed_total.SetInitialGuess(heat_bed_total0 * J)
 
         for face_idx in range(nf):
             self.model.u_s.SetInitialGuess(face_idx, face_velocity0[face_idx] * m / s)
@@ -612,15 +711,16 @@ class simBed(daeSimulation):
                 self.model.J_gas_face.SetInitialGuess(gas_idx, face_idx, face_flux[gas_idx] * gas_h0[gas_idx] * J / (s * m**2))
 
         self.model.T_in_const.SetValue(1500 * K) # use this to check how the transient temp profile looks like
+        self.model.F_in_const.SetValue(1.785 * mol / s)
 
 
-def guiRun(qtApp):
+def guiRun(qtApp, mass_scheme="weno3", heat_scheme="weno3"):
 
-    simulation = simBed()
+    simulation = simBed(mass_scheme=mass_scheme, heat_scheme=heat_scheme)
     simulation.model.SetReportingOn(True)
     simulation.ReportTimeDerivatives = True
-    simulation.ReportingInterval = 0.1
-    simulation.TimeHorizon = 10
+    simulation.ReportingInterval = 100
+    simulation.TimeHorizon = 30000
     simulator = daeSimulator(qtApp, simulation=simulation)
     simulator.exec()
 
