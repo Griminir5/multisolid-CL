@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+import importlib.util
+import unittest
+from dataclasses import replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from packed_bed import load_run_bundle, run_simulation, validate_run_bundle
+from packed_bed.config import OutputConfig
+from packed_bed.solver import assemble_simulation
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_RUN_YAML = REPO_ROOT / "packed_bed" / "examples" / "default_case" / "run.yaml"
+
+
+class PackedBedIntegrationTests(unittest.TestCase):
+    def test_default_example_runs_and_exports_expected_files(self):
+        bundle = load_run_bundle(DEFAULT_RUN_YAML)
+        validate_run_bundle(bundle)
+
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            outputs = OutputConfig(
+                directory=tmp_path / "output",
+                artifacts_directory=tmp_path / "artifacts",
+                requested_reports=bundle.run.outputs.requested_reports,
+            )
+            result = run_simulation(replace(bundle, run=replace(bundle.run, outputs=outputs)))
+
+            self.assertTrue(result.success)
+            self.assertTrue(result.summary_path.exists())
+            self.assertTrue(result.balances_path.exists())
+            self.assertTrue(result.artifact_paths["system_graph_png"].exists())
+            self.assertTrue(result.artifact_paths["operating_program_png"].exists())
+
+            expected_reports = {f"{report_id}.csv" for report_id in bundle.run.outputs.requested_reports}
+            actual_reports = {path.name for path in result.report_paths.values()}
+            self.assertEqual(expected_reports, actual_reports)
+
+    def test_metadata_only_reaction_fails_before_solver_initialization(self):
+        bundle = load_run_bundle(DEFAULT_RUN_YAML)
+        chemistry = replace(
+            bundle.chemistry,
+            gas_species=("H2", "H2O"),
+            solid_species=("Ni", "NiO"),
+            reaction_ids=("ni_reduction_h2_medrano",),
+        )
+        program = replace(
+            bundle.program,
+            inlet_composition=replace(
+                bundle.program.inlet_composition,
+                initial={"H2": 1.0, "H2O": 0.0},
+                steps=(
+                    replace(
+                        bundle.program.inlet_composition.steps[0],
+                        target=None,
+                    ),
+                    replace(
+                        bundle.program.inlet_composition.steps[1],
+                        target={"H2": 0.5, "H2O": 0.5},
+                    ),
+                    replace(
+                        bundle.program.inlet_composition.steps[2],
+                        target=None,
+                    ),
+                ),
+            ),
+        )
+        model = replace(
+            bundle.run.model,
+            initial_solid_concentration_mol_per_m3={"Ni": 0.0, "NiO": 100000.0},
+        )
+
+        with TemporaryDirectory() as tmp:
+            outputs = OutputConfig(
+                directory=Path(tmp) / "output",
+                artifacts_directory=Path(tmp) / "artifacts",
+                requested_reports=bundle.run.outputs.requested_reports,
+            )
+            guarded_bundle = replace(
+                bundle,
+                chemistry=chemistry,
+                program=program,
+                run=replace(bundle.run, model=model, outputs=outputs),
+            )
+            validate_run_bundle(guarded_bundle)
+            with self.assertRaisesRegex(NotImplementedError, "ni_reduction_h2_medrano"):
+                assemble_simulation(guarded_bundle)
+
+    def test_legacy_operation_program_file_delegates_to_package(self):
+        legacy_path = REPO_ROOT / "Packed Bed Models" / "CLBed_MHMM_operation_program.py"
+        spec = importlib.util.spec_from_file_location("legacy_operation_program", legacy_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        from packed_bed.programs import ScalarProgram
+        from packed_bed.solver import simBed
+
+        self.assertIs(module.simBed, simBed)
+        self.assertIs(module.ScalarProgram, ScalarProgram)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,9 @@
+gas_species:
+  - AR
+  - H2
+  - H2O
+solid_species:
+  - Ni
+  - NiO
+  - CaAl2O4
+reaction_ids: []
