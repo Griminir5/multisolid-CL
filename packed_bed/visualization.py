@@ -175,16 +175,11 @@ def render_system_graph(system_graph: SystemGraph, output_dir) -> dict[str, Path
     )
     figure.tight_layout()
 
-    png_path = output_dir / "system_graph.png"
     svg_path = output_dir / "system_graph.svg"
-    figure.savefig(png_path, dpi=200)
     figure.savefig(svg_path)
     plt.close(figure)
 
-    return {
-        "system_graph_png": png_path,
-        "system_graph_svg": svg_path,
-    }
+    return {"system_graph_svg": svg_path}
 
 
 def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Path]:
@@ -269,16 +264,11 @@ def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Pat
 
     figure.tight_layout()
 
-    png_path = output_dir / "operating_program.png"
     svg_path = output_dir / "operating_program.svg"
-    figure.savefig(png_path, dpi=200)
     figure.savefig(svg_path)
     plt.close(figure)
 
-    return {
-        "operating_program_png": png_path,
-        "operating_program_svg": svg_path,
-    }
+    return {"operating_program_svg": svg_path}
 
 
 def render_initial_solid_profile(run_bundle: RunBundle, output_dir) -> dict[str, Path]:
@@ -351,13 +341,8 @@ def render_initial_solid_profile(run_bundle: RunBundle, output_dir) -> dict[str,
 
     figure.tight_layout()
 
-    png_path = output_dir / "initial_solid_profile.png"
     svg_path = output_dir / "initial_solid_profile.svg"
-    figure.savefig(png_path, dpi=200)
     figure.savefig(svg_path)
     plt.close(figure)
 
-    return {
-        "initial_solid_profile_png": png_path,
-        "initial_solid_profile_svg": svg_path,
-    }
+    return {"initial_solid_profile_svg": svg_path}

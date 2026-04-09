@@ -4,20 +4,16 @@ references:
   program_file: program.yaml
 simulation:
   system_name: MassTrsf
-  time_horizon_s: 20.0
-  reporting_interval_s: 10.0
+  time_horizon_s: 12000.0
+  reporting_interval_s: 1.0
   mass_scheme: weno3
-  heat_scheme: central
+  heat_scheme: weno3
   report_time_derivatives: false
 model:
   bed_length_m: 2.5
   bed_radius_m: 0.1
-  particle_diameter_m: 0.01
   axial_cells: 20
-  interparticle_voidage: 0.5
-  intraparticle_voidage: 0.5
-  gas_constant: 8.314462
-  pi_value: 3.14
+
 solver:
   relative_tolerance: 1.0e-6
 outputs:

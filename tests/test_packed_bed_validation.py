@@ -119,6 +119,14 @@ def _make_bundle(temp_dir: Path, chemistry=None, solids=None, program=None, run=
 
 
 class PackedBedValidationTests(unittest.TestCase):
+    def test_parses_quoted_false_boolean_in_run_config(self):
+        with TemporaryDirectory() as tmp:
+            run = dict(DEFAULT_RUN)
+            run["simulation"] = dict(DEFAULT_RUN["simulation"])
+            run["simulation"]["report_time_derivatives"] = "false"
+            bundle = _make_bundle(Path(tmp), run=run)
+            self.assertFalse(bundle.run.report_time_derivatives)
+
     def test_rejects_unknown_species(self):
         with TemporaryDirectory() as tmp:
             chemistry = dict(DEFAULT_CHEMISTRY)
@@ -210,6 +218,35 @@ class PackedBedValidationTests(unittest.TestCase):
             with self.assertRaisesRegex(PackedBedValidationError, "duration must be positive"):
                 validate_run_bundle(bundle)
 
+    def test_rejects_nonfinite_step_duration(self):
+        with TemporaryDirectory() as tmp:
+            program = dict(DEFAULT_PROGRAM)
+            program["inlet_flow"] = {
+                "initial": 0.785,
+                "steps": [{"kind": "hold", "duration_s": float("nan")}],
+            }
+            bundle = _make_bundle(Path(tmp), program=program)
+            with self.assertRaisesRegex(PackedBedValidationError, "step 0 duration must be finite"):
+                validate_run_bundle(bundle)
+
+    def test_rejects_nonpositive_scalar_channel_initial_values(self):
+        cases = (
+            ("inlet_flow", -1.0, "program.inlet_flow initial value must be positive"),
+            ("inlet_temperature", -100.0, "program.inlet_temperature initial value must be positive"),
+            ("outlet_pressure", -1.0, "program.outlet_pressure initial value must be positive"),
+        )
+        for channel_name, initial_value, expected_message in cases:
+            with self.subTest(channel_name=channel_name):
+                with TemporaryDirectory() as tmp:
+                    program = dict(DEFAULT_PROGRAM)
+                    program[channel_name] = {
+                        "initial": initial_value,
+                        "steps": [{"kind": "hold", "duration_s": 5.0}],
+                    }
+                    bundle = _make_bundle(Path(tmp), program=program)
+                    with self.assertRaisesRegex(PackedBedValidationError, expected_message):
+                        validate_run_bundle(bundle)
+
     def test_rejects_composition_with_missing_species(self):
         with TemporaryDirectory() as tmp:
             program = dict(DEFAULT_PROGRAM)
@@ -260,6 +297,24 @@ class PackedBedValidationTests(unittest.TestCase):
             }
             bundle = _make_bundle(Path(tmp), solids=solids)
             with self.assertRaisesRegex(PackedBedValidationError, "contiguous"):
+                validate_run_bundle(bundle)
+
+    def test_rejects_nonfinite_simulation_horizon(self):
+        with TemporaryDirectory() as tmp:
+            run = dict(DEFAULT_RUN)
+            run["simulation"] = dict(DEFAULT_RUN["simulation"])
+            run["simulation"]["time_horizon_s"] = float("nan")
+            bundle = _make_bundle(Path(tmp), run=run)
+            with self.assertRaisesRegex(PackedBedValidationError, "simulation.time_horizon_s must be finite"):
+                validate_run_bundle(bundle)
+
+    def test_rejects_nonfinite_model_length(self):
+        with TemporaryDirectory() as tmp:
+            run = dict(DEFAULT_RUN)
+            run["model"] = dict(DEFAULT_RUN["model"])
+            run["model"]["bed_length_m"] = float("nan")
+            bundle = _make_bundle(Path(tmp), run=run)
+            with self.assertRaisesRegex(PackedBedValidationError, "model.bed_length_m must be finite"):
                 validate_run_bundle(bundle)
 
     def test_rejects_invalid_zone_voidage_or_particle_length(self):

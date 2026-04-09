@@ -28,19 +28,17 @@ class RunResult:
     success: bool = True
 
 
-def _coerce_run_bundle(run_yaml_path_or_bundle) -> RunBundle:
-    if isinstance(run_yaml_path_or_bundle, RunBundle):
-        return run_yaml_path_or_bundle
-    return load_run_bundle(run_yaml_path_or_bundle)
-
-
 def run_simulation(
-    run_yaml_path_or_bundle,
+    run_yaml_path,
     *,
     property_registry=DEFAULT_PROPERTY_REGISTRY,
     reaction_catalog=DEFAULT_REACTION_CATALOG,
 ) -> RunResult:
-    run_bundle = _coerce_run_bundle(run_yaml_path_or_bundle)
+    if isinstance(run_yaml_path, RunBundle):
+        raise TypeError("run_simulation() expects a run.yaml path, not a RunBundle.")
+
+    run_bundle = load_run_bundle(run_yaml_path)
+
     validate_run_bundle(
         run_bundle,
         property_registry=property_registry,

@@ -23,12 +23,11 @@ class PackedBedIntegrationTests(unittest.TestCase):
 
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            outputs = OutputConfig(
-                directory=tmp_path / "output",
-                artifacts_directory=tmp_path / "artifacts",
-                requested_reports=bundle.run.outputs.requested_reports,
+            result = run_simulation(
+                DEFAULT_RUN_YAML,
+                output_dir=tmp_path / "output",
+                artifacts_dir=tmp_path / "artifacts",
             )
-            result = run_simulation(replace(bundle, run=replace(bundle.run, outputs=outputs)))
 
             self.assertTrue(result.success)
             self.assertTrue(result.summary_path.exists())
@@ -106,6 +105,20 @@ class PackedBedIntegrationTests(unittest.TestCase):
 
         self.assertIs(module.simBed, simBed)
         self.assertIs(module.ScalarProgram, ScalarProgram)
+
+    def test_solver_reuses_shared_program_types(self):
+        import packed_bed.solver as solver_module
+        from packed_bed.programs import ProgramSegment, ProgramStep, ScalarProgram, VectorProgram
+
+        self.assertIs(solver_module.ProgramStep, ProgramStep)
+        self.assertIs(solver_module.ProgramSegment, ProgramSegment)
+        self.assertIs(solver_module.ScalarProgram, ScalarProgram)
+        self.assertIs(solver_module.VectorProgram, VectorProgram)
+
+    def test_run_simulation_rejects_run_bundle_argument(self):
+        bundle = load_run_bundle(DEFAULT_RUN_YAML)
+        with self.assertRaisesRegex(TypeError, "expects a run.yaml path"):
+            run_simulation(bundle)
 
     def test_cli_runs_default_example(self):
         with TemporaryDirectory() as tmp:

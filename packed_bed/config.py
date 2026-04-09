@@ -28,7 +28,7 @@ class SolidZoneConfig:
 @dataclass(frozen=True)
 class SolidConfig:
     solid_species: tuple[str, ...]
-    concentration_unit: str = "mol_per_m3_solid"
+    concentration_basis: str = "solid"
     initial_profile_zones: tuple[SolidZoneConfig, ...] = ()
 
 
@@ -82,14 +82,14 @@ class ProgramConfig:
 
 @dataclass(frozen=True)
 class ModelConfig:
-    bed_length_m: float = 2.5
-    bed_radius_m: float = 0.1
-    particle_diameter_m: float = 0.01
-    axial_cells: int = 20
-    interparticle_voidage: float = 0.5
-    intraparticle_voidage: float = 0.5
-    gas_constant: float = 8.314462
-    pi_value: float = 3.14
+    bed_length_m: float
+    bed_radius_m: float
+    particle_diameter_m: float
+    axial_cells: int
+    interparticle_voidage: float
+    intraparticle_voidage: float
+    gas_constant: float
+    pi_value: float
 
 
 @dataclass(frozen=True)
@@ -117,7 +117,7 @@ class RunConfig:
     model: ModelConfig
     solver: SolverConfig
     outputs: OutputConfig
-    system_name: str = "MassTrsf"
+    system_name: str = "Chemical Looping Bed"
 
 
 @dataclass(frozen=True)
@@ -163,89 +163,19 @@ def _coerce_float_mapping(value, label):
     return {str(key): float(raw_value) for key, raw_value in value.items()}
 
 
-def _parse_solid_zones(
-    raw_zones,
-    label,
-    *,
-    default_e_b=0.5,
-    default_e_p=0.5,
-    default_d_p=0.01,
-):
-    if raw_zones is None:
-        return ()
-    if not isinstance(raw_zones, list):
-        raise ValueError(f"{label} zones must be provided as a list.")
+def _coerce_bool(value, label):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "on", "1"}:
+            return True
+        if normalized in {"false", "no", "off", "0"}:
+            return False
+    if isinstance(value, (int, float)) and value in {0, 1}:
+        return bool(value)
+    raise ValueError(f"{label} must be a boolean.")
 
-    zones = []
-    for index, raw_zone in enumerate(raw_zones):
-        if not isinstance(raw_zone, dict):
-            raise ValueError(f"{label} zone {index} must be a mapping.")
-        raw_values = raw_zone.get("values")
-        if not isinstance(raw_values, dict):
-            raise ValueError(f"{label} zone {index} values must be a species-keyed mapping.")
-        zones.append(
-            SolidZoneConfig(
-                x_start_m=float(raw_zone.get("x_start_m")),
-                x_end_m=float(raw_zone.get("x_end_m")),
-                values_mol_per_m3={str(key): float(value) for key, value in raw_values.items()},
-                e_b=float(raw_zone.get("e_b", default_e_b)),
-                e_p=float(raw_zone.get("e_p", default_e_p)),
-                d_p=float(raw_zone.get("d_p", default_d_p)),
-            )
-        )
-    return tuple(zones)
-
-
-def _parse_solid_config(
-    raw_solids,
-    label,
-    *,
-    default_e_b=0.5,
-    default_e_p=0.5,
-    default_d_p=0.01,
-):
-    if not isinstance(raw_solids, dict):
-        raise ValueError(f"{label} must be a mapping.")
-
-    initial_profile = raw_solids.get("initial_profile") or raw_solids.get("initial_concentration")
-    if not isinstance(initial_profile, dict):
-        raise ValueError(f"{label}.initial_profile must be a mapping.")
-
-    return SolidConfig(
-        solid_species=_coerce_string_tuple(raw_solids.get("solid_species"), f"{label}.solid_species"),
-        concentration_unit=str(initial_profile.get("units", "mol_per_m3_solid")),
-        initial_profile_zones=_parse_solid_zones(
-            initial_profile.get("zones"),
-            f"{label}.initial_profile",
-            default_e_b=default_e_b,
-            default_e_p=default_e_p,
-            default_d_p=default_d_p,
-        ),
-    )
-
-
-def _build_legacy_solid_config(chemistry_data, model_data):
-    solid_species = _coerce_string_tuple(chemistry_data.get("solid_species"), "chemistry.solid_species")
-    initial_solids = _coerce_float_mapping(
-        model_data.get("initial_solid_concentration_mol_per_m3"),
-        "model.initial_solid_concentration_mol_per_m3",
-    )
-    if not solid_species:
-        return SolidConfig(solid_species=(), concentration_unit="mol_per_m3_bed", initial_profile_zones=())
-    return SolidConfig(
-        solid_species=solid_species,
-        concentration_unit="mol_per_m3_bed",
-        initial_profile_zones=(
-            SolidZoneConfig(
-                x_start_m=0.0,
-                x_end_m=float(model_data.get("bed_length_m", 2.5)),
-                values_mol_per_m3=initial_solids,
-                e_b=float(model_data.get("interparticle_voidage", 0.5)),
-                e_p=float(model_data.get("intraparticle_voidage", 0.5)),
-                d_p=float(model_data.get("particle_diameter_m", 0.01)),
-            ),
-        ),
-    )
 
 
 def _parse_steps(raw_steps, label, composition=False):
@@ -307,8 +237,8 @@ def load_run_bundle(run_yaml_path) -> RunBundle:
     if not isinstance(references, dict):
         raise ValueError("run.yaml 'references' section must be a mapping.")
 
-    chemistry_path = _resolve_path(base_dir, references.get("chemistry_file", "chemistry.yaml"))
-    program_path = _resolve_path(base_dir, references.get("program_file", "program.yaml"))
+    chemistry_path = _resolve_path(base_dir, references.get("chemistry_file"))
+    program_path = _resolve_path(base_dir, references.get("program_file"))
     solids_reference = references.get("solids_file")
     solids_path = None
     if solids_reference is not None:
@@ -322,10 +252,10 @@ def load_run_bundle(run_yaml_path) -> RunBundle:
     program_data = _read_yaml(program_path)
     solids_data = None if solids_path is None else _read_yaml(solids_path)
 
-    simulation_data = run_data.get("simulation") or {}
-    model_data = run_data.get("model") or {}
-    outputs_data = run_data.get("outputs") or {}
-    solver_data = run_data.get("solver") or {}
+    simulation_data = run_data.get("simulation")
+    model_data = run_data.get("model")
+    outputs_data = run_data.get("outputs")
+    solver_data = run_data.get("solver")
 
     if not isinstance(simulation_data, dict):
         raise ValueError("run.yaml 'simulation' section must be a mapping.")
@@ -346,9 +276,9 @@ def load_run_bundle(run_yaml_path) -> RunBundle:
         else _parse_solid_config(
             solids_data,
             "solids",
-            default_e_b=float(model_data.get("interparticle_voidage", 0.5)),
-            default_e_p=float(model_data.get("intraparticle_voidage", 0.5)),
-            default_d_p=float(model_data.get("particle_diameter_m", 0.01)),
+            default_e_b=float(model_data.get("interparticle_voidage")),
+            default_e_p=float(model_data.get("intraparticle_voidage")),
+            default_d_p=float(model_data.get("particle_diameter_m")),
         )
     )
 
@@ -373,7 +303,10 @@ def load_run_bundle(run_yaml_path) -> RunBundle:
         reporting_interval_s=float(simulation_data.get("reporting_interval_s", 10.0)),
         mass_scheme=str(simulation_data.get("mass_scheme", "weno3")),
         heat_scheme=str(simulation_data.get("heat_scheme", "central")),
-        report_time_derivatives=bool(simulation_data.get("report_time_derivatives", False)),
+        report_time_derivatives=_coerce_bool(
+            simulation_data.get("report_time_derivatives", False),
+            "simulation.report_time_derivatives",
+        ),
         system_name=str(simulation_data.get("system_name", "MassTrsf")),
         model=ModelConfig(
             bed_length_m=float(model_data.get("bed_length_m", 2.5)),

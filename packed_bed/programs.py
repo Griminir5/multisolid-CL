@@ -57,6 +57,15 @@ def coerce_composition_mapping(value, species_order, label="Composition"):
     return composition
 
 
+def coerce_composition_vector(value, expected_size=None, label="Composition"):
+    composition = coerce_vector(value, expected_size=expected_size, label=label)
+    if np.any(composition < -1e-12) or np.any(composition > 1.0 + 1e-12):
+        raise ValueError(f"{label} entries must stay within [0, 1].")
+    if not np.isclose(composition.sum(), 1.0, rtol=0.0, atol=1e-9):
+        raise ValueError(f"{label} must sum to 1.")
+    return composition
+
+
 def coerce_vector(value, expected_size=None, label="Vector"):
     vector = np.asarray(value, dtype=float)
     if vector.ndim != 1:

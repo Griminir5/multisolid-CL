@@ -55,9 +55,9 @@ Why it exists:
 
 Important contents:
 - `RunResult`: immutable summary of a completed run, including output directory, artifact paths, report paths, and key CSV locations.
-- `_coerce_run_bundle(...)`: accepts either a `RunBundle` or a path to `run.yaml` and normalizes to a `RunBundle`.
 - `run_simulation(...)`: the high-level orchestration function. It:
-  - loads or accepts a run bundle,
+  - loads `run.yaml`,
+  - optionally applies output directory overrides,
   - validates it,
   - renders the graph/program/solid-profile artifacts,
   - assembles the DAETOOLS simulation,
@@ -79,9 +79,9 @@ Important contents:
   - `--output-dir`
   - `--artifacts-dir`
   - `--validate-only`
-- `main(argv=None)`: CLI driver. It loads the run bundle, applies output overrides, validates the input, and either:
+  - `main(argv=None)`: CLI driver. It loads the run bundle for validation and either:
   - exits after validation, or
-  - executes the full run and prints the key output locations.
+  - executes the full run from the `run.yaml` path and prints the key output locations.
 
 Use:
 

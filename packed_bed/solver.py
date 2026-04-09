@@ -8,13 +8,20 @@ import sys
 
 import math
 from dataclasses import dataclass
-from typing import Literal
 
 import numpy as np
 from daetools.pyDAE import *
 
 from .axial_schemes import reconstruct_face_states, validate_scheme_name
 from .config import ModelConfig, RunBundle, SolidConfig, SolidZoneConfig
+from .programs import (
+    ProgramSegment,
+    ProgramStep,
+    ScalarProgram,
+    VectorProgram,
+    coerce_composition_vector,
+    default_inlet_composition,
+)
 from .properties import DEFAULT_PROPERTY_REGISTRY
 from .reactions import DEFAULT_REACTION_CATALOG
 from .solid_profiles import (
@@ -109,177 +116,8 @@ def _convert_solid_profile_to_bed_volume(solids_config: SolidConfig, cell_center
     )
 
 
-@dataclass(frozen=True)
-class ProgramStep:
-    duration: float
-    kind: Literal["hold", "ramp"]
-    target: float | np.ndarray | None = None
-
-
-@dataclass(frozen=True)
-class ProgramSegment:
-    start_time: float
-    end_time: float
-    start_value: float | np.ndarray
-    end_value: float | np.ndarray
-
-
-def _coerce_inlet_composition(value, expected_size=None, label="Inlet composition"):
-    composition = np.asarray(value, dtype=float)
-
-    if composition.ndim != 1:
-        raise ValueError(f"{label} must be provided as a 1D vector.")
-    if expected_size is not None and composition.size != expected_size:
-        raise ValueError(f"{label} must contain exactly {expected_size} entries.")
-    if composition.size == 0:
-        raise ValueError(f"{label} must contain at least one entry.")
-    if not np.all(np.isfinite(composition)):
-        raise ValueError(f"{label} must contain only finite values.")
-    if np.any(composition < -1e-12) or np.any(composition > 1.0 + 1e-12):
-        raise ValueError(f"{label} entries must stay within [0, 1].")
-    if not np.isclose(composition.sum(), 1.0, rtol=0.0, atol=1e-9):
-        raise ValueError(f"{label} must sum to 1.")
-
-    return composition.copy()
-
-
-def _default_inlet_composition(gas_species):
-    inlet_y = np.zeros(len(gas_species), dtype=float)
-    inlet_y[0] = 1.0
-    return inlet_y
-
-
-class ScalarProgram:
-    """Simple finite hold/ramp program compiled into DAETOOLS piecewise segments."""
-
-    def __init__(self, initial_value):
-        self.initial_value = float(initial_value)
-        self.steps: list[ProgramStep] = []
-
-    def hold(self, duration):
-        self.steps.append(ProgramStep(duration=float(duration), kind="hold"))
-        return self
-
-    def ramp(self, duration, target):
-        self.steps.append(ProgramStep(duration=float(duration), kind="ramp", target=float(target)))
-        return self
-
-    def build_segments(self, time_horizon=None):
-        segments = []
-        current_time = 0.0
-        current_value = self.initial_value
-
-        for step in self.steps:
-            if step.duration <= 0.0:
-                raise ValueError("Program step durations must be positive.")
-
-            next_time = current_time + step.duration
-            next_value = current_value if step.kind == "hold" else step.target
-            segments.append(
-                ProgramSegment(
-                    start_time=current_time,
-                    end_time=next_time,
-                    start_value=current_value,
-                    end_value=next_value,
-                )
-            )
-            current_time = next_time
-            current_value = next_value
-
-        if time_horizon is not None and (not segments or segments[-1].end_time < time_horizon):
-            segments.append(
-                ProgramSegment(
-                    start_time=current_time,
-                    end_time=float(time_horizon),
-                    start_value=current_value,
-                    end_value=current_value,
-                )
-            )
-
-        return segments
-
-
-class VectorProgram:
-    """Finite hold/ramp program for vector-valued inlet conditions such as composition."""
-
-    def __init__(self, initial_value):
-        self.initial_value = _coerce_inlet_composition(initial_value)
-        self.steps: list[ProgramStep] = []
-
-    def hold(self, duration):
-        self.steps.append(ProgramStep(duration=float(duration), kind="hold"))
-        return self
-
-    def ramp(self, duration, target):
-        self.steps.append(
-            ProgramStep(
-                duration=float(duration),
-                kind="ramp",
-                target=_coerce_inlet_composition(
-                    target,
-                    expected_size=self.initial_value.size,
-                    label="Inlet composition program target",
-                ),
-            )
-        )
-        return self
-
-    def build_segments(self, time_horizon=None):
-        segments = []
-        current_time = 0.0
-        current_value = self.initial_value.copy()
-
-        for step in self.steps:
-            if step.duration <= 0.0:
-                raise ValueError("Program step durations must be positive.")
-
-            next_time = current_time + step.duration
-            next_value = current_value.copy() if step.kind == "hold" else np.asarray(step.target, dtype=float).copy()
-            segments.append(
-                ProgramSegment(
-                    start_time=current_time,
-                    end_time=next_time,
-                    start_value=current_value.copy(),
-                    end_value=next_value.copy(),
-                )
-            )
-            current_time = next_time
-            current_value = next_value
-
-        if time_horizon is not None and (not segments or segments[-1].end_time < time_horizon):
-            segments.append(
-                ProgramSegment(
-                    start_time=current_time,
-                    end_time=float(time_horizon),
-                    start_value=current_value.copy(),
-                    end_value=current_value.copy(),
-                )
-            )
-
-        return segments
-
-
 # Wired operating program. The initial values match the steady-state
 # initialization point; later segments are native DAETOOLS IF/ELSE branches.
-INLET_FLOW_PROGRAM = (
-    ScalarProgram(initial_value=0.785)
-    .hold(100.0)
-    .ramp(100.0, 1.785)
-    .hold(2000.0)
-
-)
-INLET_TEMPERATURE_PROGRAM = (
-    ScalarProgram(initial_value=500.0)
-    .hold(250.0)
-    .ramp(250.0, 1500)
-
-)
-OUTLET_PRESSURE_PROGRAM = (
-    ScalarProgram(initial_value=1.01325e5)
-    .hold(500)
-    .ramp(1500.0, 90e5)
-)
-
 
 class CLBed_mass(daeModel):
     def __init__(
@@ -299,7 +137,7 @@ class CLBed_mass(daeModel):
         self.solid_species = list(solid_species)
         self.property_registry = property_registry
         self.mass_scheme = validate_scheme_name(mass_scheme)
-        self.heat_scheme = validate_scheme_name(mass_scheme if heat_scheme is None else heat_scheme)
+        self.heat_scheme = validate_scheme_name("central" if heat_scheme is None else heat_scheme)
         self.inlet_flow_segments = []
         self.inlet_composition_segments = []
         self.inlet_temperature_segments = []
@@ -423,7 +261,7 @@ class CLBed_mass(daeModel):
         if inlet_composition_program is None:
             self.inlet_composition_segments = []
         else:
-            inlet_composition = _coerce_inlet_composition(
+            inlet_composition = coerce_composition_vector(
                 inlet_composition_program.initial_value,
                 expected_size=len(self.gas_species),
                 label="Inlet composition program initial value",
@@ -813,16 +651,16 @@ class simBed(daeSimulation):
         gas_species=None,
         solid_species=None,
         solid_config: SolidConfig | None = None,
-        property_registry=DEFAULT_PROPERTY_REGISTRY,
+        property_registry=None,
         mass_scheme="weno3",
         heat_scheme="weno3",
-        inlet_flow_program=INLET_FLOW_PROGRAM,
-        inlet_composition_program=None,
-        inlet_temperature_program=INLET_TEMPERATURE_PROGRAM,
-        outlet_pressure_program=OUTLET_PRESSURE_PROGRAM,
+        inlet_flow_program: ScalarProgram | None = None,
+        inlet_composition_program: VectorProgram | None = None,
+        inlet_temperature_program: ScalarProgram | None = None,
+        outlet_pressure_program: ScalarProgram | None = None,
         operation_time_horizon=30000.0,
         model_config: ModelConfig | None = None,
-        system_name="MassTrsf",
+        system_name="Chemical Looping Packed Bed Reactor",
     ):
         daeSimulation.__init__(self)
 
@@ -861,17 +699,17 @@ class simBed(daeSimulation):
         )
 
     def SetUpParametersAndDomains(self):
-        self.model.R_gas.SetValue(self.model_config.gas_constant * (Pa * m**3) / (mol * K))
-        self.model.pi.SetValue(self.model_config.pi_value)
+        self.model.R_gas.SetValue(8.31446 * (Pa * m**3) / (mol * K))
+        self.model.pi.SetValue(3.14159)
         self.model.L_bed.SetValue(self.model_config.bed_length_m * m)
         self.model.R_bed.SetValue(self.model_config.bed_radius_m * m)
         inlet_temperature = 500.0 if self.inlet_temperature_program is None else self.inlet_temperature_program.initial_value
         outlet_pressure = 1.01325e5 if self.outlet_pressure_program is None else self.outlet_pressure_program.initial_value
         inlet_flow = 0.785 if self.inlet_flow_program is None else self.inlet_flow_program.initial_value
         inlet_y = (
-            _default_inlet_composition(self.gas_species)
+            default_inlet_composition(self.gas_species)
             if self.inlet_composition_program is None
-            else _coerce_inlet_composition(
+            else coerce_composition_vector(
                 self.inlet_composition_program.initial_value,
                 expected_size=len(self.gas_species),
                 label="Inlet composition program initial value",
@@ -985,13 +823,32 @@ class simBed(daeSimulation):
         upper_pin = max(lower_pin * 1.05, lower_pin + 100.0)
         upper_residual = outlet_pressure_residual(upper_pin)
 
-        while upper_residual <= 0.0:
+        for _ in range(80):
+            if not np.isfinite(upper_residual):
+                raise ValueError(
+                    "Unable to bracket the inlet pressure during steady-state initialization: residual became non-finite."
+                )
+            if upper_residual > 0.0:
+                break
             upper_pin *= 1.5
+            if not np.isfinite(upper_pin):
+                raise ValueError(
+                    "Unable to bracket the inlet pressure during steady-state initialization: upper bound became non-finite."
+                )
             upper_residual = outlet_pressure_residual(upper_pin)
+        else:
+            raise ValueError(
+                "Unable to bracket the inlet pressure during steady-state initialization."
+            )
 
         for _ in range(80):
             mid_pin = 0.5 * (lower_pin + upper_pin)
-            if outlet_pressure_residual(mid_pin) > 0.0:
+            mid_residual = outlet_pressure_residual(mid_pin)
+            if not np.isfinite(mid_residual):
+                raise ValueError(
+                    "Unable to solve for the inlet pressure during steady-state initialization: residual became non-finite."
+                )
+            if mid_residual > 0.0:
                 upper_pin = mid_pin
             else:
                 lower_pin = mid_pin
