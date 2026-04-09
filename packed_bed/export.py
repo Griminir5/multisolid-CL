@@ -39,7 +39,7 @@ def _flatten_variable(variable, run_bundle: RunBundle):
                 if domain_name == "Gas_comps":
                     row["species"] = run_bundle.chemistry.gas_species[item_index]
                 elif domain_name == "Solid_comps":
-                    row["species"] = run_bundle.chemistry.solid_species[item_index]
+                    row["species"] = run_bundle.solids.solid_species[item_index]
                 elif domain_name == "Cell_centers":
                     row["x_cell_m"] = float(domain_points[axis_index][item_index])
                 elif domain_name == "Cell_faces":
@@ -171,7 +171,7 @@ def export_run_outputs(reporter, run_bundle: RunBundle, output_dir):
         [
             {"metric": "success", "value": "True"},
             {"metric": "gas_species", "value": ";".join(run_bundle.chemistry.gas_species)},
-            {"metric": "solid_species", "value": ";".join(run_bundle.chemistry.solid_species)},
+            {"metric": "solid_species", "value": ";".join(run_bundle.solids.solid_species)},
             {"metric": "reaction_ids", "value": ";".join(run_bundle.chemistry.reaction_ids)},
             {"metric": "time_horizon_s", "value": run_bundle.run.time_horizon_s},
             {"metric": "reporting_interval_s", "value": run_bundle.run.reporting_interval_s},

@@ -53,6 +53,67 @@ def _validate_composition_channel(channel, gas_species, label, errors):
                 errors.append(str(exc))
 
 
+def _validate_solid_profile(run_bundle: RunBundle, errors):
+    solid_species = list(run_bundle.solids.solid_species)
+    bed_length = run_bundle.run.model.bed_length_m
+    zones = list(run_bundle.solids.initial_profile_zones)
+
+    if not solid_species:
+        errors.append("solids.solid_species must contain at least one species.")
+        return
+
+    _validate_unique(solid_species, "solids.solid_species", errors)
+
+    if run_bundle.solids.concentration_unit not in {"mol_per_m3_solid", "mol_per_m3_bed"}:
+        errors.append(
+            "solids.initial_profile units must be one of: mol_per_m3_solid, mol_per_m3_bed."
+        )
+
+    if not zones:
+        errors.append("solids.initial_profile.zones must contain at least one zone.")
+        return
+
+    expected_species = set(solid_species)
+    previous_end = None
+    for index, zone in enumerate(zones):
+        if zone.x_start_m < 0.0:
+            errors.append(f"solids.initial_profile zone {index} x_start_m must be non-negative.")
+        if zone.x_end_m <= zone.x_start_m:
+            errors.append(f"solids.initial_profile zone {index} must satisfy x_end_m > x_start_m.")
+        value_species = set(zone.values_mol_per_m3.keys())
+        missing = sorted(expected_species - value_species)
+        unexpected = sorted(value_species - expected_species)
+        if missing:
+            errors.append(
+                f"solids.initial_profile zone {index} is missing species values for: {', '.join(missing)}."
+            )
+        if unexpected:
+            errors.append(
+                f"solids.initial_profile zone {index} contains unexpected species values: {', '.join(unexpected)}."
+            )
+        negative_species = sorted(
+            species_id for species_id, value in zone.values_mol_per_m3.items() if value < 0.0
+        )
+        if negative_species:
+            errors.append(
+                f"solids.initial_profile zone {index} contains negative concentrations for: {', '.join(negative_species)}."
+            )
+        if not (0.0 < zone.e_b < 1.0):
+            errors.append(f"solids.initial_profile zone {index} e_b must stay within (0, 1).")
+        if not (0.0 < zone.e_p < 1.0):
+            errors.append(f"solids.initial_profile zone {index} e_p must stay within (0, 1).")
+        if zone.d_p <= 0.0:
+            errors.append(f"solids.initial_profile zone {index} d_p must be positive.")
+        if index == 0 and abs(zone.x_start_m) > 1e-9:
+            errors.append("solids.initial_profile must start at x = 0.")
+        if previous_end is not None and abs(zone.x_start_m - previous_end) > 1e-9:
+            errors.append("solids.initial_profile zones must be contiguous without gaps or overlaps.")
+        previous_end = zone.x_end_m
+
+    if previous_end is not None and abs(previous_end - bed_length) > 1e-9:
+        errors.append("solids.initial_profile must end at x = model.bed_length_m.")
+
+
 def validate_run_bundle(
     run_bundle: RunBundle,
     *,
@@ -62,16 +123,13 @@ def validate_run_bundle(
     errors: list[str] = []
 
     gas_species = list(run_bundle.chemistry.gas_species)
-    solid_species = list(run_bundle.chemistry.solid_species)
+    solid_species = list(run_bundle.solids.solid_species)
     reaction_ids = list(run_bundle.chemistry.reaction_ids)
 
     if not gas_species:
         errors.append("chemistry.gas_species must contain at least one species.")
-    if not solid_species:
-        errors.append("chemistry.solid_species must contain at least one species.")
 
     _validate_unique(gas_species, "chemistry.gas_species", errors)
-    _validate_unique(solid_species, "chemistry.solid_species", errors)
     _validate_unique(reaction_ids, "chemistry.reaction_ids", errors)
 
     for species_id in gas_species:
@@ -100,6 +158,8 @@ def validate_run_bundle(
         if record.enthalpy is None:
             errors.append(f"Solid species '{species_id}' must define an enthalpy correlation.")
 
+    _validate_solid_profile(run_bundle, errors)
+
     selected_species = set(gas_species) | set(solid_species)
     for reaction_id in reaction_ids:
         reaction = reaction_catalog.get(reaction_id)
@@ -115,7 +175,7 @@ def validate_run_bundle(
             if species_id not in selected_species:
                 errors.append(
                     f"Reaction '{reaction_id}' references species '{species_id}' "
-                    "that is not selected in chemistry.yaml."
+                    "that is not selected in the current gas/solid configuration."
                 )
 
     _validate_scalar_channel(run_bundle.program.inlet_flow, "program.inlet_flow", errors)
@@ -154,26 +214,6 @@ def validate_run_bundle(
         errors.append("model.interparticle_voidage must stay within (0, 1).")
     if not (0.0 < run_bundle.run.model.intraparticle_voidage < 1.0):
         errors.append("model.intraparticle_voidage must stay within (0, 1).")
-
-    initial_solids = dict(run_bundle.run.model.initial_solid_concentration_mol_per_m3)
-    missing_initial_solids = [
-        species_id for species_id in run_bundle.chemistry.solid_species if species_id not in initial_solids
-    ]
-    unexpected_initial_solids = [
-        species_id for species_id in initial_solids if species_id not in set(run_bundle.chemistry.solid_species)
-    ]
-    if missing_initial_solids:
-        errors.append(
-            "model.initial_solid_concentration_mol_per_m3 is missing entries for: "
-            + ", ".join(missing_initial_solids)
-            + "."
-        )
-    if unexpected_initial_solids:
-        errors.append(
-            "model.initial_solid_concentration_mol_per_m3 contains unexpected entries: "
-            + ", ".join(unexpected_initial_solids)
-            + "."
-        )
 
     unknown_reports = [
         report_id

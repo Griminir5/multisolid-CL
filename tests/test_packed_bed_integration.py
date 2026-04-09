@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -34,6 +35,7 @@ class PackedBedIntegrationTests(unittest.TestCase):
             self.assertTrue(result.balances_path.exists())
             self.assertTrue(result.artifact_paths["system_graph_png"].exists())
             self.assertTrue(result.artifact_paths["operating_program_png"].exists())
+            self.assertTrue(result.artifact_paths["initial_solid_profile_png"].exists())
 
             expected_reports = {f"{report_id}.csv" for report_id in bundle.run.outputs.requested_reports}
             actual_reports = {path.name for path in result.report_paths.values()}
@@ -44,8 +46,15 @@ class PackedBedIntegrationTests(unittest.TestCase):
         chemistry = replace(
             bundle.chemistry,
             gas_species=("H2", "H2O"),
-            solid_species=("Ni", "NiO"),
             reaction_ids=("ni_reduction_h2_medrano",),
+        )
+        solids = replace(
+            bundle.solids,
+            solid_species=("Ni", "NiO"),
+            initial_profile_zones=tuple(
+                replace(zone, values_mol_per_m3={"Ni": 0.0, "NiO": 100000.0})
+                for zone in bundle.solids.initial_profile_zones
+            ),
         )
         program = replace(
             bundle.program,
@@ -68,11 +77,6 @@ class PackedBedIntegrationTests(unittest.TestCase):
                 ),
             ),
         )
-        model = replace(
-            bundle.run.model,
-            initial_solid_concentration_mol_per_m3={"Ni": 0.0, "NiO": 100000.0},
-        )
-
         with TemporaryDirectory() as tmp:
             outputs = OutputConfig(
                 directory=Path(tmp) / "output",
@@ -82,8 +86,9 @@ class PackedBedIntegrationTests(unittest.TestCase):
             guarded_bundle = replace(
                 bundle,
                 chemistry=chemistry,
+                solids=solids,
                 program=program,
-                run=replace(bundle.run, model=model, outputs=outputs),
+                run=replace(bundle.run, outputs=outputs),
             )
             validate_run_bundle(guarded_bundle)
             with self.assertRaisesRegex(NotImplementedError, "ni_reduction_h2_medrano"):
@@ -101,6 +106,32 @@ class PackedBedIntegrationTests(unittest.TestCase):
 
         self.assertIs(module.simBed, simBed)
         self.assertIs(module.ScalarProgram, ScalarProgram)
+
+    def test_cli_runs_default_example(self):
+        with TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "output"
+            artifacts_dir = Path(tmp) / "artifacts"
+            command = [
+                "python",
+                "-m",
+                "packed_bed",
+                str(DEFAULT_RUN_YAML),
+                "--output-dir",
+                str(output_dir),
+                "--artifacts-dir",
+                str(artifacts_dir),
+            ]
+            completed = subprocess.run(
+                command,
+                cwd=REPO_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("Simulation finished successfully", completed.stdout)
+            self.assertTrue((output_dir / "run_summary.csv").exists())
+            self.assertTrue((artifacts_dir / "system_graph.png").exists())
+            self.assertTrue((artifacts_dir / "initial_solid_profile.png").exists())
 
 
 if __name__ == "__main__":

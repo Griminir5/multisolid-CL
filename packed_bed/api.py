@@ -9,7 +9,12 @@ from .properties import DEFAULT_PROPERTY_REGISTRY
 from .reactions import DEFAULT_REACTION_CATALOG
 from .solver import assemble_simulation, run_assembled_simulation
 from .validation import validate_run_bundle
-from .visualization import build_system_graph, render_operating_program, render_system_graph
+from .visualization import (
+    build_system_graph,
+    render_initial_solid_profile,
+    render_operating_program,
+    render_system_graph,
+)
 
 
 @dataclass(frozen=True)
@@ -55,6 +60,7 @@ def run_simulation(
     artifact_paths = {}
     artifact_paths.update(render_system_graph(system_graph, artifacts_directory))
     artifact_paths.update(render_operating_program(run_bundle, artifacts_directory))
+    artifact_paths.update(render_initial_solid_profile(run_bundle, artifacts_directory))
 
     assembly = assemble_simulation(
         run_bundle,

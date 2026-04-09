@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
@@ -12,8 +12,24 @@ from .programs import ProgramStep, ScalarProgram, VectorProgram, coerce_composit
 @dataclass(frozen=True)
 class ChemistryConfig:
     gas_species: tuple[str, ...]
-    solid_species: tuple[str, ...]
     reaction_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SolidZoneConfig:
+    x_start_m: float
+    x_end_m: float
+    values_mol_per_m3: Mapping[str, float]
+    e_b: float = 0.5
+    e_p: float = 0.5
+    d_p: float = 0.01
+
+
+@dataclass(frozen=True)
+class SolidConfig:
+    solid_species: tuple[str, ...]
+    concentration_unit: str = "mol_per_m3_solid"
+    initial_profile_zones: tuple[SolidZoneConfig, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -72,7 +88,6 @@ class ModelConfig:
     axial_cells: int = 20
     interparticle_voidage: float = 0.5
     intraparticle_voidage: float = 0.5
-    initial_solid_concentration_mol_per_m3: Mapping[str, float] = field(default_factory=dict)
     gas_constant: float = 8.314462
     pi_value: float = 3.14
 
@@ -92,6 +107,7 @@ class OutputConfig:
 @dataclass(frozen=True)
 class RunConfig:
     chemistry_file: Path
+    solids_file: Path | None
     program_file: Path
     time_horizon_s: float
     reporting_interval_s: float
@@ -108,8 +124,10 @@ class RunConfig:
 class RunBundle:
     run_path: Path
     chemistry_path: Path
+    solids_path: Path | None
     program_path: Path
     chemistry: ChemistryConfig
+    solids: SolidConfig
     program: ProgramConfig
     run: RunConfig
 
@@ -143,6 +161,91 @@ def _coerce_float_mapping(value, label):
     if not isinstance(value, dict):
         raise ValueError(f"{label} must be provided as a mapping.")
     return {str(key): float(raw_value) for key, raw_value in value.items()}
+
+
+def _parse_solid_zones(
+    raw_zones,
+    label,
+    *,
+    default_e_b=0.5,
+    default_e_p=0.5,
+    default_d_p=0.01,
+):
+    if raw_zones is None:
+        return ()
+    if not isinstance(raw_zones, list):
+        raise ValueError(f"{label} zones must be provided as a list.")
+
+    zones = []
+    for index, raw_zone in enumerate(raw_zones):
+        if not isinstance(raw_zone, dict):
+            raise ValueError(f"{label} zone {index} must be a mapping.")
+        raw_values = raw_zone.get("values")
+        if not isinstance(raw_values, dict):
+            raise ValueError(f"{label} zone {index} values must be a species-keyed mapping.")
+        zones.append(
+            SolidZoneConfig(
+                x_start_m=float(raw_zone.get("x_start_m")),
+                x_end_m=float(raw_zone.get("x_end_m")),
+                values_mol_per_m3={str(key): float(value) for key, value in raw_values.items()},
+                e_b=float(raw_zone.get("e_b", default_e_b)),
+                e_p=float(raw_zone.get("e_p", default_e_p)),
+                d_p=float(raw_zone.get("d_p", default_d_p)),
+            )
+        )
+    return tuple(zones)
+
+
+def _parse_solid_config(
+    raw_solids,
+    label,
+    *,
+    default_e_b=0.5,
+    default_e_p=0.5,
+    default_d_p=0.01,
+):
+    if not isinstance(raw_solids, dict):
+        raise ValueError(f"{label} must be a mapping.")
+
+    initial_profile = raw_solids.get("initial_profile") or raw_solids.get("initial_concentration")
+    if not isinstance(initial_profile, dict):
+        raise ValueError(f"{label}.initial_profile must be a mapping.")
+
+    return SolidConfig(
+        solid_species=_coerce_string_tuple(raw_solids.get("solid_species"), f"{label}.solid_species"),
+        concentration_unit=str(initial_profile.get("units", "mol_per_m3_solid")),
+        initial_profile_zones=_parse_solid_zones(
+            initial_profile.get("zones"),
+            f"{label}.initial_profile",
+            default_e_b=default_e_b,
+            default_e_p=default_e_p,
+            default_d_p=default_d_p,
+        ),
+    )
+
+
+def _build_legacy_solid_config(chemistry_data, model_data):
+    solid_species = _coerce_string_tuple(chemistry_data.get("solid_species"), "chemistry.solid_species")
+    initial_solids = _coerce_float_mapping(
+        model_data.get("initial_solid_concentration_mol_per_m3"),
+        "model.initial_solid_concentration_mol_per_m3",
+    )
+    if not solid_species:
+        return SolidConfig(solid_species=(), concentration_unit="mol_per_m3_bed", initial_profile_zones=())
+    return SolidConfig(
+        solid_species=solid_species,
+        concentration_unit="mol_per_m3_bed",
+        initial_profile_zones=(
+            SolidZoneConfig(
+                x_start_m=0.0,
+                x_end_m=float(model_data.get("bed_length_m", 2.5)),
+                values_mol_per_m3=initial_solids,
+                e_b=float(model_data.get("interparticle_voidage", 0.5)),
+                e_p=float(model_data.get("intraparticle_voidage", 0.5)),
+                d_p=float(model_data.get("particle_diameter_m", 0.01)),
+            ),
+        ),
+    )
 
 
 def _parse_steps(raw_steps, label, composition=False):
@@ -206,22 +309,18 @@ def load_run_bundle(run_yaml_path) -> RunBundle:
 
     chemistry_path = _resolve_path(base_dir, references.get("chemistry_file", "chemistry.yaml"))
     program_path = _resolve_path(base_dir, references.get("program_file", "program.yaml"))
+    solids_reference = references.get("solids_file")
+    solids_path = None
+    if solids_reference is not None:
+        solids_path = _resolve_path(base_dir, solids_reference)
+    else:
+        candidate_solids_path = _resolve_path(base_dir, "solids.yaml")
+        if candidate_solids_path.exists():
+            solids_path = candidate_solids_path
 
     chemistry_data = _read_yaml(chemistry_path)
     program_data = _read_yaml(program_path)
-
-    chemistry = ChemistryConfig(
-        gas_species=_coerce_string_tuple(chemistry_data.get("gas_species"), "chemistry.gas_species"),
-        solid_species=_coerce_string_tuple(chemistry_data.get("solid_species"), "chemistry.solid_species"),
-        reaction_ids=_coerce_string_tuple(chemistry_data.get("reaction_ids"), "chemistry.reaction_ids"),
-    )
-
-    program = ProgramConfig(
-        inlet_flow=_parse_scalar_channel(program_data.get("inlet_flow"), "program.inlet_flow"),
-        inlet_temperature=_parse_scalar_channel(program_data.get("inlet_temperature"), "program.inlet_temperature"),
-        outlet_pressure=_parse_scalar_channel(program_data.get("outlet_pressure"), "program.outlet_pressure"),
-        inlet_composition=_parse_composition_channel(program_data.get("inlet_composition"), "program.inlet_composition"),
-    )
+    solids_data = None if solids_path is None else _read_yaml(solids_path)
 
     simulation_data = run_data.get("simulation") or {}
     model_data = run_data.get("model") or {}
@@ -237,6 +336,29 @@ def load_run_bundle(run_yaml_path) -> RunBundle:
     if not isinstance(solver_data, dict):
         raise ValueError("run.yaml 'solver' section must be a mapping.")
 
+    chemistry = ChemistryConfig(
+        gas_species=_coerce_string_tuple(chemistry_data.get("gas_species"), "chemistry.gas_species"),
+        reaction_ids=_coerce_string_tuple(chemistry_data.get("reaction_ids"), "chemistry.reaction_ids"),
+    )
+    solids = (
+        _build_legacy_solid_config(chemistry_data, model_data)
+        if solids_data is None
+        else _parse_solid_config(
+            solids_data,
+            "solids",
+            default_e_b=float(model_data.get("interparticle_voidage", 0.5)),
+            default_e_p=float(model_data.get("intraparticle_voidage", 0.5)),
+            default_d_p=float(model_data.get("particle_diameter_m", 0.01)),
+        )
+    )
+
+    program = ProgramConfig(
+        inlet_flow=_parse_scalar_channel(program_data.get("inlet_flow"), "program.inlet_flow"),
+        inlet_temperature=_parse_scalar_channel(program_data.get("inlet_temperature"), "program.inlet_temperature"),
+        outlet_pressure=_parse_scalar_channel(program_data.get("outlet_pressure"), "program.outlet_pressure"),
+        inlet_composition=_parse_composition_channel(program_data.get("inlet_composition"), "program.inlet_composition"),
+    )
+
     outputs_directory = _resolve_path(base_dir, outputs_data.get("directory", "output"))
     artifacts_directory = _resolve_path(
         base_dir,
@@ -245,6 +367,7 @@ def load_run_bundle(run_yaml_path) -> RunBundle:
 
     run = RunConfig(
         chemistry_file=chemistry_path,
+        solids_file=solids_path,
         program_file=program_path,
         time_horizon_s=float(simulation_data.get("time_horizon_s", 30000.0)),
         reporting_interval_s=float(simulation_data.get("reporting_interval_s", 10.0)),
@@ -259,10 +382,6 @@ def load_run_bundle(run_yaml_path) -> RunBundle:
             axial_cells=int(model_data.get("axial_cells", 20)),
             interparticle_voidage=float(model_data.get("interparticle_voidage", 0.5)),
             intraparticle_voidage=float(model_data.get("intraparticle_voidage", 0.5)),
-            initial_solid_concentration_mol_per_m3=_coerce_float_mapping(
-                model_data.get("initial_solid_concentration_mol_per_m3"),
-                "model.initial_solid_concentration_mol_per_m3",
-            ),
             gas_constant=float(model_data.get("gas_constant", 8.314462)),
             pi_value=float(model_data.get("pi_value", 3.14)),
         ),
@@ -279,8 +398,10 @@ def load_run_bundle(run_yaml_path) -> RunBundle:
     return RunBundle(
         run_path=run_path,
         chemistry_path=chemistry_path,
+        solids_path=solids_path,
         program_path=program_path,
         chemistry=chemistry,
+        solids=solids,
         program=program,
         run=run,
     )

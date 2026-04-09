@@ -14,9 +14,17 @@ import numpy as np
 from daetools.pyDAE import *
 
 from .axial_schemes import reconstruct_face_states, validate_scheme_name
-from .config import ModelConfig, RunBundle
+from .config import ModelConfig, RunBundle, SolidConfig, SolidZoneConfig
 from .properties import DEFAULT_PROPERTY_REGISTRY
 from .reactions import DEFAULT_REACTION_CATALOG
+from .solid_profiles import (
+    build_cell_scalar_profile,
+    build_face_scalar_profile,
+    build_solid_profile_matrix as _shared_build_solid_profile_matrix,
+    convert_solid_profile_to_bed_volume as _shared_convert_solid_profile_to_bed_volume,
+    gas_fraction_from_voidages,
+    solid_fraction_from_voidages,
+)
 from pyUnits import kg, J, K, Pa, m, mol, s  # this will not show up because pylance cannot get to .pyd files
 
 
@@ -63,11 +71,42 @@ velocity_type =         daeVariableType(name="velocity_type", units=m / s,
 fraction_type =         daeVariableType(name="fraction_type", units=dimless,
                                         lowerBound=-0.1, upperBound=1.1, initialGuess=0, absTolerance=1e-5,)
 
-def _default_model_config(solid_species):
+
+def _default_model_config():
+    return ModelConfig()
+
+
+def _default_solid_config(solid_species, bed_length_m):
     initial_solids = {species_id: 0.0 for species_id in solid_species}
     if solid_species:
         initial_solids[solid_species[0]] = 100000.0
-    return ModelConfig(initial_solid_concentration_mol_per_m3=initial_solids)
+    return SolidConfig(
+        solid_species=tuple(solid_species),
+        concentration_unit="mol_per_m3_bed",
+        initial_profile_zones=(
+            SolidZoneConfig(
+                x_start_m=0.0,
+                x_end_m=float(bed_length_m),
+                values_mol_per_m3=initial_solids,
+                e_b=0.5,
+                e_p=0.5,
+                d_p=0.01,
+            ),
+        ),
+    )
+
+
+def _build_solid_profile_matrix(solids_config: SolidConfig, cell_centers_m, solid_species):
+    return _shared_build_solid_profile_matrix(solids_config, cell_centers_m, solid_species)
+
+
+def _convert_solid_profile_to_bed_volume(solids_config: SolidConfig, cell_centers_m, solid_fraction, solid_species):
+    return _shared_convert_solid_profile_to_bed_volume(
+        solids_config,
+        cell_centers_m,
+        solid_fraction,
+        solid_species,
+    )
 
 
 @dataclass(frozen=True)
@@ -272,8 +311,6 @@ class CLBed_mass(daeModel):
         self.L_bed = daeParameter("Bed_length", m, self, "Length of the reactor bed")
         self.R_bed = daeParameter("Bed_radius", m, self, "Radius of the reactor bed")
 
-        self.d_p = daeParameter("Particle_length", m, self, "Characteristic length of the solid particles")
-
         self.x_centers = daeDomain("Cell_centers", self, m, "Axial cell centers domain over the packed bed")
         self.x_faces = daeDomain("Cell_faces", self, m, "Axial cell faces domain over the packed bed")
         self.N_gas = daeDomain("Gas_comps", self, dimless, "Number of gaseous components")
@@ -281,6 +318,7 @@ class CLBed_mass(daeModel):
         self.N_gas.CreateArray(len(self.gas_species))
         self.N_sol.CreateArray(len(self.solid_species))
 
+        self.d_p = daeParameter("Particle_length", m, self, "Characteristic length of the solid particles", [self.x_faces])
         self.e_b = daeParameter("Interparticle_voidage", dimless, self, "Interparticle (between particles) voidage", [self.x_centers])
         self.e_p = daeParameter("Intraparticle_voidage", dimless, self, "Intraparticle (within particles) voidage", [self.x_centers])
 
@@ -586,7 +624,7 @@ class CLBed_mass(daeModel):
 
         eq = self.CreateEquation("axial_dispersion_face")
         idx_face = eq.DistributeOnDomain(self.x_faces, eClosedClosed, "x_f")
-        eq.Residual = self.Dax(idx_face) - Abs(self.u_s(idx_face)) * 0.5 * self.d_p()
+        eq.Residual = self.Dax(idx_face) - Abs(self.u_s(idx_face)) * 0.5 * self.d_p(idx_face)
 
         zero_velocity = Constant(0 * m / s)
         zero_molar_flux = Constant(0 * mol / (s * m**2))
@@ -664,8 +702,8 @@ class CLBed_mass(daeModel):
         dx = center_coords[0] - face_coords[0]
         e_b_face = self.e_b(0)
         ergun_drag = (
-            150 * self.mu_g(0) * (1 - e_b_face) ** 2 / (e_b_face ** 3 * self.d_p() ** 2) * self.u_s(0)
-            + 1.75 * self.rho_g(0) * (1 - e_b_face) / (e_b_face ** 3 * self.d_p()) * Abs(self.u_s(0)) * self.u_s(0)
+            150 * self.mu_g(0) * (1 - e_b_face) ** 2 / (e_b_face ** 3 * self.d_p(0) ** 2) * self.u_s(0)
+            + 1.75 * self.rho_g(0) * (1 - e_b_face) / (e_b_face ** 3 * self.d_p(0)) * Abs(self.u_s(0)) * self.u_s(0)
         )
         eq = self.CreateEquation("ergun_face_0")
         eq.Residual = (self.P_in() - self.P(0)) / dx - ergun_drag
@@ -678,8 +716,8 @@ class CLBed_mass(daeModel):
             rho_face = 0.5 * (self.rho_g(idx_cell_L) + self.rho_g(idx_cell_R))
             e_b_face = 0.5 * (self.e_b(idx_cell_L) + self.e_b(idx_cell_R))
             ergun_drag = (
-                150 * mu_face * (1 - e_b_face) ** 2 / (e_b_face ** 3 * self.d_p() ** 2) * self.u_s(face_index)
-                + 1.75 * rho_face * (1 - e_b_face) / (e_b_face ** 3 * self.d_p()) * Abs(self.u_s(face_index)) * self.u_s(face_index)
+                150 * mu_face * (1 - e_b_face) ** 2 / (e_b_face ** 3 * self.d_p(face_index) ** 2) * self.u_s(face_index)
+                + 1.75 * rho_face * (1 - e_b_face) / (e_b_face ** 3 * self.d_p(face_index)) * Abs(self.u_s(face_index)) * self.u_s(face_index)
             )
 
             eq = self.CreateEquation(f"ergun_face_{face_index}")
@@ -688,8 +726,8 @@ class CLBed_mass(daeModel):
         dx = face_coords[Nf - 1] - center_coords[Nc - 1]
         e_b_face = self.e_b(Nc - 1)
         ergun_drag = (
-            150 * self.mu_g(Nc - 1) * (1 - e_b_face) ** 2 / (e_b_face ** 3 * self.d_p() ** 2) * self.u_s(Nf - 1)
-            + 1.75 * self.rho_g(Nc - 1) * (1 - e_b_face) / (e_b_face ** 3 * self.d_p()) * Abs(self.u_s(Nf - 1)) * self.u_s(Nf - 1)
+            150 * self.mu_g(Nc - 1) * (1 - e_b_face) ** 2 / (e_b_face ** 3 * self.d_p(Nf - 1) ** 2) * self.u_s(Nf - 1)
+            + 1.75 * self.rho_g(Nc - 1) * (1 - e_b_face) / (e_b_face ** 3 * self.d_p(Nf - 1)) * Abs(self.u_s(Nf - 1)) * self.u_s(Nf - 1)
         )
         eq = self.CreateEquation(f"ergun_face_{Nf - 1}")
         eq.Residual = (self.P(Nc - 1) - self.P_out()) / dx - ergun_drag
@@ -774,6 +812,7 @@ class simBed(daeSimulation):
         self,
         gas_species=None,
         solid_species=None,
+        solid_config: SolidConfig | None = None,
         property_registry=DEFAULT_PROPERTY_REGISTRY,
         mass_scheme="weno3",
         heat_scheme="weno3",
@@ -790,7 +829,12 @@ class simBed(daeSimulation):
         self.property_registry = property_registry
         self.gas_species = list(self.property_registry.species_ids("gas") if gas_species is None else gas_species)
         self.solid_species = list(self.property_registry.species_ids("solid") if solid_species is None else solid_species)
-        self.model_config = model_config if model_config is not None else _default_model_config(self.solid_species)
+        self.model_config = model_config if model_config is not None else _default_model_config()
+        self.solid_config = (
+            solid_config
+            if solid_config is not None
+            else _default_solid_config(self.solid_species, self.model_config.bed_length_m)
+        )
         self.mass_scheme = validate_scheme_name(mass_scheme)
         self.heat_scheme = validate_scheme_name("central" if heat_scheme is None else heat_scheme)
         self.inlet_flow_program = inlet_flow_program
@@ -821,7 +865,6 @@ class simBed(daeSimulation):
         self.model.pi.SetValue(self.model_config.pi_value)
         self.model.L_bed.SetValue(self.model_config.bed_length_m * m)
         self.model.R_bed.SetValue(self.model_config.bed_radius_m * m)
-        self.model.d_p.SetValue(self.model_config.particle_diameter_m * m)
         inlet_temperature = 500.0 if self.inlet_temperature_program is None else self.inlet_temperature_program.initial_value
         outlet_pressure = 1.01325e5 if self.outlet_pressure_program is None else self.outlet_pressure_program.initial_value
         inlet_flow = 0.785 if self.inlet_flow_program is None else self.inlet_flow_program.initial_value
@@ -842,19 +885,17 @@ class simBed(daeSimulation):
         self.model.SetUniformAxialGrid(self.model_config.axial_cells)
         self.model.y_in_const.SetValues(inlet_y)
 
-        self.model.e_b.SetValues(self.model_config.interparticle_voidage + np.zeros(self.model.x_centers.NumberOfPoints, dtype=float))
-        self.model.e_p.SetValues(self.model_config.intraparticle_voidage + np.zeros(self.model.x_centers.NumberOfPoints, dtype=float))
+        center_coords = np.asarray(self.model.xval_cells.npyValues, dtype=float)
+        face_coords = np.asarray(self.model.xval_faces.npyValues, dtype=float)
+        self.model.e_b.SetValues(build_cell_scalar_profile(self.solid_config, center_coords, "e_b"))
+        self.model.e_p.SetValues(build_cell_scalar_profile(self.solid_config, center_coords, "e_p"))
+        self.model.d_p.SetValues(build_face_scalar_profile(self.solid_config, face_coords, "d_p"))
 
     def SetUpVariables(self):
         ng = self.model.N_gas.NumberOfPoints
         ns = self.model.N_sol.NumberOfPoints
         nc = self.model.x_centers.NumberOfPoints
         nf = self.model.x_faces.NumberOfPoints
-        c0_sol = np.zeros((ns, nc), dtype=float)
-        initial_solids = dict(self.model_config.initial_solid_concentration_mol_per_m3)
-        for sol_idx, species_id in enumerate(self.solid_species):
-            c0_sol[sol_idx, :] = float(initial_solids.get(species_id, 0.0))
-        ct0_sol = c0_sol.sum(axis=0)
 
         inlet_y = np.asarray(self.model.y_in_const.npyValues, dtype=float)
         area = self.model.pi.GetValue() * self.model.R_bed.GetValue() ** 2
@@ -866,13 +907,21 @@ class simBed(daeSimulation):
         r_gas = self.model.R_gas.GetValue()
         outlet_pressure = self.model.P_out_const.GetValue()
         inlet_temperature = self.model.T_in_const.GetValue()
-        particle_diameter = self.model.d_p.GetValue()
 
         center_coords = np.asarray(self.model.xval_cells.npyValues, dtype=float)
         face_coords = np.asarray(self.model.xval_faces.npyValues, dtype=float)
         e_b0 = np.asarray(self.model.e_b.npyValues, dtype=float)
         e_p0 = np.asarray(self.model.e_p.npyValues, dtype=float)
-        gasfrac0 = e_b0 + (1.0 - e_b0) * e_p0
+        d_p0 = np.asarray(self.model.d_p.npyValues, dtype=float)
+        gasfrac0 = gas_fraction_from_voidages(e_b0, e_p0)
+        solfrac0 = solid_fraction_from_voidages(e_b0, e_p0)
+        c0_sol = _convert_solid_profile_to_bed_volume(
+            self.solid_config,
+            center_coords,
+            solfrac0,
+            self.solid_species,
+        )
+        ct0_sol = c0_sol.sum(axis=0)
 
         gas_mw = np.asarray(
             [self.model.property_registry.get_record(gas_name).mw for gas_name in self.gas_species],
@@ -895,9 +944,9 @@ class simBed(daeSimulation):
         mu_mix_scalar = float(inlet_y @ gas_mu)
         molar_flux_in = fin / area
 
-        def ergun_terms(e_b_value, rho_weight):
-            alpha = 150.0 * mu_mix_scalar * (1.0 - e_b_value) ** 2 / (e_b_value ** 3 * particle_diameter ** 2)
-            beta = 1.75 * (1.0 - e_b_value) / (e_b_value ** 3 * particle_diameter)
+        def ergun_terms(e_b_value, d_p_value, rho_weight):
+            alpha = 150.0 * mu_mix_scalar * (1.0 - e_b_value) ** 2 / (e_b_value ** 3 * d_p_value ** 2)
+            beta = 1.75 * (1.0 - e_b_value) / (e_b_value ** 3 * d_p_value)
             a_term = alpha * molar_flux_in * r_gas * inlet_temperature
             b_term = rho_weight * beta * mw_mix_scalar * molar_flux_in ** 2 * r_gas * inlet_temperature
             return a_term, b_term
@@ -908,7 +957,7 @@ class simBed(daeSimulation):
         def pressure_profile_from_inlet(pin):
             pressures = np.zeros(nc, dtype=float)
 
-            a_term, b_term = ergun_terms(e_b0[0], 1.0)
+            a_term, b_term = ergun_terms(e_b0[0], d_p0[0], 1.0)
             pressures[0] = (pin - dx_in * a_term / pin) / (1.0 + dx_in * b_term / pin ** 2)
             if pressures[0] <= 0.0:
                 raise ValueError("Computed a non-positive first-cell pressure during steady-state initialization.")
@@ -918,7 +967,7 @@ class simBed(daeSimulation):
                 idx_right = face_idx
                 dx_face = center_coords[idx_right] - center_coords[idx_left]
                 e_b_face = 0.5 * (e_b0[idx_left] + e_b0[idx_right])
-                a_term, b_term = ergun_terms(e_b_face, 0.5)
+                a_term, b_term = ergun_terms(e_b_face, d_p0[face_idx], 0.5)
                 p_left = pressures[idx_left]
                 pressures[idx_right] = (p_left - dx_face * (a_term + b_term) / p_left) / (1.0 + dx_face * b_term / p_left ** 2)
                 if pressures[idx_right] <= 0.0:
@@ -928,7 +977,7 @@ class simBed(daeSimulation):
 
         def outlet_pressure_residual(pin):
             pressures = pressure_profile_from_inlet(pin)
-            a_term, b_term = ergun_terms(e_b0[-1], 1.0)
+            a_term, b_term = ergun_terms(e_b0[-1], d_p0[-1], 1.0)
             predicted_outlet = pressures[-1] - dx_out * (a_term + b_term) / pressures[-1]
             return predicted_outlet - outlet_pressure
 
@@ -963,7 +1012,7 @@ class simBed(daeSimulation):
         face_velocity0[0] = molar_flux_in * r_gas * inlet_temperature / p_in0
         for face_idx in range(1, nf):
             face_velocity0[face_idx] = molar_flux_in * r_gas * inlet_temperature / p0[face_idx - 1]
-        dax0 = 0.5 * np.abs(face_velocity0) * particle_diameter
+        dax0 = 0.5 * np.abs(face_velocity0) * d_p0
         face_flux = inlet_y * molar_flux_in
 
         for cell_idx in range(nc):
@@ -1061,7 +1110,8 @@ def assemble_simulation(
 
     simulation = simBed(
         gas_species=run_bundle.chemistry.gas_species,
-        solid_species=run_bundle.chemistry.solid_species,
+        solid_species=run_bundle.solids.solid_species,
+        solid_config=run_bundle.solids,
         property_registry=property_registry,
         mass_scheme=run_bundle.run.mass_scheme,
         heat_scheme=run_bundle.run.heat_scheme,

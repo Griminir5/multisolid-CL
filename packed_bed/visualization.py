@@ -14,6 +14,15 @@ from .config import RunBundle
 from .programs import default_inlet_composition
 from .properties import DEFAULT_PROPERTY_REGISTRY
 from .reactions import DEFAULT_REACTION_CATALOG
+from .solid_profiles import (
+    build_cell_scalar_profile,
+    build_face_scalar_profile,
+    build_uniform_axial_grid,
+    convert_solid_profile_to_bed_volume,
+    gas_fraction_from_voidages,
+    solid_fraction_from_voidages,
+    zone_edges,
+)
 
 
 @dataclass(frozen=True)
@@ -60,7 +69,7 @@ def build_system_graph(
             )
         )
 
-    for species_id in run_bundle.chemistry.solid_species:
+    for species_id in run_bundle.solids.solid_species:
         record = property_registry.get_record(species_id)
         nodes.append(
             GraphNode(
@@ -269,4 +278,86 @@ def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Pat
     return {
         "operating_program_png": png_path,
         "operating_program_svg": svg_path,
+    }
+
+
+def render_initial_solid_profile(run_bundle: RunBundle, output_dir) -> dict[str, Path]:
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    zones = run_bundle.solids.initial_profile_zones
+    cell_centers, face_positions = build_uniform_axial_grid(
+        run_bundle.run.model.bed_length_m,
+        run_bundle.run.model.axial_cells,
+    )
+    authored_edges = zone_edges(run_bundle.solids)
+    e_b = build_cell_scalar_profile(run_bundle.solids, cell_centers, "e_b")
+    e_p = build_cell_scalar_profile(run_bundle.solids, cell_centers, "e_p")
+    gas_fraction = gas_fraction_from_voidages(e_b, e_p)
+    solid_fraction = solid_fraction_from_voidages(e_b, e_p)
+    bed_basis_concentration = convert_solid_profile_to_bed_volume(
+        run_bundle.solids,
+        cell_centers,
+        solid_fraction,
+        run_bundle.solids.solid_species,
+    )
+    d_p = build_face_scalar_profile(run_bundle.solids, face_positions, "d_p")
+
+    unit_label = {
+        "mol_per_m3_solid": "mol/m^3 solid",
+        "mol_per_m3_bed": "mol/m^3 bed",
+    }.get(run_bundle.solids.concentration_unit, run_bundle.solids.concentration_unit)
+
+    figure, axes = plt.subplots(4, 1, figsize=(11, 15), sharex=False)
+
+    for species_id in run_bundle.solids.solid_species:
+        zone_values = [float(zone.values_mol_per_m3[species_id]) for zone in zones]
+        axes[0].stairs(zone_values, authored_edges, label=species_id, linewidth=2)
+    axes[0].set_title("Initial Solid Concentration Input")
+    axes[0].set_ylabel(unit_label)
+
+    for species_index, species_id in enumerate(run_bundle.solids.solid_species):
+        axes[1].step(
+            cell_centers,
+            bed_basis_concentration[species_index],
+            where="mid",
+            label=species_id,
+            linewidth=2,
+        )
+    axes[1].set_title("Initial Solid Concentration on Bed-Volume Basis")
+    axes[1].set_ylabel("mol/m^3 bed")
+
+    axes[2].step(cell_centers, e_b, where="mid", linewidth=2, label="e_b")
+    axes[2].step(cell_centers, e_p, where="mid", linewidth=2, label="e_p")
+    axes[2].step(cell_centers, gas_fraction, where="mid", linewidth=1.5, linestyle="--", label="gasfrac")
+    axes[2].step(cell_centers, solid_fraction, where="mid", linewidth=1.5, linestyle=":", label="solfrac")
+    axes[2].set_title("Voidages and Volume Fractions")
+    axes[2].set_ylabel("Fraction")
+    axes[2].set_ylim(0.0, 1.05)
+
+    axes[3].plot(face_positions, d_p, marker="o", linewidth=2, color="#7f5539")
+    axes[3].set_title("Particle Characteristic Length on Face Domain")
+    axes[3].set_ylabel("d_p [m]")
+    axes[3].set_xlabel("Axial position [m]")
+
+    for axis in axes:
+        axis.grid(True, alpha=0.3)
+        axis.set_xlim(0.0, run_bundle.run.model.bed_length_m)
+
+    if run_bundle.solids.solid_species:
+        axes[0].legend(loc="upper right", fontsize=8)
+        axes[1].legend(loc="upper right", fontsize=8)
+    axes[2].legend(loc="upper right", fontsize=8)
+
+    figure.tight_layout()
+
+    png_path = output_dir / "initial_solid_profile.png"
+    svg_path = output_dir / "initial_solid_profile.svg"
+    figure.savefig(png_path, dpi=200)
+    figure.savefig(svg_path)
+    plt.close(figure)
+
+    return {
+        "initial_solid_profile_png": png_path,
+        "initial_solid_profile_svg": svg_path,
     }

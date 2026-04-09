@@ -1,11 +1,20 @@
 from .api import RunResult, run_simulation
-from .config import ChemistryConfig, OutputConfig, ProgramConfig, RunBundle, RunConfig, load_run_bundle
+from .config import (
+    ChemistryConfig,
+    OutputConfig,
+    ProgramConfig,
+    RunBundle,
+    RunConfig,
+    SolidConfig,
+    SolidZoneConfig,
+    load_run_bundle,
+)
 from .programs import ProgramSegment, ProgramStep, ScalarProgram, VectorProgram, default_inlet_composition
 from .properties import DEFAULT_PROPERTY_REGISTRY, PropertyRegistry, SpeciesPropertyRecord
 from .reactions import DEFAULT_REACTION_CATALOG, ReactionDefinition
 from .solver import CLBed_mass, assemble_simulation, build_idas_solver, configure_evaluation_mode, guiRun, simBed
 from .validation import validate_run_bundle
-from .visualization import SystemGraph, build_system_graph, render_operating_program
+from .visualization import SystemGraph, build_system_graph, render_initial_solid_profile, render_operating_program
 
 __all__ = [
     "CLBed_mass",
@@ -22,6 +31,8 @@ __all__ = [
     "RunConfig",
     "RunResult",
     "ScalarProgram",
+    "SolidConfig",
+    "SolidZoneConfig",
     "SpeciesPropertyRecord",
     "SystemGraph",
     "VectorProgram",
@@ -32,6 +43,7 @@ __all__ = [
     "default_inlet_composition",
     "guiRun",
     "load_run_bundle",
+    "render_initial_solid_profile",
     "render_operating_program",
     "run_simulation",
     "simBed",

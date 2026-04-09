@@ -1,12 +1,13 @@
 references:
   chemistry_file: chemistry.yaml
+  solids_file: solids.yaml
   program_file: program.yaml
 simulation:
   system_name: MassTrsf
-  time_horizon_s: 12000.0
+  time_horizon_s: 20.0
   reporting_interval_s: 10.0
   mass_scheme: weno3
-  heat_scheme: weno3
+  heat_scheme: central
   report_time_derivatives: false
 model:
   bed_length_m: 2.5
@@ -15,10 +16,6 @@ model:
   axial_cells: 20
   interparticle_voidage: 0.5
   intraparticle_voidage: 0.5
-  initial_solid_concentration_mol_per_m3:
-    Ni: 100000.0
-    NiO: 0.0
-    CaAl2O4: 0.0
   gas_constant: 8.314462
   pi_value: 3.14
 solver:
