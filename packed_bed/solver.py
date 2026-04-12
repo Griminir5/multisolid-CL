@@ -12,23 +12,13 @@ from dataclasses import dataclass
 import numpy as np
 from daetools.pyDAE import *
 
-from .axial_schemes import reconstruct_face_states, validate_scheme_name
-from .config import ModelConfig, RunBundle, SolidConfig, SolidZoneConfig
-from .programs import (
-    ProgramSegment,
-    ProgramStep,
-    ScalarProgram,
-    VectorProgram,
-    coerce_composition_vector,
-    default_inlet_composition,
-)
-from .properties import DEFAULT_PROPERTY_REGISTRY
-from .reactions import DEFAULT_REACTION_CATALOG
+from .axial_schemes import reconstruct_face_states
+from .config import ModelConfig, ProgramSegment, RunBundle, ScalarProgram, SolidConfig, VectorProgram
 from .solid_profiles import (
     build_cell_scalar_profile,
     build_face_scalar_profile,
-    build_solid_profile_matrix as _shared_build_solid_profile_matrix,
-    convert_solid_profile_to_bed_volume as _shared_convert_solid_profile_to_bed_volume,
+    build_solid_profile_matrix,
+    convert_solid_profile_to_bed_volume,
     gas_fraction_from_voidages,
     solid_fraction_from_voidages,
 )
@@ -78,37 +68,12 @@ velocity_type =         daeVariableType(name="velocity_type", units=m / s,
 fraction_type =         daeVariableType(name="fraction_type", units=dimless,
                                         lowerBound=-0.1, upperBound=1.1, initialGuess=0, absTolerance=1e-5,)
 
-
-def _default_model_config():
-    return ModelConfig()
-
-
-def _default_solid_config(solid_species, bed_length_m):
-    initial_solids = {species_id: 0.0 for species_id in solid_species}
-    if solid_species:
-        initial_solids[solid_species[0]] = 100000.0
-    return SolidConfig(
-        solid_species=tuple(solid_species),
-        concentration_unit="mol_per_m3_bed",
-        initial_profile_zones=(
-            SolidZoneConfig(
-                x_start_m=0.0,
-                x_end_m=float(bed_length_m),
-                values_mol_per_m3=initial_solids,
-                e_b=0.5,
-                e_p=0.5,
-                d_p=0.01,
-            ),
-        ),
-    )
-
-
 def _build_solid_profile_matrix(solids_config: SolidConfig, cell_centers_m, solid_species):
-    return _shared_build_solid_profile_matrix(solids_config, cell_centers_m, solid_species)
+    return build_solid_profile_matrix(solids_config, cell_centers_m, solid_species)
 
 
 def _convert_solid_profile_to_bed_volume(solids_config: SolidConfig, cell_centers_m, solid_fraction, solid_species):
-    return _shared_convert_solid_profile_to_bed_volume(
+    return convert_solid_profile_to_bed_volume(
         solids_config,
         cell_centers_m,
         solid_fraction,
@@ -125,19 +90,19 @@ class CLBed_mass(daeModel):
         Name,
         gas_species,
         solid_species,
-        property_registry=DEFAULT_PROPERTY_REGISTRY,
-        mass_scheme="weno3",
-        heat_scheme="weno3",
+        property_registry,
+        mass_scheme,
+        heat_scheme,
+        Description="",
         Parent=None,
-        Description="Gas/solid mass balance-only bed",
     ):
         daeModel.__init__(self, Name, Parent, Description)
 
         self.gas_species = list(gas_species)
         self.solid_species = list(solid_species)
         self.property_registry = property_registry
-        self.mass_scheme = validate_scheme_name(mass_scheme)
-        self.heat_scheme = validate_scheme_name("central" if heat_scheme is None else heat_scheme)
+        self.mass_scheme = mass_scheme
+        self.heat_scheme = heat_scheme
         self.inlet_flow_segments = []
         self.inlet_composition_segments = []
         self.inlet_temperature_segments = []
@@ -181,8 +146,8 @@ class CLBed_mass(daeModel):
 
         self.T = daeVariable("temp_bed", temp_type, self, "Temperature inside a cell", [self.x_centers])
         self.h_cell = daeVariable("h_cell", volum_enthaply_type, self, "Enthalpy per total bed volume", [self.x_centers])
-        self.h_gas = daeVariable("h_gas", molar_enthalpy_type, self, "Moalr enthalpy of gas i in a cell", [self.N_gas, self.x_centers])
-        self.h_sol = daeVariable("h_sol", molar_enthalpy_type, self, "Moalr enthalpy of solid i in a cell", [self.N_sol, self.x_centers])
+        self.h_gas = daeVariable("h_gas", molar_enthalpy_type, self, "Molar enthalpy of gas i in a cell", [self.N_gas, self.x_centers])
+        self.h_sol = daeVariable("h_sol", molar_enthalpy_type, self, "Molar enthalpy of solid i in a cell", [self.N_sol, self.x_centers])
         self.J_gas_face = daeVariable("J_gas_face", heat_flux_type, self, "Enthalpy flow at cell faces attributable to component i", [self.N_gas, self.x_faces])
         
         self.material_in_total = daeVariable("material_in_total", molar_inventory_type, self, "Cumulative gas-phase material that has entered the bed")
@@ -199,10 +164,10 @@ class CLBed_mass(daeModel):
         self.mu_g = daeVariable("mu_g", viscosity_type, self, "Mole-averaged gas viscosity in a cell", [self.x_centers])
         self.rho_g = daeVariable("rho_g", density_type, self, "Gas density in a cell", [self.x_centers])
         
-        self.F_in_const = daeParameter("F_in_const", molar_flow_type.Units, self, "Fixed total molar flow at the inlet")
-        self.y_in_const = daeParameter("y_in_const", molar_frac_type.Units, self, "Fixed molar fraction of component i at the inlet", [self.N_gas])
-        self.T_in_const = daeParameter("T_in_const", K, self, "Fixed temperature at the inlet")
-        self.P_out_const = daeParameter("P_out_const", Pa, self, "Fixed pressure at the outlet")
+        self.F_in_const = daeParameter("F_in_const", molar_flow_type.Units, self, "Default fixed total molar flow at the inlet")
+        self.y_in_const = daeParameter("y_in_const", molar_frac_type.Units, self, "Default fixed molar fraction of component i at the inlet", [self.N_gas])
+        self.T_in_const = daeParameter("T_in_const", K, self, "Default fixed temperature at the inlet")
+        self.P_out_const = daeParameter("P_out_const", Pa, self, "Default fixed pressure at the outlet")
 
         self.F_in = daeVariable("F_in", molar_flow_type, self, "Total molar flow at the inlet")
         self.y_in = daeVariable("y_in", molar_frac_type, self, "Molar fraction of component i at the inlet", [self.N_gas])
@@ -249,42 +214,28 @@ class CLBed_mass(daeModel):
 
     def SetOperationProgram(
         self,
-        inlet_flow_program=None,
-        inlet_composition_program=None,
-        inlet_temperature_program=None,
-        outlet_pressure_program=None,
-        time_horizon=None,
+        inlet_flow_program,
+        inlet_composition_program,
+        inlet_temperature_program,
+        outlet_pressure_program,
     ):
-        self.inlet_flow_segments = (
-            [] if inlet_flow_program is None else inlet_flow_program.build_segments(time_horizon=time_horizon)
-        )
-        if inlet_composition_program is None:
-            self.inlet_composition_segments = []
-        else:
-            inlet_composition = coerce_composition_vector(
-                inlet_composition_program.initial_value,
-                expected_size=len(self.gas_species),
-                label="Inlet composition program initial value",
-            )
-            vector_segments = inlet_composition_program.build_segments(time_horizon=time_horizon)
-            self.inlet_composition_segments = [
-                [
-                    ProgramSegment(
-                        start_time=segment.start_time,
-                        end_time=segment.end_time,
-                        start_value=float(segment.start_value[gas_idx]),
-                        end_value=float(segment.end_value[gas_idx]),
-                    )
-                    for segment in vector_segments
-                ]
-                for gas_idx in range(inlet_composition.size)
+        self.inlet_flow_segments = inlet_flow_program.build_segments()
+        inlet_composition = np.asarray(inlet_composition_program.initial_value, dtype=float)
+        vector_segments = inlet_composition_program.build_segments()
+        self.inlet_composition_segments = [
+            [
+                ProgramSegment(
+                    start_time=segment.start_time,
+                    end_time=segment.end_time,
+                    start_value=float(segment.start_value[gas_idx]),
+                    end_value=float(segment.end_value[gas_idx]),
+                )
+                for segment in vector_segments
             ]
-        self.inlet_temperature_segments = (
-            [] if inlet_temperature_program is None else inlet_temperature_program.build_segments(time_horizon=time_horizon)
-        )
-        self.outlet_pressure_segments = (
-            [] if outlet_pressure_program is None else outlet_pressure_program.build_segments(time_horizon=time_horizon)
-        )
+            for gas_idx in range(inlet_composition.size)
+        ]
+        self.inlet_temperature_segments = inlet_temperature_program.build_segments()
+        self.outlet_pressure_segments = outlet_pressure_program.build_segments()
 
     def _segment_expression(self, segment, units):
         start_value = Constant(segment.start_value * units)
@@ -648,33 +599,29 @@ class CLBed_mass(daeModel):
 class simBed(daeSimulation):
     def __init__(
         self,
-        gas_species=None,
-        solid_species=None,
-        solid_config: SolidConfig | None = None,
-        property_registry=None,
-        mass_scheme="weno3",
-        heat_scheme="weno3",
-        inlet_flow_program: ScalarProgram | None = None,
-        inlet_composition_program: VectorProgram | None = None,
-        inlet_temperature_program: ScalarProgram | None = None,
-        outlet_pressure_program: ScalarProgram | None = None,
-        operation_time_horizon=30000.0,
-        model_config: ModelConfig | None = None,
-        system_name="Chemical Looping Packed Bed Reactor",
+        gas_species,
+        solid_species,
+        solid_config: SolidConfig,
+        property_registry,
+        mass_scheme,
+        heat_scheme,
+        inlet_flow_program: ScalarProgram,
+        inlet_composition_program: VectorProgram,
+        inlet_temperature_program: ScalarProgram,
+        outlet_pressure_program: ScalarProgram,
+        operation_time_horizon,
+        model_config: ModelConfig,
+        system_name,
     ):
         daeSimulation.__init__(self)
 
         self.property_registry = property_registry
-        self.gas_species = list(self.property_registry.species_ids("gas") if gas_species is None else gas_species)
-        self.solid_species = list(self.property_registry.species_ids("solid") if solid_species is None else solid_species)
-        self.model_config = model_config if model_config is not None else _default_model_config()
-        self.solid_config = (
-            solid_config
-            if solid_config is not None
-            else _default_solid_config(self.solid_species, self.model_config.bed_length_m)
-        )
-        self.mass_scheme = validate_scheme_name(mass_scheme)
-        self.heat_scheme = validate_scheme_name("central" if heat_scheme is None else heat_scheme)
+        self.gas_species = list(gas_species)
+        self.solid_species = list(solid_species)
+        self.model_config = model_config
+        self.solid_config = solid_config
+        self.mass_scheme = mass_scheme
+        self.heat_scheme = heat_scheme
         self.inlet_flow_program = inlet_flow_program
         self.inlet_composition_program = inlet_composition_program
         self.inlet_temperature_program = inlet_temperature_program
@@ -695,7 +642,6 @@ class simBed(daeSimulation):
             inlet_composition_program=self.inlet_composition_program,
             inlet_temperature_program=self.inlet_temperature_program,
             outlet_pressure_program=self.outlet_pressure_program,
-            time_horizon=self.operation_time_horizon,
         )
 
     def SetUpParametersAndDomains(self):
@@ -703,18 +649,10 @@ class simBed(daeSimulation):
         self.model.pi.SetValue(3.14159)
         self.model.L_bed.SetValue(self.model_config.bed_length_m * m)
         self.model.R_bed.SetValue(self.model_config.bed_radius_m * m)
-        inlet_temperature = 500.0 if self.inlet_temperature_program is None else self.inlet_temperature_program.initial_value
-        outlet_pressure = 1.01325e5 if self.outlet_pressure_program is None else self.outlet_pressure_program.initial_value
-        inlet_flow = 0.785 if self.inlet_flow_program is None else self.inlet_flow_program.initial_value
-        inlet_y = (
-            default_inlet_composition(self.gas_species)
-            if self.inlet_composition_program is None
-            else coerce_composition_vector(
-                self.inlet_composition_program.initial_value,
-                expected_size=len(self.gas_species),
-                label="Inlet composition program initial value",
-            )
-        )
+        inlet_temperature = self.inlet_temperature_program.initial_value
+        outlet_pressure = self.outlet_pressure_program.initial_value
+        inlet_flow = self.inlet_flow_program.initial_value
+        inlet_y = np.asarray(self.inlet_composition_program.initial_value, dtype=float)
 
         self.model.T_in_const.SetValue(inlet_temperature * K)
         self.model.P_out_const.SetValue(outlet_pressure * Pa)
@@ -939,8 +877,8 @@ def build_idas_solver(relative_tolerance=1e-6):
 def assemble_simulation(
     run_bundle: RunBundle,
     *,
-    property_registry=DEFAULT_PROPERTY_REGISTRY,
-    reaction_catalog=DEFAULT_REACTION_CATALOG,
+    property_registry,
+    reaction_catalog,
 ) -> SimulationAssembly:
     unimplemented = [
         reaction_id
@@ -952,18 +890,10 @@ def assemble_simulation(
             "Selected reactions do not have kinetics implementations: " + ", ".join(unimplemented)
         )
 
-    inlet_flow_program = None if run_bundle.program.inlet_flow is None else run_bundle.program.inlet_flow.compile_program()
-    inlet_composition_program = (
-        None
-        if run_bundle.program.inlet_composition is None
-        else run_bundle.program.inlet_composition.compile_program(run_bundle.chemistry.gas_species)
-    )
-    inlet_temperature_program = (
-        None if run_bundle.program.inlet_temperature is None else run_bundle.program.inlet_temperature.compile_program()
-    )
-    outlet_pressure_program = (
-        None if run_bundle.program.outlet_pressure is None else run_bundle.program.outlet_pressure.compile_program()
-    )
+    inlet_flow_program = run_bundle.program.inlet_flow.compile_program()
+    inlet_composition_program = run_bundle.program.inlet_composition.compile_program(run_bundle.chemistry.gas_species)
+    inlet_temperature_program = run_bundle.program.inlet_temperature.compile_program()
+    outlet_pressure_program = run_bundle.program.outlet_pressure.compile_program()
 
     simulation = simBed(
         gas_species=run_bundle.chemistry.gas_species,

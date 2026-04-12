@@ -5,9 +5,9 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ReportDefinition:
-    id: str
+    id: str 
     description: str
-    variable_name: str | None = None
+    variable_name: str | None = None # actual name inside the DAETools model definition
 
 
 REPORT_VARIABLE_REGISTRY = {
@@ -60,4 +60,3 @@ REPORT_VARIABLE_REGISTRY = {
         description="Heat balance totals and error over time.",
     ),
 }
-

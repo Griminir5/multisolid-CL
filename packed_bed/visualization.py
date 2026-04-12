@@ -11,9 +11,6 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 from .config import RunBundle
-from .programs import default_inlet_composition
-from .properties import DEFAULT_PROPERTY_REGISTRY
-from .reactions import DEFAULT_REACTION_CATALOG
 from .solid_profiles import (
     build_cell_scalar_profile,
     build_face_scalar_profile,
@@ -51,8 +48,8 @@ class SystemGraph:
 def build_system_graph(
     run_bundle: RunBundle,
     *,
-    property_registry=DEFAULT_PROPERTY_REGISTRY,
-    reaction_catalog=DEFAULT_REACTION_CATALOG,
+    property_registry,
+    reaction_catalog
 ) -> SystemGraph:
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
@@ -189,55 +186,39 @@ def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Pat
     time_horizon = run_bundle.run.time_horizon_s
     gas_species = run_bundle.chemistry.gas_species
 
-    inlet_flow_program = (
-        None if run_bundle.program.inlet_flow is None else run_bundle.program.inlet_flow.compile_program()
-    )
-    inlet_temperature_program = (
-        None
-        if run_bundle.program.inlet_temperature is None
-        else run_bundle.program.inlet_temperature.compile_program()
-    )
-    outlet_pressure_program = (
-        None if run_bundle.program.outlet_pressure is None else run_bundle.program.outlet_pressure.compile_program()
-    )
-    inlet_composition_program = (
-        None
-        if run_bundle.program.inlet_composition is None
-        else run_bundle.program.inlet_composition.compile_program(gas_species)
-    )
+    inlet_flow_program = run_bundle.program.inlet_flow.compile_program()
+    inlet_temperature_program = run_bundle.program.inlet_temperature.compile_program()
+    outlet_pressure_program = run_bundle.program.outlet_pressure.compile_program()
+    inlet_composition_program = run_bundle.program.inlet_composition.compile_program(gas_species)
 
     figure, axes = plt.subplots(4, 1, figsize=(11, 12), sharex=True)
 
     flow_times, flow_values = _series_from_segments(
-        [] if inlet_flow_program is None else inlet_flow_program.build_segments(time_horizon=time_horizon),
-        0.785 if inlet_flow_program is None else inlet_flow_program.initial_value,
+        inlet_flow_program.build_segments(),
+        inlet_flow_program.initial_value,
     )
     axes[0].plot(flow_times, flow_values, color="#1d3557", linewidth=2)
     axes[0].set_ylabel("mol/s")
     axes[0].set_title("Inlet Flow")
 
     temp_times, temp_values = _series_from_segments(
-        [] if inlet_temperature_program is None else inlet_temperature_program.build_segments(time_horizon=time_horizon),
-        500.0 if inlet_temperature_program is None else inlet_temperature_program.initial_value,
+        inlet_temperature_program.build_segments(),
+        inlet_temperature_program.initial_value,
     )
     axes[1].plot(temp_times, temp_values, color="#e76f51", linewidth=2)
     axes[1].set_ylabel("K")
     axes[1].set_title("Inlet Temperature")
 
     pressure_times, pressure_values = _series_from_segments(
-        [] if outlet_pressure_program is None else outlet_pressure_program.build_segments(time_horizon=time_horizon),
-        1.01325e5 if outlet_pressure_program is None else outlet_pressure_program.initial_value,
+        outlet_pressure_program.build_segments(),
+        outlet_pressure_program.initial_value,
     )
     axes[2].plot(pressure_times, pressure_values, color="#264653", linewidth=2)
     axes[2].set_ylabel("Pa")
     axes[2].set_title("Outlet Pressure")
 
-    if inlet_composition_program is None:
-        composition_initial = default_inlet_composition(gas_species)
-        composition_segments = []
-    else:
-        composition_initial = inlet_composition_program.initial_value
-        composition_segments = inlet_composition_program.build_segments(time_horizon=time_horizon)
+    composition_initial = inlet_composition_program.initial_value
+    composition_segments = inlet_composition_program.build_segments()
 
     if composition_segments:
         times = [0.0]

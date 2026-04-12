@@ -328,7 +328,7 @@ class PropertyRegistry:
         return record.viscosity.value(temperature)
 
 
-DEFAULT_PROPERTY_REGISTRY = PropertyRegistry(
+PROPERTY_REGISTRY = PropertyRegistry(
     records={
         "AR": SpeciesPropertyRecord(
             name="Argon",
@@ -473,3 +473,5 @@ DEFAULT_PROPERTY_REGISTRY = PropertyRegistry(
         ),
     }
 )
+
+DEFAULT_PROPERTY_REGISTRY = PROPERTY_REGISTRY

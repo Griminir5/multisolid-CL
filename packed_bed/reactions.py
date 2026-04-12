@@ -16,7 +16,7 @@ class ReactionDefinition:
     notes: str = ""
 
 
-DEFAULT_REACTION_CATALOG = {
+REACTION_CATALOG = {
     "ni_reduction_h2_medrano": ReactionDefinition(
         id="ni_reduction_h2_medrano",
         name="NiO reduction by H2",
@@ -62,3 +62,5 @@ DEFAULT_REACTION_CATALOG = {
         notes="Catalogued as metadata only in v1; assembly must reject it until kinetics are implemented.",
     ),
 }
+
+DEFAULT_REACTION_CATALOG = REACTION_CATALOG

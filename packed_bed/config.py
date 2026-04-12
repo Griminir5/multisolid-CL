@@ -1,340 +1,704 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Annotated, Literal
 
 import yaml
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, field_validator, model_validator
+from yaml.resolver import BaseResolver
 
-from .programs import ProgramStep, ScalarProgram, VectorProgram, coerce_composition_mapping
+from .axial_schemes import SUPPORTED_SCHEMES
+from .properties import PROPERTY_REGISTRY
+from .reactions import REACTION_CATALOG
+from .reporting import REPORT_VARIABLE_REGISTRY
+
+
+class PackedBedValidationError(ValueError):
+    pass
+
+
+class FrozenConfigModel(BaseModel):
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        strict=True,
+    )
+
+
+def _require_string(value: str) -> str:
+    if value == "" or value != value.strip():
+        raise ValueError("must not be blank or padded with whitespace.")
+    return value
+
+
+def _require_float(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, float):
+        raise ValueError("must be written as a float value.")
+    if not math.isfinite(value):
+        raise ValueError("must be finite.")
+    return value
+
+
+def _require_positive(value: float) -> float:
+    if value <= 0.0:
+        raise ValueError("must be strictly positive.")
+    return value
+
+
+def _require_nonnegative(value: float) -> float:
+    if value < 0.0:
+        raise ValueError("must be non-negative.")
+    return value
+
+
+def _require_unit_fraction(value: float) -> float:
+    if not (0.0 < value < 1.0):
+        raise ValueError("must lie strictly between 0 and 1.")
+    return value
+
+
+ConfigString = Annotated[str, AfterValidator(_require_string)]
+PositiveFloat = Annotated[float, BeforeValidator(_require_float), AfterValidator(_require_positive)]
+NonNegativeFloat = Annotated[float, BeforeValidator(_require_float), AfterValidator(_require_nonnegative)]
+UnitFraction = Annotated[float, BeforeValidator(_require_float), AfterValidator(_require_unit_fraction)]
+
+
+def _require_nonempty_unique_strings(values: tuple[str, ...]) -> tuple[str, ...]:
+    if not values:
+        raise ValueError("must not be empty.")
+    duplicates = sorted({value for value in values if values.count(value) > 1})
+    if duplicates:
+        raise ValueError(f"contains duplicates: {', '.join(duplicates)}.")
+    return values
+
+
+def _require_unique_strings(values: tuple[str, ...]) -> tuple[str, ...]:
+    duplicates = sorted({value for value in values if values.count(value) > 1})
+    if duplicates:
+        raise ValueError(f"contains duplicates: {', '.join(duplicates)}.")
+    return values
+
+
+def _as_tuple(value: Any) -> tuple[Any, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("must be provided as a YAML sequence.")
+    return tuple(value)
+
+
+def _require_fraction_mapping(mapping: dict[str, float]) -> dict[str, float]:
+    if not mapping:
+        raise ValueError("must not be empty.")
+    total = sum(mapping.values())
+    if not math.isclose(total, 1.0, rel_tol=0.0, abs_tol=1e-12):
+        raise ValueError(f"must sum to 1.0 exactly, got {total:.16g}.")
+    return mapping
+
+
+def _require_exact_keys(actual: set[str], expected: tuple[str, ...], label: str) -> None:
+    expected_keys = set(expected)
+    if actual == expected_keys:
+        return
+    missing = sorted(expected_keys - actual)
+    extra = sorted(actual - expected_keys)
+    parts: list[str] = []
+    if missing:
+        parts.append(f"missing {', '.join(missing)}")
+    if extra:
+        parts.append(f"unexpected {', '.join(extra)}")
+    raise ValueError(f"{label} species mismatch: {'; '.join(parts)}.")
+
+
+def _sum_step_durations(steps: tuple["HoldStep | ScalarRampStep | CompositionRampStep", ...]) -> float:
+    return sum(step.duration_s for step in steps)
+
+
+def _resolve_path(base_dir: Path, raw_path: str) -> Path:
+    path = Path(raw_path)
+    return (base_dir / path).resolve() if not path.is_absolute() else path.resolve()
+
+
+def _format_validation_error(label: str, path: Path, exc: ValidationError) -> PackedBedValidationError:
+    lines = [f"{label} is invalid: {path}"]
+    for error in exc.errors():
+        location = ".".join(str(item) for item in error["loc"]) or "<root>"
+        lines.append(f"- {location}: {error['msg']}")
+    return PackedBedValidationError("\n".join(lines))
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    pass
+
+
+def _construct_unique_mapping(loader: _UniqueKeyLoader, node, deep=False):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            line = key_node.start_mark.line + 1
+            raise PackedBedValidationError(f"Duplicate key {key!r} at line {line}.")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping)
+
+
+def _read_yaml_mapping(path: Path, label: str) -> dict[str, Any]:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            data = yaml.load(handle, Loader=_UniqueKeyLoader)
+    except PackedBedValidationError:
+        raise
+    except FileNotFoundError as exc:
+        raise PackedBedValidationError(f"{label} was not found: {path}") from exc
+    except OSError as exc:
+        raise PackedBedValidationError(f"Could not read {label}: {path}") from exc
+    except yaml.YAMLError as exc:
+        raise PackedBedValidationError(f"{label} contains invalid YAML: {path}") from exc
+
+    if not isinstance(data, dict):
+        raise PackedBedValidationError(f"{label} must contain a top-level mapping: {path}")
+    return data
+
+
+def _validate_model(model_type, data: dict[str, Any], label: str, path: Path):
+    try:
+        return model_type.model_validate(data)
+    except ValidationError as exc:
+        raise _format_validation_error(label, path, exc) from exc
 
 
 @dataclass(frozen=True)
-class ChemistryConfig:
-    gas_species: tuple[str, ...]
-    reaction_ids: tuple[str, ...] = ()
+class ProgramSegment:
+    start_time: float
+    end_time: float
+    start_value: float | tuple[float, ...]
+    end_value: float | tuple[float, ...]
 
 
 @dataclass(frozen=True)
-class SolidZoneConfig:
-    x_start_m: float
-    x_end_m: float
-    values_mol_per_m3: Mapping[str, float]
-    e_b: float = 0.5
-    e_p: float = 0.5
-    d_p: float = 0.01
+class ScalarProgram:
+    initial_value: float
+    segments: tuple[ProgramSegment, ...]
+
+    def build_segments(self) -> tuple[ProgramSegment, ...]:
+        return self.segments
 
 
 @dataclass(frozen=True)
-class SolidConfig:
-    solid_species: tuple[str, ...]
-    concentration_basis: str = "solid"
-    initial_profile_zones: tuple[SolidZoneConfig, ...] = ()
+class VectorProgram:
+    initial_value: tuple[float, ...]
+    segments: tuple[ProgramSegment, ...]
+
+    def build_segments(self) -> tuple[ProgramSegment, ...]:
+        return self.segments
 
 
 @dataclass(frozen=True)
-class ScalarChannelConfig:
-    initial: float
-    steps: tuple[ProgramStep, ...] = ()
+class RunResult:
+    run_bundle: RunBundle
+    output_directory: Path
+    success: bool
+    artifact_paths: dict[str, Path] = field(default_factory=dict)
+    report_paths: dict[str, Path] = field(default_factory=dict)
+    summary_path: Path | None = None
+    balances_path: Path | None = None
+    reporter: Any | None = None
+    simulation: Any | None = None
+
+
+class HoldStep(FrozenConfigModel):
+    kind: Literal["hold"]
+    duration_s: PositiveFloat
+
+
+class ScalarRampStep(FrozenConfigModel):
+    kind: Literal["ramp"]
+    duration_s: PositiveFloat
+    target: PositiveFloat
+
+
+class CompositionRampStep(FrozenConfigModel):
+    kind: Literal["ramp"]
+    duration_s: PositiveFloat
+    target: dict[ConfigString, NonNegativeFloat]
+
+    @field_validator("target")
+    @classmethod
+    def validate_target(cls, value: dict[str, float]) -> dict[str, float]:
+        return _require_fraction_mapping(value)
+
+
+ScalarStep = Annotated[HoldStep | ScalarRampStep, Field(discriminator="kind")]
+CompositionStep = Annotated[HoldStep | CompositionRampStep, Field(discriminator="kind")]
+
+
+class ChemistryConfig(FrozenConfigModel):
+    gas_species: tuple[ConfigString, ...]
+    reaction_ids: tuple[ConfigString, ...]
+
+    @field_validator("gas_species", "reaction_ids", mode="before")
+    @classmethod
+    def coerce_sequences(cls, value: Any) -> tuple[Any, ...]:
+        return _as_tuple(value)
+
+    @field_validator("gas_species")
+    @classmethod
+    def validate_gas_species(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _require_nonempty_unique_strings(value)
+
+    @field_validator("reaction_ids")
+    @classmethod
+    def validate_reaction_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _require_unique_strings(value)
+
+
+class SolidZoneConfig(FrozenConfigModel):
+    x_start_m: NonNegativeFloat
+    x_end_m: PositiveFloat
+    e_b: UnitFraction
+    e_p: UnitFraction
+    d_p: PositiveFloat
+    values: dict[ConfigString, NonNegativeFloat]
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "SolidZoneConfig":
+        if self.x_end_m <= self.x_start_m:
+            raise ValueError("x_end_m must be greater than x_start_m.")
+        if not self.values:
+            raise ValueError("values must not be empty.")
+        return self
+
+    @property
+    def values_mol_per_m3(self) -> dict[str, float]:
+        return self.values
+
+
+class SolidProfileConfig(FrozenConfigModel):
+    basis: Literal["solid", "bed"]
+    zones: tuple[SolidZoneConfig, ...]
+
+    @field_validator("zones", mode="before")
+    @classmethod
+    def coerce_zones(cls, value: Any) -> tuple[Any, ...]:
+        return _as_tuple(value)
+
+    @field_validator("zones")
+    @classmethod
+    def validate_zones(cls, value: tuple[SolidZoneConfig, ...]) -> tuple[SolidZoneConfig, ...]:
+        if not value:
+            raise ValueError("must not be empty.")
+        return value
+
+
+class SolidConfig(FrozenConfigModel):
+    solid_species: tuple[ConfigString, ...]
+    initial_profile: SolidProfileConfig
+
+    @field_validator("solid_species", mode="before")
+    @classmethod
+    def coerce_solid_species(cls, value: Any) -> tuple[Any, ...]:
+        return _as_tuple(value)
+
+    @field_validator("solid_species")
+    @classmethod
+    def validate_solid_species(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _require_nonempty_unique_strings(value)
+
+    @model_validator(mode="after")
+    def validate_zone_species(self) -> "SolidConfig":
+        for zone_index, zone in enumerate(self.initial_profile.zones):
+            _require_exact_keys(
+                set(zone.values),
+                self.solid_species,
+                f"solids.initial_profile.zones[{zone_index}].values",
+            )
+        return self
+
+    @property
+    def concentration_unit(self) -> str:
+        return "mol_per_m3_solid" if self.initial_profile.basis == "solid" else "mol_per_m3_bed"
+
+    @property
+    def initial_profile_zones(self) -> tuple[SolidZoneConfig, ...]:
+        return self.initial_profile.zones
+
+
+class ScalarChannelConfig(FrozenConfigModel):
+    initial: PositiveFloat
+    steps: tuple[ScalarStep, ...]
+
+    @field_validator("steps", mode="before")
+    @classmethod
+    def coerce_steps(cls, value: Any) -> tuple[Any, ...]:
+        return _as_tuple(value)
 
     def compile_program(self) -> ScalarProgram:
-        program = ScalarProgram(self.initial)
+        current_time = 0.0
+        current_value = self.initial
+        segments: list[ProgramSegment] = []
+
         for step in self.steps:
-            if step.kind == "hold":
-                program.hold(step.duration)
-            else:
-                program.ramp(step.duration, step.target)
-        return program
-
-
-@dataclass(frozen=True)
-class CompositionChannelConfig:
-    initial: Mapping[str, float]
-    steps: tuple[ProgramStep, ...] = ()
-
-    def compile_program(self, species_order) -> VectorProgram:
-        initial_vector = coerce_composition_mapping(
-            self.initial,
-            species_order,
-            label="Inlet composition program initial value",
-        )
-        program = VectorProgram(initial_vector)
-        for step in self.steps:
-            if step.kind == "hold":
-                program.hold(step.duration)
-            else:
-                target_vector = coerce_composition_mapping(
-                    step.target,
-                    species_order,
-                    label="Inlet composition program target",
+            next_time = current_time + step.duration_s
+            next_value = current_value if isinstance(step, HoldStep) else step.target
+            segments.append(
+                ProgramSegment(
+                    start_time=current_time,
+                    end_time=next_time,
+                    start_value=current_value,
+                    end_value=next_value,
                 )
-                program.ramp(step.duration, target_vector)
-        return program
+            )
+            current_time = next_time
+            current_value = next_value
+
+        return ScalarProgram(initial_value=self.initial, segments=tuple(segments))
 
 
-@dataclass(frozen=True)
-class ProgramConfig:
-    inlet_flow: ScalarChannelConfig | None = None
-    inlet_temperature: ScalarChannelConfig | None = None
-    outlet_pressure: ScalarChannelConfig | None = None
-    inlet_composition: CompositionChannelConfig | None = None
+class CompositionChannelConfig(FrozenConfigModel):
+    initial: dict[ConfigString, NonNegativeFloat]
+    steps: tuple[CompositionStep, ...]
+
+    @field_validator("steps", mode="before")
+    @classmethod
+    def coerce_steps(cls, value: Any) -> tuple[Any, ...]:
+        return _as_tuple(value)
+
+    @field_validator("initial")
+    @classmethod
+    def validate_initial(cls, value: dict[str, float]) -> dict[str, float]:
+        return _require_fraction_mapping(value)
+
+    def compile_program(self, species_order: tuple[str, ...]) -> VectorProgram:
+        _require_exact_keys(set(self.initial), species_order, "program.inlet_composition.initial")
+
+        current_time = 0.0
+        current_value = tuple(self.initial[species_id] for species_id in species_order)
+        segments: list[ProgramSegment] = []
+
+        for step_index, step in enumerate(self.steps):
+            next_time = current_time + step.duration_s
+            if isinstance(step, HoldStep):
+                next_value = current_value
+            else:
+                _require_exact_keys(
+                    set(step.target),
+                    species_order,
+                    f"program.inlet_composition.steps[{step_index}].target",
+                )
+                next_value = tuple(step.target[species_id] for species_id in species_order)
+            segments.append(
+                ProgramSegment(
+                    start_time=current_time,
+                    end_time=next_time,
+                    start_value=current_value,
+                    end_value=next_value,
+                )
+            )
+            current_time = next_time
+            current_value = next_value
+
+        return VectorProgram(
+            initial_value=tuple(self.initial[species_id] for species_id in species_order),
+            segments=tuple(segments),
+        )
 
 
-@dataclass(frozen=True)
-class ModelConfig:
-    bed_length_m: float
-    bed_radius_m: float
-    particle_diameter_m: float
-    axial_cells: int
-    interparticle_voidage: float
-    intraparticle_voidage: float
-    gas_constant: float
-    pi_value: float
+class ProgramConfig(FrozenConfigModel):
+    inlet_flow: ScalarChannelConfig
+    inlet_temperature: ScalarChannelConfig
+    outlet_pressure: ScalarChannelConfig
+    inlet_composition: CompositionChannelConfig
 
 
-@dataclass(frozen=True)
-class SolverConfig:
-    relative_tolerance: float = 1e-6
+class ReferencesConfig(FrozenConfigModel):
+    chemistry_file: ConfigString
+    program_file: ConfigString
+    solids_file: ConfigString
 
 
-@dataclass(frozen=True)
-class OutputConfig:
-    directory: Path
-    artifacts_directory: Path
-    requested_reports: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class RunConfig:
-    chemistry_file: Path
-    solids_file: Path | None
-    program_file: Path
-    time_horizon_s: float
-    reporting_interval_s: float
-    mass_scheme: str
-    heat_scheme: str
+class SimulationConfig(FrozenConfigModel):
+    system_name: ConfigString
+    time_horizon_s: PositiveFloat
+    reporting_interval_s: PositiveFloat
+    mass_scheme: ConfigString
+    heat_scheme: ConfigString
     report_time_derivatives: bool
+
+    @field_validator("mass_scheme", "heat_scheme")
+    @classmethod
+    def validate_scheme(cls, value: str) -> str:
+        if value not in SUPPORTED_SCHEMES:
+            raise ValueError(f"must be one of: {', '.join(SUPPORTED_SCHEMES)}.")
+        return value
+
+
+class ModelConfig(FrozenConfigModel):
+    bed_length_m: PositiveFloat
+    bed_radius_m: PositiveFloat
+    axial_cells: int
+
+    @field_validator("axial_cells")
+    @classmethod
+    def validate_axial_cells(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("must be at least 1.")
+        return value
+
+
+class SolverConfig(FrozenConfigModel):
+    relative_tolerance: PositiveFloat
+
+
+class OutputConfig(FrozenConfigModel):
+    directory: ConfigString
+    artifacts_directory: ConfigString
+    requested_reports: tuple[ConfigString, ...]
+
+    @field_validator("requested_reports", mode="before")
+    @classmethod
+    def coerce_requested_reports(cls, value: Any) -> tuple[Any, ...]:
+        return _as_tuple(value)
+
+    @field_validator("requested_reports")
+    @classmethod
+    def validate_requested_reports(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _require_unique_strings(value)
+
+
+class RunConfig(FrozenConfigModel):
+    references: ReferencesConfig
+    simulation: SimulationConfig
     model: ModelConfig
     solver: SolverConfig
     outputs: OutputConfig
-    system_name: str = "Chemical Looping Bed"
+
+    @model_validator(mode="after")
+    def validate_reporting_window(self) -> "RunConfig":
+        if self.simulation.reporting_interval_s > self.simulation.time_horizon_s:
+            raise ValueError("reporting_interval_s must not exceed time_horizon_s.")
+        return self
+
+    @property
+    def system_name(self) -> str:
+        return self.simulation.system_name
+
+    @property
+    def time_horizon_s(self) -> float:
+        return self.simulation.time_horizon_s
+
+    @property
+    def reporting_interval_s(self) -> float:
+        return self.simulation.reporting_interval_s
+
+    @property
+    def mass_scheme(self) -> str:
+        return self.simulation.mass_scheme
+
+    @property
+    def heat_scheme(self) -> str:
+        return self.simulation.heat_scheme
+
+    @property
+    def report_time_derivatives(self) -> bool:
+        return self.simulation.report_time_derivatives
 
 
-@dataclass(frozen=True)
-class RunBundle:
+class RunBundle(FrozenConfigModel):
     run_path: Path
     chemistry_path: Path
-    solids_path: Path | None
+    solids_path: Path
     program_path: Path
     chemistry: ChemistryConfig
     solids: SolidConfig
     program: ProgramConfig
     run: RunConfig
 
+    @property
+    def output_directory(self) -> Path:
+        return _resolve_path(self.run_path.parent, self.run.outputs.directory)
 
-def _read_yaml(path: Path):
-    with path.open("r", encoding="utf-8") as handle:
-        data = yaml.safe_load(handle) or {}
-    if not isinstance(data, dict):
-        raise ValueError(f"YAML file '{path}' must contain a top-level mapping.")
-    return data
+    @property
+    def artifacts_directory(self) -> Path:
+        return _resolve_path(self.run_path.parent, self.run.outputs.artifacts_directory)
 
+    @model_validator(mode="after")
+    def validate_cross_file_rules(self) -> "RunBundle":
+        overlap = sorted(set(self.chemistry.gas_species) & set(self.solids.solid_species))
+        if overlap:
+            raise ValueError(
+                "Gas and solid species identifiers must be disjoint. "
+                f"Found duplicates: {', '.join(overlap)}."
+            )
 
-def _resolve_path(base_dir: Path, value: str | Path) -> Path:
-    path = Path(value)
-    if not path.is_absolute():
-        path = (base_dir / path).resolve()
-    return path
+        zones = self.solids.initial_profile_zones
+        previous_end: float | None = None
+        for zone_index, zone in enumerate(zones):
+            if zone_index == 0 and not math.isclose(zone.x_start_m, 0.0, rel_tol=0.0, abs_tol=1e-12):
+                raise ValueError("solids.initial_profile.zones must start at x = 0.")
+            if previous_end is not None and not math.isclose(zone.x_start_m, previous_end, rel_tol=0.0, abs_tol=1e-12):
+                raise ValueError("solids.initial_profile.zones must be contiguous without gaps or overlaps.")
+            previous_end = zone.x_end_m
 
+        if previous_end is None:
+            raise ValueError("solids.initial_profile.zones must not be empty.")
+        if not math.isclose(previous_end, self.run.model.bed_length_m, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError("solids.initial_profile.zones must end at model.bed_length_m.")
 
-def _coerce_string_tuple(value, label):
-    if value is None:
-        return ()
-    if not isinstance(value, list):
-        raise ValueError(f"{label} must be provided as a list.")
-    return tuple(str(item) for item in value)
-
-
-def _coerce_float_mapping(value, label):
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be provided as a mapping.")
-    return {str(key): float(raw_value) for key, raw_value in value.items()}
-
-
-def _coerce_bool(value, label):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "yes", "on", "1"}:
-            return True
-        if normalized in {"false", "no", "off", "0"}:
-            return False
-    if isinstance(value, (int, float)) and value in {0, 1}:
-        return bool(value)
-    raise ValueError(f"{label} must be a boolean.")
-
-
-
-def _parse_steps(raw_steps, label, composition=False):
-    if raw_steps is None:
-        return ()
-    if not isinstance(raw_steps, list):
-        raise ValueError(f"{label} steps must be provided as a list.")
-
-    steps = []
-    for index, raw_step in enumerate(raw_steps):
-        if not isinstance(raw_step, dict):
-            raise ValueError(f"{label} step {index} must be a mapping.")
-        kind = str(raw_step.get("kind", ""))
-        duration = float(raw_step.get("duration_s"))
-        if kind not in {"hold", "ramp"}:
-            raise ValueError(f"{label} step {index} kind must be 'hold' or 'ramp'.")
-        target = raw_step.get("target")
-        if kind == "ramp" and target is None:
-            raise ValueError(f"{label} step {index} must define a target for a ramp.")
-        if composition and target is not None and not isinstance(target, dict):
-            raise ValueError(f"{label} step {index} target must be a species-keyed mapping.")
-        if not composition and target is not None:
-            target = float(target)
-        steps.append(ProgramStep(duration=duration, kind=kind, target=target))
-    return tuple(steps)
-
-
-def _parse_scalar_channel(raw_channel, label):
-    if raw_channel is None:
-        return None
-    if not isinstance(raw_channel, dict):
-        raise ValueError(f"{label} must be a mapping.")
-    return ScalarChannelConfig(
-        initial=float(raw_channel.get("initial")),
-        steps=_parse_steps(raw_channel.get("steps"), label),
-    )
-
-
-def _parse_composition_channel(raw_channel, label):
-    if raw_channel is None:
-        return None
-    if not isinstance(raw_channel, dict):
-        raise ValueError(f"{label} must be a mapping.")
-    initial = raw_channel.get("initial")
-    if not isinstance(initial, dict):
-        raise ValueError(f"{label} initial value must be a species-keyed mapping.")
-    return CompositionChannelConfig(
-        initial={str(key): float(value) for key, value in initial.items()},
-        steps=_parse_steps(raw_channel.get("steps"), label, composition=True),
-    )
-
-
-def load_run_bundle(run_yaml_path) -> RunBundle:
-    run_path = Path(run_yaml_path).resolve()
-    run_data = _read_yaml(run_path)
-    base_dir = run_path.parent
-
-    references = run_data.get("references") or {}
-    if not isinstance(references, dict):
-        raise ValueError("run.yaml 'references' section must be a mapping.")
-
-    chemistry_path = _resolve_path(base_dir, references.get("chemistry_file"))
-    program_path = _resolve_path(base_dir, references.get("program_file"))
-    solids_reference = references.get("solids_file")
-    solids_path = None
-    if solids_reference is not None:
-        solids_path = _resolve_path(base_dir, solids_reference)
-    else:
-        candidate_solids_path = _resolve_path(base_dir, "solids.yaml")
-        if candidate_solids_path.exists():
-            solids_path = candidate_solids_path
-
-    chemistry_data = _read_yaml(chemistry_path)
-    program_data = _read_yaml(program_path)
-    solids_data = None if solids_path is None else _read_yaml(solids_path)
-
-    simulation_data = run_data.get("simulation")
-    model_data = run_data.get("model")
-    outputs_data = run_data.get("outputs")
-    solver_data = run_data.get("solver")
-
-    if not isinstance(simulation_data, dict):
-        raise ValueError("run.yaml 'simulation' section must be a mapping.")
-    if not isinstance(model_data, dict):
-        raise ValueError("run.yaml 'model' section must be a mapping.")
-    if not isinstance(outputs_data, dict):
-        raise ValueError("run.yaml 'outputs' section must be a mapping.")
-    if not isinstance(solver_data, dict):
-        raise ValueError("run.yaml 'solver' section must be a mapping.")
-
-    chemistry = ChemistryConfig(
-        gas_species=_coerce_string_tuple(chemistry_data.get("gas_species"), "chemistry.gas_species"),
-        reaction_ids=_coerce_string_tuple(chemistry_data.get("reaction_ids"), "chemistry.reaction_ids"),
-    )
-    solids = (
-        _build_legacy_solid_config(chemistry_data, model_data)
-        if solids_data is None
-        else _parse_solid_config(
-            solids_data,
-            "solids",
-            default_e_b=float(model_data.get("interparticle_voidage")),
-            default_e_p=float(model_data.get("intraparticle_voidage")),
-            default_d_p=float(model_data.get("particle_diameter_m")),
+        _require_exact_keys(
+            set(self.program.inlet_composition.initial),
+            self.chemistry.gas_species,
+            "program.inlet_composition.initial",
         )
+        for step_index, step in enumerate(self.program.inlet_composition.steps):
+            if isinstance(step, CompositionRampStep):
+                _require_exact_keys(
+                    set(step.target),
+                    self.chemistry.gas_species,
+                    f"program.inlet_composition.steps[{step_index}].target",
+                )
+
+        horizon = self.run.time_horizon_s
+        channel_steps = (
+            ("program.inlet_flow.steps", self.program.inlet_flow.steps),
+            ("program.inlet_temperature.steps", self.program.inlet_temperature.steps),
+            ("program.outlet_pressure.steps", self.program.outlet_pressure.steps),
+            ("program.inlet_composition.steps", self.program.inlet_composition.steps),
+        )
+        for label, steps in channel_steps:
+            duration = _sum_step_durations(steps)
+            if not math.isclose(duration, horizon, rel_tol=0.0, abs_tol=1e-12):
+                raise ValueError(f"{label} must sum exactly to time_horizon_s ({horizon:.16g}), got {duration:.16g}.")
+
+        return self
+
+
+def validate_run_bundle(
+    run_bundle: RunBundle,
+    property_registry=PROPERTY_REGISTRY,
+    reaction_catalog=REACTION_CATALOG,
+    report_variable_registry=REPORT_VARIABLE_REGISTRY,
+) -> RunBundle:
+    errors: list[str] = []
+    gas_species = set(run_bundle.chemistry.gas_species)
+    solid_species = set(run_bundle.solids.solid_species)
+    selected_species = gas_species | solid_species
+
+    for species_id in run_bundle.chemistry.gas_species:
+        if not property_registry.has_species(species_id):
+            errors.append(f"Unknown gas species '{species_id}'.")
+            continue
+        record = property_registry.get_record(species_id)
+        if record.phase != "gas":
+            errors.append(f"Species '{species_id}' is phase '{record.phase}', not gas.")
+        if record.mw is None:
+            errors.append(f"Gas species '{species_id}' must define molecular weight.")
+        if record.enthalpy is None:
+            errors.append(f"Gas species '{species_id}' must define an enthalpy correlation.")
+        if record.viscosity is None:
+            errors.append(f"Gas species '{species_id}' must define a viscosity correlation.")
+
+    for species_id in run_bundle.solids.solid_species:
+        if not property_registry.has_species(species_id):
+            errors.append(f"Unknown solid species '{species_id}'.")
+            continue
+        record = property_registry.get_record(species_id)
+        if record.phase != "solid":
+            errors.append(f"Species '{species_id}' is phase '{record.phase}', not solid.")
+        if record.mw is None:
+            errors.append(f"Solid species '{species_id}' must define molecular weight.")
+        if record.enthalpy is None:
+            errors.append(f"Solid species '{species_id}' must define an enthalpy correlation.")
+
+    for reaction_id in run_bundle.chemistry.reaction_ids:
+        reaction = reaction_catalog.get(reaction_id)
+        if reaction is None:
+            errors.append(f"Unknown reaction id '{reaction_id}'.")
+            continue
+
+        missing = sorted(
+            species_id
+            for species_id in reaction.required_species
+            if species_id not in selected_species
+        )
+        if missing:
+            errors.append(f"Reaction '{reaction_id}' requires unselected species: {', '.join(missing)}.")
+
+        invalid_refs = sorted(
+            species_id
+            for species_id in reaction.stoichiometry
+            if species_id not in selected_species
+        )
+        for species_id in invalid_refs:
+            errors.append(
+                f"Reaction '{reaction_id}' references species '{species_id}' that is not selected in the current gas/solid configuration."
+            )
+
+    unknown_reports = sorted(
+        report_id
+        for report_id in run_bundle.run.outputs.requested_reports
+        if report_id not in report_variable_registry
+    )
+    if unknown_reports:
+        errors.append(f"outputs.requested_reports contains unknown ids: {', '.join(unknown_reports)}.")
+
+    if errors:
+        raise PackedBedValidationError("\n".join(errors))
+    return run_bundle
+
+
+def load_run_bundle(run_yaml_path: str | Path) -> RunBundle:
+    run_path = Path(run_yaml_path).resolve()
+    run = _validate_model(RunConfig, _read_yaml_mapping(run_path, "run.yaml"), "run.yaml", run_path)
+
+    base_dir = run_path.parent
+    chemistry_path = _resolve_path(base_dir, run.references.chemistry_file)
+    program_path = _resolve_path(base_dir, run.references.program_file)
+    solids_path = _resolve_path(base_dir, run.references.solids_file)
+
+    for label, path in (
+        ("run.references.chemistry_file", chemistry_path),
+        ("run.references.program_file", program_path),
+        ("run.references.solids_file", solids_path),
+    ):
+        if not path.exists():
+            raise PackedBedValidationError(f"{label} does not exist: {path}")
+        if not path.is_file():
+            raise PackedBedValidationError(f"{label} must point to a file: {path}")
+
+    chemistry = _validate_model(
+        ChemistryConfig,
+        _read_yaml_mapping(chemistry_path, "chemistry.yaml"),
+        "chemistry.yaml",
+        chemistry_path,
+    )
+    program = _validate_model(
+        ProgramConfig,
+        _read_yaml_mapping(program_path, "program.yaml"),
+        "program.yaml",
+        program_path,
+    )
+    solids = _validate_model(
+        SolidConfig,
+        _read_yaml_mapping(solids_path, "solids.yaml"),
+        "solids.yaml",
+        solids_path,
     )
 
-    program = ProgramConfig(
-        inlet_flow=_parse_scalar_channel(program_data.get("inlet_flow"), "program.inlet_flow"),
-        inlet_temperature=_parse_scalar_channel(program_data.get("inlet_temperature"), "program.inlet_temperature"),
-        outlet_pressure=_parse_scalar_channel(program_data.get("outlet_pressure"), "program.outlet_pressure"),
-        inlet_composition=_parse_composition_channel(program_data.get("inlet_composition"), "program.inlet_composition"),
-    )
+    try:
+        run_bundle = RunBundle(
+            run_path=run_path,
+            chemistry_path=chemistry_path,
+            solids_path=solids_path,
+            program_path=program_path,
+            chemistry=chemistry,
+            solids=solids,
+            program=program,
+            run=run,
+        )
+    except ValidationError as exc:
+        raise _format_validation_error("run bundle", run_path, exc) from exc
 
-    outputs_directory = _resolve_path(base_dir, outputs_data.get("directory", "output"))
-    artifacts_directory = _resolve_path(
-        base_dir,
-        outputs_data.get("artifacts_directory", outputs_directory / "artifacts"),
-    )
-
-    run = RunConfig(
-        chemistry_file=chemistry_path,
-        solids_file=solids_path,
-        program_file=program_path,
-        time_horizon_s=float(simulation_data.get("time_horizon_s", 30000.0)),
-        reporting_interval_s=float(simulation_data.get("reporting_interval_s", 10.0)),
-        mass_scheme=str(simulation_data.get("mass_scheme", "weno3")),
-        heat_scheme=str(simulation_data.get("heat_scheme", "central")),
-        report_time_derivatives=_coerce_bool(
-            simulation_data.get("report_time_derivatives", False),
-            "simulation.report_time_derivatives",
-        ),
-        system_name=str(simulation_data.get("system_name", "MassTrsf")),
-        model=ModelConfig(
-            bed_length_m=float(model_data.get("bed_length_m", 2.5)),
-            bed_radius_m=float(model_data.get("bed_radius_m", 0.1)),
-            particle_diameter_m=float(model_data.get("particle_diameter_m", 0.01)),
-            axial_cells=int(model_data.get("axial_cells", 20)),
-            interparticle_voidage=float(model_data.get("interparticle_voidage", 0.5)),
-            intraparticle_voidage=float(model_data.get("intraparticle_voidage", 0.5)),
-            gas_constant=float(model_data.get("gas_constant", 8.314462)),
-            pi_value=float(model_data.get("pi_value", 3.14)),
-        ),
-        solver=SolverConfig(
-            relative_tolerance=float(solver_data.get("relative_tolerance", 1e-6)),
-        ),
-        outputs=OutputConfig(
-            directory=outputs_directory,
-            artifacts_directory=artifacts_directory,
-            requested_reports=_coerce_string_tuple(outputs_data.get("requested_reports"), "outputs.requested_reports"),
-        ),
-    )
-
-    return RunBundle(
-        run_path=run_path,
-        chemistry_path=chemistry_path,
-        solids_path=solids_path,
-        program_path=program_path,
-        chemistry=chemistry,
-        solids=solids,
-        program=program,
-        run=run,
-    )
+    return validate_run_bundle(run_bundle)

@@ -1,10 +1,10 @@
 references:
   chemistry_file: chemistry.yaml
-  solids_file: solids.yaml
   program_file: program.yaml
+  solids_file: solids.yaml
 simulation:
   system_name: MassTrsf
-  time_horizon_s: 12000.0
+  time_horizon_s: 20.0
   reporting_interval_s: 1.0
   mass_scheme: weno3
   heat_scheme: weno3
@@ -13,7 +13,6 @@ model:
   bed_length_m: 2.5
   bed_radius_m: 0.1
   axial_cells: 20
-
 solver:
   relative_tolerance: 1.0e-6
 outputs:

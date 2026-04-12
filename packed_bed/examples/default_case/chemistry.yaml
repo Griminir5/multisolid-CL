@@ -2,4 +2,7 @@ gas_species:
   - AR
   - H2
   - H2O
-reaction_ids: []
+  - O2
+  - CO
+  - CO2
+reaction_ids: [ni_oxidation_o2_medrano, ni_reduction_co_medrano, ni_reduction_h2_medrano]

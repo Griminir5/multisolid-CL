@@ -97,7 +97,11 @@ def build_face_scalar_profile(solids_config, face_positions_m, attribute_name):
 
         for zone_index, zone in enumerate(zones):
             is_last_zone = zone_index == len(zones) - 1
-            upper_ok = position <= zone.x_end_m + _POSITION_TOL if is_last_zone else position < zone.x_end_m - _POSITION_TOL
+            upper_ok = (
+                position <= zone.x_end_m + _POSITION_TOL
+                if is_last_zone
+                else position < zone.x_end_m - _POSITION_TOL
+            )
             if position >= zone.x_start_m - _POSITION_TOL and upper_ok:
                 profile[face_index] = float(getattr(zone, attribute_name))
                 assigned = True

@@ -3,10 +3,10 @@ solid_species:
   - NiO
   - CaAl2O4
 initial_profile:
-  basis: solid
+  basis: slid
   zones:
     - x_start_m: 0.0
-      x_end_m: 1.4
+      x_end_m: 1.5
       e_b: 0.5
       e_p: 0.5
       d_p: 0.01
@@ -14,12 +14,12 @@ initial_profile:
         Ni: 75000.0
         NiO: 0.0
         CaAl2O4: 9400.0
-    - x_start_m: 0
+    - x_start_m: 1.5
       x_end_m: 2.5
-      e_b: 0.4
-      e_p: 0.5
+      e_b: 0.45
+      e_p: 0.35
       d_p: 0.005
       values:
         Ni: 55000.0
         NiO: 0.0
-        CaAl2O4: 9400.0
+        CaAl2O4: 10400.0

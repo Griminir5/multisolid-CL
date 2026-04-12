@@ -1,51 +1,59 @@
-from .api import RunResult, run_simulation
+from .cli import main, run_simulation
 from .config import (
     ChemistryConfig,
+    CompositionChannelConfig,
+    ProgramSegment,
+    HoldStep,
+    ModelConfig,
     OutputConfig,
+    PackedBedValidationError,
     ProgramConfig,
     RunBundle,
     RunConfig,
+    RunResult,
+    ScalarProgram,
+    ScalarChannelConfig,
+    ScalarRampStep,
+    SolverConfig,
     SolidConfig,
     SolidZoneConfig,
+    VectorProgram,
+    CompositionRampStep,
     load_run_bundle,
+    validate_run_bundle,
 )
-from .programs import ProgramSegment, ProgramStep, ScalarProgram, VectorProgram, default_inlet_composition
-from .properties import DEFAULT_PROPERTY_REGISTRY, PropertyRegistry, SpeciesPropertyRecord
-from .reactions import DEFAULT_REACTION_CATALOG, ReactionDefinition
-from .solver import CLBed_mass, assemble_simulation, build_idas_solver, configure_evaluation_mode, guiRun, simBed
-from .validation import validate_run_bundle
-from .visualization import SystemGraph, build_system_graph, render_initial_solid_profile, render_operating_program
+from .properties import DEFAULT_PROPERTY_REGISTRY, PROPERTY_REGISTRY, PropertyRegistry, SpeciesPropertyRecord
+from .reactions import DEFAULT_REACTION_CATALOG, REACTION_CATALOG, ReactionDefinition
 
 __all__ = [
-    "CLBed_mass",
     "ChemistryConfig",
+    "CompositionChannelConfig",
+    "CompositionRampStep",
     "DEFAULT_PROPERTY_REGISTRY",
     "DEFAULT_REACTION_CATALOG",
+    "HoldStep",
+    "ModelConfig",
     "OutputConfig",
+    "PROPERTY_REGISTRY",
+    "PackedBedValidationError",
     "ProgramConfig",
     "ProgramSegment",
-    "ProgramStep",
     "PropertyRegistry",
+    "REACTION_CATALOG",
     "ReactionDefinition",
     "RunBundle",
     "RunConfig",
     "RunResult",
+    "ScalarChannelConfig",
     "ScalarProgram",
+    "ScalarRampStep",
+    "SolverConfig",
     "SolidConfig",
     "SolidZoneConfig",
     "SpeciesPropertyRecord",
-    "SystemGraph",
     "VectorProgram",
-    "assemble_simulation",
-    "build_idas_solver",
-    "build_system_graph",
-    "configure_evaluation_mode",
-    "default_inlet_composition",
-    "guiRun",
     "load_run_bundle",
-    "render_initial_solid_profile",
-    "render_operating_program",
+    "main",
     "run_simulation",
-    "simBed",
     "validate_run_bundle",
 ]
