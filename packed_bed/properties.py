@@ -471,6 +471,90 @@ PROPERTY_REGISTRY = PropertyRegistry(
                 a3=3.37682975e-08,
             ),
         ),
+        "Cu": SpeciesPropertyRecord(
+            name="Copper",
+            phase="solid",
+            mw=63.55e-3,
+            enthalpy=CpCubicMolar(
+                h_form_ref=0.0,
+                a0=2.43826543e+01,
+                a1=1.06212521e-02,
+                a2=-1.53809529e-05,
+                a3=1.25658461e-08,
+            ),
+        ),
+        "Cu2O": SpeciesPropertyRecord(
+            name="Copper(I) Oxide",
+            phase="solid",
+            mw=143.091e-3,
+            enthalpy=CpCubicMolar(
+                h_form_ref=-170707.0,
+                a0=6.31729851e+01,
+                a1=4.50982629e-02,
+                a2=-4.40775011e-05,
+                a3=2.44874168e-08,
+            ),
+        ),
+        "CuO": SpeciesPropertyRecord(
+            name="Copper(II) Oxide",
+            phase="solid",
+            mw=79.545e-3,
+            enthalpy=CpCubicMolar(
+                h_form_ref=-156063.0,
+                a0=4.28595032e+01,
+                a1=3.80740189e-02,
+                a2=-4.25436164e-05,
+                a3=1.92484328e-08,
+            ),
+        ),
+        "Fe": SpeciesPropertyRecord(
+            name="Iron",
+            phase="solid",
+            mw=55.845e-3,
+            enthalpy=CpCubicMolar(
+                h_form_ref=0.0,
+                a0=1.52959946e+01,
+                a1=1.05151203e-01,
+                a2=-1.20394019e-04,
+                a3=4.13092928e-08,
+            ),
+        ),
+        "FeO": SpeciesPropertyRecord(
+            name="Iron(II) Oxide",
+            phase="solid",
+            mw=71.844e-3,
+            enthalpy=CpCubicMolar(
+                h_form_ref=-272044.0,
+                a0=5.00153501e+01,
+                a1=1.83032040e-02,
+                a2=-8.55099620e-06,
+                a3=2.13210525e-09,
+            ),
+        ),
+        "Fe3O4": SpeciesPropertyRecord(
+            name="Iron(II,III) Oxide",
+            phase="solid",
+            mw=231.533e-3,
+            enthalpy=CpCubicMolar(
+                h_form_ref=-1118380.0,
+                a0=1.38896229e+02,
+                a1=4.26480881e-01,
+                a2=-5.95185534e-04,
+                a3=2.27414606e-07,
+            ),
+        ),
+        "Fe2O3": SpeciesPropertyRecord(
+            name="Iron(III) Oxide",
+            phase="solid",
+            mw=159.687e-3,
+            enthalpy=CpCubicMolar(
+                h_form_ref=-824248.0,
+                a0=9.67074082e+01,
+                a1=2.51521981e-01,
+                a2=-3.28757899e-04,
+                a3=1.24389558e-07,
+            ),
+        ),
     }
 )
 

@@ -5,4 +5,4 @@ gas_species:
   - O2
   - CO
   - CO2
-reaction_ids: [ni_oxidation_o2_medrano, ni_reduction_co_medrano, ni_reduction_h2_medrano]
+reaction_ids: ["wgs_reaction_iron", "wgs_reaction_numaguchi", "ni_oxidation_o2_medrano", "ni_reduction_co_medrano", "ni_reduction_h2_medrano"]

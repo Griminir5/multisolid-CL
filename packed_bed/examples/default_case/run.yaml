@@ -4,8 +4,9 @@ references:
   solids_file: solids.yaml
 simulation:
   system_name: MassTrsf
-  time_horizon_s: 20.0
+  time_horizon_s: 12000.0
   reporting_interval_s: 1.0
+  repeat_program: true
   mass_scheme: weno3
   heat_scheme: weno3
   report_time_derivatives: false
@@ -23,5 +24,4 @@ outputs:
     - pressure
     - gas_mole_fraction
     - solid_mole_fraction
-    - material_balance
     - heat_balance

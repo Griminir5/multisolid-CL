@@ -1,30 +1,32 @@
 inlet_flow:
   initial: 0.785
   steps:
-    - kind: hold
-      duration_s: 5.0
     - kind: ramp
-      duration_s: 5.0
+      duration_s: 100.0
       target: 1.0
-    - kind: hold
-      duration_s: 10.0
+    - kind: ramp
+      duration_s: 100.0
+      target: 0.5
 
 inlet_temperature:
   initial: 500.0
   steps:
-    - kind: hold
-      duration_s: 10.0
     - kind: ramp
-      duration_s: 10.0
-      target: 650.0
+      duration_s: 150.0
+      target: 700.0
+    - kind: hold
+      duration_s: 500.0
+    - kind: ramp
+      duration_s: 150.0
+      target: 350.0
+    - kind: hold
+      duration_s: 500.0
       
 outlet_pressure:
   initial: 101325.0
   steps:
-    - kind: hold
-      duration_s: 10.0
     - kind: ramp
-      duration_s: 10.0
+      duration_s: 150.0
       target: 150000.0
 
 inlet_composition:
@@ -37,9 +39,9 @@ inlet_composition:
     CO2: 0.0
   steps:
     - kind: hold
-      duration_s: 8.0
+      duration_s: 20.0
     - kind: ramp
-      duration_s: 4.0
+      duration_s: 1000.0
       target:
         AR: 0.5
         H2: 0.5
@@ -48,4 +50,13 @@ inlet_composition:
         CO: 0.0
         CO2: 0.0
     - kind: hold
-      duration_s: 8.0
+      duration_s: 100.0
+    - kind: ramp
+      duration_s: 3000.0
+      target:
+        AR: 1.0
+        H2: 0.0
+        H2O: 0.0
+        O2: 0.0
+        CO: 0.0
+        CO2: 0.0

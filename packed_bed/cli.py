@@ -6,6 +6,7 @@ from pathlib import Path
 from .config import RunBundle, RunResult, load_run_bundle
 from .properties import PROPERTY_REGISTRY
 from .reactions import REACTION_CATALOG
+from .solver import assemble_simulation, run_assembled_simulation
 from .visualization import build_system_graph, render_initial_solid_profile, render_operating_program, render_system_graph
 
 def generate_artifacts(run_bundle: RunBundle) -> dict[str, Path]:
@@ -32,9 +33,25 @@ def run_simulation(
     run_bundle: RunBundle,
     property_registry=PROPERTY_REGISTRY,
     reaction_catalog=REACTION_CATALOG,
+    artifact_paths: dict[str, Path] | None = None,
 ) -> RunResult:
-    raise NotImplementedError(
-        "Simulation execution and report export are not implemented yet."
+    output_directory = run_bundle.output_directory
+    output_directory.mkdir(parents=True, exist_ok=True)
+
+    assembly = assemble_simulation(
+        run_bundle,
+        property_registry=property_registry,
+        reaction_catalog=reaction_catalog,
+    )
+    reporter = run_assembled_simulation(assembly)
+
+    return RunResult(
+        run_bundle=run_bundle,
+        output_directory=output_directory,
+        success=True,
+        artifact_paths=dict(artifact_paths or {}),
+        reporter=reporter,
+        simulation=assembly.simulation,
     )
 
 

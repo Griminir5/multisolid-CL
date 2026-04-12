@@ -2,8 +2,9 @@ solid_species:
   - Ni
   - NiO
   - CaAl2O4
+  - Fe
 initial_profile:
-  basis: slid
+  basis: solid
   zones:
     - x_start_m: 0.0
       x_end_m: 1.5
@@ -14,6 +15,7 @@ initial_profile:
         Ni: 75000.0
         NiO: 0.0
         CaAl2O4: 9400.0
+        Fe: 0.0
     - x_start_m: 1.5
       x_end_m: 2.5
       e_b: 0.45
@@ -23,3 +25,4 @@ initial_profile:
         Ni: 55000.0
         NiO: 0.0
         CaAl2O4: 10400.0
+        Fe: 0.0

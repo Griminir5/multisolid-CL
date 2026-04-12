@@ -23,7 +23,13 @@ from .config import (
     validate_run_bundle,
 )
 from .properties import DEFAULT_PROPERTY_REGISTRY, PROPERTY_REGISTRY, PropertyRegistry, SpeciesPropertyRecord
-from .reactions import DEFAULT_REACTION_CATALOG, REACTION_CATALOG, ReactionDefinition
+from .reactions import (
+    DEFAULT_REACTION_CATALOG,
+    REACTION_CATALOG,
+    ReactionDefinition,
+    ReactionNetwork,
+    build_reaction_network,
+)
 
 __all__ = [
     "ChemistryConfig",
@@ -41,6 +47,7 @@ __all__ = [
     "PropertyRegistry",
     "REACTION_CATALOG",
     "ReactionDefinition",
+    "ReactionNetwork",
     "RunBundle",
     "RunConfig",
     "RunResult",
@@ -52,6 +59,7 @@ __all__ = [
     "SolidZoneConfig",
     "SpeciesPropertyRecord",
     "VectorProgram",
+    "build_reaction_network",
     "load_run_bundle",
     "main",
     "run_simulation",

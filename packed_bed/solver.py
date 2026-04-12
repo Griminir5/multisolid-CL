@@ -14,6 +14,7 @@ from daetools.pyDAE import *
 
 from .axial_schemes import reconstruct_face_states
 from .config import ModelConfig, ProgramSegment, RunBundle, ScalarProgram, SolidConfig, VectorProgram
+from .reactions import ReactionNetwork, build_reaction_network
 from .solid_profiles import (
     build_cell_scalar_profile,
     build_face_scalar_profile,
@@ -90,6 +91,7 @@ class CLBed_mass(daeModel):
         Name,
         gas_species,
         solid_species,
+        reaction_network: ReactionNetwork,
         property_registry,
         mass_scheme,
         heat_scheme,
@@ -100,6 +102,7 @@ class CLBed_mass(daeModel):
 
         self.gas_species = list(gas_species)
         self.solid_species = list(solid_species)
+        self.reaction_network = reaction_network
         self.property_registry = property_registry
         self.mass_scheme = mass_scheme
         self.heat_scheme = heat_scheme
@@ -120,6 +123,11 @@ class CLBed_mass(daeModel):
         self.N_sol = daeDomain("Solid_comps", self, dimless, "Number of solid components")
         self.N_gas.CreateArray(len(self.gas_species))
         self.N_sol.CreateArray(len(self.solid_species))
+        if self.reaction_network.has_reactions:
+            self.N_rxn = daeDomain("Reactions", self, dimless, "Number of reactions")
+            self.N_rxn.CreateArray(self.reaction_network.reaction_count)
+        else:
+            self.N_rxn = None
 
         self.d_p = daeParameter("Particle_length", m, self, "Characteristic length of the solid particles", [self.x_faces])
         self.e_b = daeParameter("Interparticle_voidage", dimless, self, "Interparticle (between particles) voidage", [self.x_centers])
@@ -142,7 +150,12 @@ class CLBed_mass(daeModel):
         self.y_sol = daeVariable("y_sol", molar_frac_type, self, "Molar fraction of solid component i", [self.N_sol, self.x_centers])
         self.N_gas_face = daeVariable("N_gas_face", molar_flux_type, self, "Species i molar flux at cell faces", [self.N_gas, self.x_faces])
 
+        self.S_gas = daeVariable("S_gas", molar_source_type, self, "Net source of gas component i per total bed volume", [self.N_gas, self.x_centers])
         self.S_sol = daeVariable("S_sol", molar_source_type, self, "Net source of solid component i per total bed volume", [self.N_sol, self.x_centers])
+        if self.reaction_network.has_reactions:
+            self.R_rxn = daeVariable("R_rxn", molar_source_type, self, "Reaction rate of reaction k per total bed volume", [self.N_rxn, self.x_centers])
+        else:
+            self.R_rxn = None
 
         self.T = daeVariable("temp_bed", temp_type, self, "Temperature inside a cell", [self.x_centers])
         self.h_cell = daeVariable("h_cell", volum_enthaply_type, self, "Enthalpy per total bed volume", [self.x_centers])
@@ -471,7 +484,7 @@ class CLBed_mass(daeModel):
             idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
             eq.Residual = dt(self.c_gas(idx_gas, idx_cell)) + (
                 self.N_gas_face(idx_gas, idx_cell + 1) - self.N_gas_face(idx_gas, idx_cell)
-            ) / dx
+            ) / dx - self.S_gas(idx_gas, idx_cell)
 
             eq = self.CreateEquation(f"solid_species_balance_cell_{idx_cell}")
             idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, "j")
@@ -590,10 +603,45 @@ class CLBed_mass(daeModel):
         eq = self.CreateEquation("heat_bed_total_definition")
         eq.Residual = self.heat_bed_total() - heat_bed_total
 
-        eq = self.CreateEquation("solid_source_term_placeholder")
-        idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, "j")
-        idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-        eq.Residual = self.S_sol(idx_sol, idx_cell)
+        if self.reaction_network.has_reactions:
+            for gas_idx, species_name in enumerate(self.gas_species):
+                coefficients = self.reaction_network.gas_source_matrix[gas_idx]
+                eq = self.CreateEquation(f"gas_source_assembly_{species_name}")
+                idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+                residual = self.S_gas(gas_idx, idx_cell)
+                for reaction_idx, coefficient in enumerate(coefficients):
+                    if coefficient != 0.0:
+                        residual = residual - Constant(coefficient * mol / (m**3 * s)) * (
+                            self.R_rxn(reaction_idx, idx_cell) / Constant(1.0 * mol / (m**3 * s))
+                        )
+                eq.Residual = residual
+
+            for sol_idx, species_name in enumerate(self.solid_species):
+                coefficients = self.reaction_network.solid_source_matrix[sol_idx]
+                eq = self.CreateEquation(f"solid_source_assembly_{species_name}")
+                idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+                residual = self.S_sol(sol_idx, idx_cell)
+                for reaction_idx, coefficient in enumerate(coefficients):
+                    if coefficient != 0.0:
+                        residual = residual - Constant(coefficient * mol / (m**3 * s)) * (
+                            self.R_rxn(reaction_idx, idx_cell) / Constant(1.0 * mol / (m**3 * s))
+                        )
+                eq.Residual = residual
+
+            for reaction_idx, reaction in enumerate(self.reaction_network.reactions):
+                eq = self.CreateEquation(f"reaction_rate_placeholder_{reaction.id}")
+                idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+                eq.Residual = self.R_rxn(reaction_idx, idx_cell)
+        else:
+            eq = self.CreateEquation("gas_source_term_placeholder")
+            idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
+            idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+            eq.Residual = self.S_gas(idx_gas, idx_cell)
+
+            eq = self.CreateEquation("solid_source_term_placeholder")
+            idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, "j")
+            idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+            eq.Residual = self.S_sol(idx_sol, idx_cell)
 
 
 class simBed(daeSimulation):
@@ -601,6 +649,7 @@ class simBed(daeSimulation):
         self,
         gas_species,
         solid_species,
+        reaction_network: ReactionNetwork,
         solid_config: SolidConfig,
         property_registry,
         mass_scheme,
@@ -618,6 +667,7 @@ class simBed(daeSimulation):
         self.property_registry = property_registry
         self.gas_species = list(gas_species)
         self.solid_species = list(solid_species)
+        self.reaction_network = reaction_network
         self.model_config = model_config
         self.solid_config = solid_config
         self.mass_scheme = mass_scheme
@@ -633,6 +683,7 @@ class simBed(daeSimulation):
             self.system_name,
             self.gas_species,
             self.solid_species,
+            reaction_network=self.reaction_network,
             property_registry=self.property_registry,
             mass_scheme=self.mass_scheme,
             heat_scheme=self.heat_scheme,
@@ -827,6 +878,7 @@ class simBed(daeSimulation):
             for cell_idx in range(nc):
                 self.model.c_gas.SetInitialCondition(gas_idx, cell_idx, c0[gas_idx, cell_idx] * mol / m**3)
                 self.model.y_gas.SetInitialGuess(gas_idx, cell_idx, inlet_y[gas_idx])
+                self.model.S_gas.SetInitialGuess(gas_idx, cell_idx, 0.0 * mol / (m**3 * s))
                 self.model.h_gas.SetInitialGuess(gas_idx, cell_idx, gas_h0[gas_idx] * J / mol)
 
         for sol_idx in range(ns):
@@ -856,6 +908,12 @@ class simBed(daeSimulation):
                 self.model.N_gas_face.SetInitialGuess(gas_idx, face_idx, face_flux[gas_idx] * mol / (s * m**2))
                 self.model.J_gas_face.SetInitialGuess(gas_idx, face_idx, face_flux[gas_idx] * gas_h0[gas_idx] * J / (s * m**2))
 
+        if self.model.R_rxn is not None:
+            nr = self.model.N_rxn.NumberOfPoints
+            for reaction_idx in range(nr):
+                for cell_idx in range(nc):
+                    self.model.R_rxn.SetInitialGuess(reaction_idx, cell_idx, 0.0 * mol / (m**3 * s))
+
 
 @dataclass(frozen=True)
 class SimulationAssembly:
@@ -880,24 +938,52 @@ def assemble_simulation(
     property_registry,
     reaction_catalog,
 ) -> SimulationAssembly:
-    unimplemented = [
+    reaction_network = build_reaction_network(
+        run_bundle.chemistry.reaction_ids,
+        run_bundle.chemistry.gas_species,
+        run_bundle.solids.solid_species,
+        reaction_catalog=reaction_catalog,
+    )
+
+    missing_hooks = [
         reaction_id
-        for reaction_id in run_bundle.chemistry.reaction_ids
+        for reaction_id in reaction_network.reaction_ids
         if reaction_catalog[reaction_id].kinetics_hook is None
     ]
-    if unimplemented:
+    if missing_hooks:
         raise NotImplementedError(
-            "Selected reactions do not have kinetics implementations: " + ", ".join(unimplemented)
+            "Selected reactions do not have kinetics implementations: " + ", ".join(missing_hooks)
         )
 
-    inlet_flow_program = run_bundle.program.inlet_flow.compile_program()
-    inlet_composition_program = run_bundle.program.inlet_composition.compile_program(run_bundle.chemistry.gas_species)
-    inlet_temperature_program = run_bundle.program.inlet_temperature.compile_program()
-    outlet_pressure_program = run_bundle.program.outlet_pressure.compile_program()
+    if reaction_network.has_reactions:
+        raise NotImplementedError(
+            "Reaction stoichiometry is wired into S_gas/S_sol, but kinetics are still placeholder zero-rate "
+            "equations in packed_bed/solver.py. Replace the reaction_rate_placeholder_* equations before running "
+            "reactive cases."
+        )
+
+    inlet_flow_program = run_bundle.program.inlet_flow.compile_program(
+        repeat=run_bundle.run.repeat_program,
+        time_horizon=run_bundle.run.time_horizon_s,
+    )
+    inlet_composition_program = run_bundle.program.inlet_composition.compile_program(
+        run_bundle.chemistry.gas_species,
+        repeat=run_bundle.run.repeat_program,
+        time_horizon=run_bundle.run.time_horizon_s,
+    )
+    inlet_temperature_program = run_bundle.program.inlet_temperature.compile_program(
+        repeat=run_bundle.run.repeat_program,
+        time_horizon=run_bundle.run.time_horizon_s,
+    )
+    outlet_pressure_program = run_bundle.program.outlet_pressure.compile_program(
+        repeat=run_bundle.run.repeat_program,
+        time_horizon=run_bundle.run.time_horizon_s,
+    )
 
     simulation = simBed(
         gas_species=run_bundle.chemistry.gas_species,
         solid_species=run_bundle.solids.solid_species,
+        reaction_network=reaction_network,
         solid_config=run_bundle.solids,
         property_registry=property_registry,
         mass_scheme=run_bundle.run.mass_scheme,

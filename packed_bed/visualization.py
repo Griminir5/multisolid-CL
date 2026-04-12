@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-
 import matplotlib
+import pygraphviz
 
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-import networkx as nx
 
 from .config import RunBundle
 from .solid_profiles import (
@@ -37,6 +36,7 @@ class GraphEdge:
     target: str
     label: str
     coefficient: float
+    reversible: bool
 
 
 @dataclass(frozen=True)
@@ -81,10 +81,15 @@ def build_system_graph(
     for reaction_id in run_bundle.chemistry.reaction_ids:
         reaction = reaction_catalog[reaction_id]
         reaction_node_id = f"reaction:{reaction.id}"
+        label_lines = [reaction.id]
+        if reaction.reversible:
+            label_lines.append("reversible")
+        if reaction.catalyst_species:
+            label_lines.append(f"cat: {', '.join(reaction.catalyst_species)}")
         nodes.append(
             GraphNode(
                 id=reaction_node_id,
-                label=reaction.id,
+                label="\n".join(label_lines),
                 kind="reaction",
                 phase=reaction.phase,
                 color="#6d597a",
@@ -98,6 +103,7 @@ def build_system_graph(
                         target=reaction_node_id,
                         label=str(abs(coefficient)),
                         coefficient=coefficient,
+                        reversible=reaction.reversible,
                     )
                 )
             elif coefficient > 0.0:
@@ -107,8 +113,19 @@ def build_system_graph(
                         target=species_id,
                         label=str(abs(coefficient)),
                         coefficient=coefficient,
+                        reversible=reaction.reversible,
                     )
                 )
+        for catalyst_species_id in reaction.catalyst_species:
+            edges.append(
+                GraphEdge(
+                    source=catalyst_species_id,
+                    target=reaction_node_id,
+                    label="cat",
+                    coefficient=0.0,
+                    reversible=reaction.reversible,
+                )
+            )
 
     return SystemGraph(nodes=tuple(nodes), edges=tuple(edges))
 
@@ -128,53 +145,145 @@ def _series_from_segments(segments, initial_value):
     return times, values
 
 
+def _vector_series_from_segments(segments, initial_value):
+    initial_components = tuple(float(value) for value in initial_value)
+    if not segments:
+        return [0.0], [[value] for value in initial_components]
+
+    times = [0.0]
+    values_by_component = [[value] for value in initial_components]
+    for segment in segments:
+        start_values = tuple(float(value) for value in segment.start_value)
+        end_values = tuple(float(value) for value in segment.end_value)
+        if times[-1] != segment.start_time or any(
+            component_values[-1] != start_value
+            for component_values, start_value in zip(values_by_component, start_values)
+        ):
+            times.append(float(segment.start_time))
+            for component_values, start_value in zip(values_by_component, start_values):
+                component_values.append(start_value)
+        times.append(float(segment.end_time))
+        for component_values, end_value in zip(values_by_component, end_values):
+            component_values.append(end_value)
+    return times, values_by_component
+
+
+def _format_edge_label(edge: GraphEdge) -> str:
+    if edge.coefficient == 0.0:
+        return edge.label
+
+    magnitude = abs(edge.coefficient)
+    rounded = round(magnitude)
+    if abs(magnitude - rounded) < 1e-9:
+        return str(int(rounded))
+    return f"{magnitude:g}"
+
+
+def _draw_zone_boundaries(axes, boundaries):
+    if len(boundaries) <= 2:
+        return
+    for axis in axes:
+        for boundary in boundaries[1:-1]:
+            axis.axvline(float(boundary), color="#adb5bd", linestyle="--", linewidth=1.0, alpha=0.7, zorder=0)
+
+
+def _finalize_series_axes(axes, *, x_min, x_max):
+    for axis in axes:
+        axis.grid(True, alpha=0.3)
+        axis.set_xlim(float(x_min), float(x_max))
+        axis.margins(x=0.0)
+
+
+def _save_figure(figure, path: Path) -> None:
+    figure.savefig(path, bbox_inches="tight")
+    plt.close(figure)
+
+
+def _build_system_agraph(system_graph: SystemGraph):
+    graph = pygraphviz.AGraph(name="system_graph", strict=False, directed=True)
+    graph.graph_attr.update(
+        bgcolor="white",
+        pad="0.35",
+        outputorder="edgesfirst",
+        overlap="false",
+        splines="true",
+        labelloc="t",
+        labeljust="c",
+        fontname="Arial",
+        fontsize="20",
+        label="Species and Reaction System Graph",
+        rankdir="LR",
+        nodesep="0.55",
+        ranksep="0.85",
+        newrank="true",
+    )
+
+    graph.node_attr.update(
+        fontname="Arial",
+        fontsize="13",
+        penwidth="1.6",
+        margin="0.18,0.12",
+    )
+    graph.edge_attr.update(
+        fontname="Arial",
+        fontsize="13",
+        penwidth="2.0",
+        arrowsize="0.95",
+    )
+
+    for node in system_graph.nodes:
+        if node.kind == "reaction":
+            attributes = {
+                "label": node.label,
+                "shape": "box",
+                "style": "rounded,filled",
+                "fillcolor": node.color,
+                "color": "#3d405b",
+                "fontcolor": "white",
+                "margin": "0.22,0.14",
+            }
+        else:
+            attributes = {
+                "label": node.label,
+                "shape": "ellipse",
+                "style": "filled",
+                "fillcolor": node.color,
+                "color": "#2f3e46",
+                "fontcolor": "#1f2933",
+            }
+        graph.add_node(node.id, **attributes)
+
+    for edge in system_graph.edges:
+        if edge.coefficient < 0.0:
+            edge_color = "#355070"
+        elif edge.coefficient > 0.0:
+            edge_color = "#bc6c25"
+        else:
+            edge_color = "#6d597a"
+
+        attributes = {
+            "label": _format_edge_label(edge),
+            "color": edge_color,
+            "fontcolor": edge_color,
+            "dir": "both" if edge.reversible else "forward",
+            "arrowhead": "normal",
+            "arrowtail": "normal" if edge.reversible else "none",
+            "style": "dashed" if edge.coefficient == 0.0 else "solid",
+            "constraint": "false" if edge.coefficient == 0.0 else "true",
+            "penwidth": "1.8" if edge.coefficient == 0.0 else "2.2",
+            "arrowsize": "0.85" if edge.coefficient == 0.0 else "0.95",
+        }
+        graph.add_edge(edge.source, edge.target, **attributes)
+
+    return graph
+
+
 def render_system_graph(system_graph: SystemGraph, output_dir) -> dict[str, Path]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    graph = nx.DiGraph()
-    for node in system_graph.nodes:
-        graph.add_node(node.id, label=node.label, color=node.color, kind=node.kind, phase=node.phase)
-    for edge in system_graph.edges:
-        graph.add_edge(edge.source, edge.target, label=edge.label)
-
-    species_nodes = [node.id for node in system_graph.nodes if node.kind == "species"]
-    reaction_nodes = [node.id for node in system_graph.nodes if node.kind == "reaction"]
-
-    positions = {}
-    for index, node_id in enumerate(species_nodes):
-        positions[node_id] = (0.0, -index)
-    for index, node_id in enumerate(reaction_nodes):
-        positions[node_id] = (1.0, -index)
-
-    figure, axis = plt.subplots(figsize=(10, max(4, 0.8 * max(1, len(system_graph.nodes)))))
-    axis.set_title("Species and Reaction System Graph")
-    axis.axis("off")
-
-    node_colors = [graph.nodes[node_id]["color"] for node_id in graph.nodes]
-    nx.draw_networkx(
-        graph,
-        pos=positions,
-        ax=axis,
-        labels={node.id: node.label for node in system_graph.nodes},
-        node_color=node_colors,
-        node_size=2600,
-        font_size=8,
-        arrows=True,
-        arrowsize=18,
-    )
-    nx.draw_networkx_edge_labels(
-        graph,
-        pos=positions,
-        edge_labels={(edge.source, edge.target): edge.label for edge in system_graph.edges},
-        font_size=8,
-        ax=axis,
-    )
-    figure.tight_layout()
-
     svg_path = output_dir / "system_graph.svg"
-    figure.savefig(svg_path)
-    plt.close(figure)
+    graph = _build_system_agraph(system_graph)
+    graph.draw(str(svg_path), prog="fdp")
 
     return {"system_graph_svg": svg_path}
 
@@ -186,12 +295,25 @@ def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Pat
     time_horizon = run_bundle.run.time_horizon_s
     gas_species = run_bundle.chemistry.gas_species
 
-    inlet_flow_program = run_bundle.program.inlet_flow.compile_program()
-    inlet_temperature_program = run_bundle.program.inlet_temperature.compile_program()
-    outlet_pressure_program = run_bundle.program.outlet_pressure.compile_program()
-    inlet_composition_program = run_bundle.program.inlet_composition.compile_program(gas_species)
+    inlet_flow_program = run_bundle.program.inlet_flow.compile_program(
+        repeat=run_bundle.run.repeat_program,
+        time_horizon=time_horizon,
+    )
+    inlet_temperature_program = run_bundle.program.inlet_temperature.compile_program(
+        repeat=run_bundle.run.repeat_program,
+        time_horizon=time_horizon,
+    )
+    outlet_pressure_program = run_bundle.program.outlet_pressure.compile_program(
+        repeat=run_bundle.run.repeat_program,
+        time_horizon=time_horizon,
+    )
+    inlet_composition_program = run_bundle.program.inlet_composition.compile_program(
+        gas_species,
+        repeat=run_bundle.run.repeat_program,
+        time_horizon=time_horizon,
+    )
 
-    figure, axes = plt.subplots(4, 1, figsize=(11, 12), sharex=True)
+    figure, axes = plt.subplots(4, 1, figsize=(12, 12), sharex=True)
 
     flow_times, flow_values = _series_from_segments(
         inlet_flow_program.build_segments(),
@@ -217,37 +339,32 @@ def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Pat
     axes[2].set_ylabel("Pa")
     axes[2].set_title("Outlet Pressure")
 
-    composition_initial = inlet_composition_program.initial_value
-    composition_segments = inlet_composition_program.build_segments()
-
-    if composition_segments:
-        times = [0.0]
-        series_by_species = [[float(value)] for value in composition_initial]
-        for segment in composition_segments:
-            times.append(float(segment.end_time))
-            for species_index, species_series in enumerate(series_by_species):
-                species_series.append(float(segment.end_value[species_index]))
-    else:
-        times = [0.0]
-        series_by_species = [[float(value)] for value in composition_initial]
-
+    composition_times, series_by_species = _vector_series_from_segments(
+        inlet_composition_program.build_segments(),
+        inlet_composition_program.initial_value,
+    )
     for species_id, series in zip(gas_species, series_by_species):
-        axes[3].plot(times, series, linewidth=2, label=species_id)
+        axes[3].plot(composition_times, series, linewidth=2, label=species_id)
     axes[3].set_ylabel("Mole fraction")
     axes[3].set_title("Inlet Composition")
     axes[3].set_xlabel("Time [s]")
+    axes[3].set_ylim(-0.02, 1.02)
     if gas_species:
-        axes[3].legend(loc="upper right", fontsize=8)
+        axes[3].legend(
+            loc="upper left",
+            bbox_to_anchor=(1.01, 1.0),
+            borderaxespad=0.0,
+            fontsize=8,
+        )
 
-    for axis in axes:
-        axis.grid(True, alpha=0.3)
-        axis.set_xlim(0.0, time_horizon)
+    axes[0].set_ylim(bottom=0.0)
+    axes[2].set_ylim(bottom=0.0)
+    _finalize_series_axes(axes, x_min=0.0, x_max=time_horizon)
 
     figure.tight_layout()
 
     svg_path = output_dir / "operating_program.svg"
-    figure.savefig(svg_path)
-    plt.close(figure)
+    _save_figure(figure, svg_path)
 
     return {"operating_program_svg": svg_path}
 
@@ -279,7 +396,7 @@ def render_initial_solid_profile(run_bundle: RunBundle, output_dir) -> dict[str,
         "mol_per_m3_bed": "mol/m^3 bed",
     }.get(run_bundle.solids.concentration_unit, run_bundle.solids.concentration_unit)
 
-    figure, axes = plt.subplots(4, 1, figsize=(11, 15), sharex=False)
+    figure, axes = plt.subplots(4, 1, figsize=(12, 15), sharex=True)
 
     for species_id in run_bundle.solids.solid_species:
         zone_values = [float(zone.values_mol_per_m3[species_id]) for zone in zones]
@@ -288,32 +405,33 @@ def render_initial_solid_profile(run_bundle: RunBundle, output_dir) -> dict[str,
     axes[0].set_ylabel(unit_label)
 
     for species_index, species_id in enumerate(run_bundle.solids.solid_species):
-        axes[1].step(
-            cell_centers,
+        axes[1].stairs(
             bed_basis_concentration[species_index],
-            where="mid",
+            face_positions,
             label=species_id,
             linewidth=2,
         )
     axes[1].set_title("Initial Solid Concentration on Bed-Volume Basis")
     axes[1].set_ylabel("mol/m^3 bed")
 
-    axes[2].step(cell_centers, e_b, where="mid", linewidth=2, label="e_b")
-    axes[2].step(cell_centers, e_p, where="mid", linewidth=2, label="e_p")
-    axes[2].step(cell_centers, gas_fraction, where="mid", linewidth=1.5, linestyle="--", label="gasfrac")
-    axes[2].step(cell_centers, solid_fraction, where="mid", linewidth=1.5, linestyle=":", label="solfrac")
+    axes[2].stairs(e_b, face_positions, linewidth=2, label="e_b")
+    axes[2].stairs(e_p, face_positions, linewidth=2, label="e_p")
+    axes[2].stairs(gas_fraction, face_positions, linewidth=1.5, linestyle="--", label="gasfrac")
+    axes[2].stairs(solid_fraction, face_positions, linewidth=1.5, linestyle=":", label="solfrac")
     axes[2].set_title("Voidages and Volume Fractions")
     axes[2].set_ylabel("Fraction")
     axes[2].set_ylim(0.0, 1.05)
 
-    axes[3].plot(face_positions, d_p, marker="o", linewidth=2, color="#7f5539")
+    axes[3].plot(face_positions, d_p, marker="o", markersize=4, linewidth=2, color="#7f5539")
     axes[3].set_title("Particle Characteristic Length on Face Domain")
     axes[3].set_ylabel("d_p [m]")
     axes[3].set_xlabel("Axial position [m]")
 
-    for axis in axes:
-        axis.grid(True, alpha=0.3)
-        axis.set_xlim(0.0, run_bundle.run.model.bed_length_m)
+    axes[0].set_ylim(bottom=0.0)
+    axes[1].set_ylim(bottom=0.0)
+    axes[3].set_ylim(bottom=0.0)
+    _draw_zone_boundaries(axes, authored_edges)
+    _finalize_series_axes(axes, x_min=0.0, x_max=run_bundle.run.model.bed_length_m)
 
     if run_bundle.solids.solid_species:
         axes[0].legend(loc="upper right", fontsize=8)
@@ -323,7 +441,6 @@ def render_initial_solid_profile(run_bundle: RunBundle, output_dir) -> dict[str,
     figure.tight_layout()
 
     svg_path = output_dir / "initial_solid_profile.svg"
-    figure.savefig(svg_path)
-    plt.close(figure)
+    _save_figure(figure, svg_path)
 
     return {"initial_solid_profile_svg": svg_path}

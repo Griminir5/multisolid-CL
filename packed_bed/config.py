@@ -11,7 +11,7 @@ from yaml.resolver import BaseResolver
 
 from .axial_schemes import SUPPORTED_SCHEMES
 from .properties import PROPERTY_REGISTRY
-from .reactions import REACTION_CATALOG
+from .reactions import REACTION_CATALOG, build_reaction_network
 from .reporting import REPORT_VARIABLE_REGISTRY
 
 
@@ -112,6 +112,74 @@ def _require_exact_keys(actual: set[str], expected: tuple[str, ...], label: str)
 
 def _sum_step_durations(steps: tuple["HoldStep | ScalarRampStep | CompositionRampStep", ...]) -> float:
     return sum(step.duration_s for step in steps)
+
+
+def _interpolate_program_value(
+    start_value: float | tuple[float, ...],
+    end_value: float | tuple[float, ...],
+    fraction: float,
+) -> float | tuple[float, ...]:
+    if isinstance(start_value, tuple):
+        if not isinstance(end_value, tuple):
+            raise TypeError("Expected tuple-valued program endpoints.")
+        return tuple(
+            start_component + (end_component - start_component) * fraction
+            for start_component, end_component in zip(start_value, end_value)
+        )
+
+    if isinstance(end_value, tuple):
+        raise TypeError("Expected scalar-valued program endpoints.")
+    return start_value + (end_value - start_value) * fraction
+
+
+def _compile_program_segments(
+    initial_value: float | tuple[float, ...],
+    steps: tuple["HoldStep | ScalarRampStep | CompositionRampStep", ...],
+    *,
+    repeat: bool,
+    time_horizon: float | None,
+    resolve_next_value,
+) -> tuple["ProgramSegment", ...]:
+    if repeat and time_horizon is None:
+        raise ValueError("time_horizon must be provided when repeat=True.")
+
+    current_time = 0.0
+    current_value = initial_value
+    segments: list[ProgramSegment] = []
+
+    while True:
+        for step_index, step in enumerate(steps):
+            next_time = current_time + step.duration_s
+            next_value = resolve_next_value(step_index, step, current_value)
+
+            if time_horizon is not None and next_time > time_horizon:
+                if current_time >= time_horizon:
+                    return tuple(segments)
+
+                fraction = (time_horizon - current_time) / step.duration_s
+                segments.append(
+                    ProgramSegment(
+                        start_time=current_time,
+                        end_time=time_horizon,
+                        start_value=current_value,
+                        end_value=_interpolate_program_value(current_value, next_value, fraction),
+                    )
+                )
+                return tuple(segments)
+
+            segments.append(
+                ProgramSegment(
+                    start_time=current_time,
+                    end_time=next_time,
+                    start_value=current_value,
+                    end_value=next_value,
+                )
+            )
+            current_time = next_time
+            current_value = next_value
+
+        if not repeat or not steps or (time_horizon is not None and current_time >= time_horizon):
+            return tuple(segments)
 
 
 def _resolve_path(base_dir: Path, raw_path: str) -> Path:
@@ -335,26 +403,17 @@ class ScalarChannelConfig(FrozenConfigModel):
     def coerce_steps(cls, value: Any) -> tuple[Any, ...]:
         return _as_tuple(value)
 
-    def compile_program(self) -> ScalarProgram:
-        current_time = 0.0
-        current_value = self.initial
-        segments: list[ProgramSegment] = []
-
-        for step in self.steps:
-            next_time = current_time + step.duration_s
-            next_value = current_value if isinstance(step, HoldStep) else step.target
-            segments.append(
-                ProgramSegment(
-                    start_time=current_time,
-                    end_time=next_time,
-                    start_value=current_value,
-                    end_value=next_value,
-                )
-            )
-            current_time = next_time
-            current_value = next_value
-
-        return ScalarProgram(initial_value=self.initial, segments=tuple(segments))
+    def compile_program(self, *, repeat: bool = False, time_horizon: float | None = None) -> ScalarProgram:
+        segments = _compile_program_segments(
+            self.initial,
+            self.steps,
+            repeat=repeat,
+            time_horizon=time_horizon,
+            resolve_next_value=lambda _step_index, step, current_value: (
+                current_value if isinstance(step, HoldStep) else step.target
+            ),
+        )
+        return ScalarProgram(initial_value=self.initial, segments=segments)
 
 
 class CompositionChannelConfig(FrozenConfigModel):
@@ -371,38 +430,38 @@ class CompositionChannelConfig(FrozenConfigModel):
     def validate_initial(cls, value: dict[str, float]) -> dict[str, float]:
         return _require_fraction_mapping(value)
 
-    def compile_program(self, species_order: tuple[str, ...]) -> VectorProgram:
+    def compile_program(
+        self,
+        species_order: tuple[str, ...],
+        *,
+        repeat: bool = False,
+        time_horizon: float | None = None,
+    ) -> VectorProgram:
         _require_exact_keys(set(self.initial), species_order, "program.inlet_composition.initial")
+        initial_value = tuple(self.initial[species_id] for species_id in species_order)
 
-        current_time = 0.0
-        current_value = tuple(self.initial[species_id] for species_id in species_order)
-        segments: list[ProgramSegment] = []
-
-        for step_index, step in enumerate(self.steps):
-            next_time = current_time + step.duration_s
+        def resolve_next_value(step_index: int, step: HoldStep | CompositionRampStep, current_value: tuple[float, ...]):
             if isinstance(step, HoldStep):
-                next_value = current_value
-            else:
-                _require_exact_keys(
-                    set(step.target),
-                    species_order,
-                    f"program.inlet_composition.steps[{step_index}].target",
-                )
-                next_value = tuple(step.target[species_id] for species_id in species_order)
-            segments.append(
-                ProgramSegment(
-                    start_time=current_time,
-                    end_time=next_time,
-                    start_value=current_value,
-                    end_value=next_value,
-                )
+                return current_value
+
+            _require_exact_keys(
+                set(step.target),
+                species_order,
+                f"program.inlet_composition.steps[{step_index}].target",
             )
-            current_time = next_time
-            current_value = next_value
+            return tuple(step.target[species_id] for species_id in species_order)
+
+        segments = _compile_program_segments(
+            initial_value,
+            self.steps,
+            repeat=repeat,
+            time_horizon=time_horizon,
+            resolve_next_value=resolve_next_value,
+        )
 
         return VectorProgram(
-            initial_value=tuple(self.initial[species_id] for species_id in species_order),
-            segments=tuple(segments),
+            initial_value=initial_value,
+            segments=segments,
         )
 
 
@@ -423,6 +482,7 @@ class SimulationConfig(FrozenConfigModel):
     system_name: ConfigString
     time_horizon_s: PositiveFloat
     reporting_interval_s: PositiveFloat
+    repeat_program: bool = False
     mass_scheme: ConfigString
     heat_scheme: ConfigString
     report_time_derivatives: bool
@@ -494,6 +554,10 @@ class RunConfig(FrozenConfigModel):
         return self.simulation.reporting_interval_s
 
     @property
+    def repeat_program(self) -> bool:
+        return self.simulation.repeat_program
+
+    @property
     def mass_scheme(self) -> str:
         return self.simulation.mass_scheme
 
@@ -561,16 +625,18 @@ class RunBundle(FrozenConfigModel):
                 )
 
         horizon = self.run.time_horizon_s
-        channel_steps = (
-            ("program.inlet_flow.steps", self.program.inlet_flow.steps),
-            ("program.inlet_temperature.steps", self.program.inlet_temperature.steps),
-            ("program.outlet_pressure.steps", self.program.outlet_pressure.steps),
-            ("program.inlet_composition.steps", self.program.inlet_composition.steps),
+        cycle_durations = (
+            ("program.inlet_flow.steps", _sum_step_durations(self.program.inlet_flow.steps)),
+            ("program.inlet_temperature.steps", _sum_step_durations(self.program.inlet_temperature.steps)),
+            ("program.outlet_pressure.steps", _sum_step_durations(self.program.outlet_pressure.steps)),
+            ("program.inlet_composition.steps", _sum_step_durations(self.program.inlet_composition.steps)),
         )
-        for label, steps in channel_steps:
-            duration = _sum_step_durations(steps)
-            if not math.isclose(duration, horizon, rel_tol=0.0, abs_tol=1e-12):
-                raise ValueError(f"{label} must sum exactly to time_horizon_s ({horizon:.16g}), got {duration:.16g}.")
+        if not self.run.repeat_program:
+            for label, duration in cycle_durations:
+                if math.isclose(duration, 0.0, rel_tol=0.0, abs_tol=1e-12):
+                    continue
+                if not math.isclose(duration, horizon, rel_tol=0.0, abs_tol=1e-12):
+                    raise ValueError(f"{label} must sum exactly to time_horizon_s ({horizon:.16g}), got {duration:.16g}.")
 
         return self
 
@@ -582,6 +648,7 @@ def validate_run_bundle(
     report_variable_registry=REPORT_VARIABLE_REGISTRY,
 ) -> RunBundle:
     errors: list[str] = []
+    has_unknown_reaction_ids = False
     gas_species = set(run_bundle.chemistry.gas_species)
     solid_species = set(run_bundle.solids.solid_species)
     selected_species = gas_species | solid_species
@@ -616,11 +683,12 @@ def validate_run_bundle(
         reaction = reaction_catalog.get(reaction_id)
         if reaction is None:
             errors.append(f"Unknown reaction id '{reaction_id}'.")
+            has_unknown_reaction_ids = True
             continue
 
         missing = sorted(
             species_id
-            for species_id in reaction.required_species
+            for species_id in reaction.all_species
             if species_id not in selected_species
         )
         if missing:
@@ -635,6 +703,17 @@ def validate_run_bundle(
             errors.append(
                 f"Reaction '{reaction_id}' references species '{species_id}' that is not selected in the current gas/solid configuration."
             )
+
+    if not has_unknown_reaction_ids:
+        try:
+            build_reaction_network(
+                run_bundle.chemistry.reaction_ids,
+                run_bundle.chemistry.gas_species,
+                run_bundle.solids.solid_species,
+                reaction_catalog=reaction_catalog,
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
 
     unknown_reports = sorted(
         report_id

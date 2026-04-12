@@ -46,14 +46,25 @@ REPORT_VARIABLE_REGISTRY = {
         description="Gas molar flux by species and face.",
         variable_name="N_gas_face",
     ),
+    "gas_source": ReportDefinition(
+        id="gas_source",
+        description="Net gas-phase source term by species and cell center.",
+        variable_name="S_gas",
+    ),
+    "solid_source": ReportDefinition(
+        id="solid_source",
+        description="Net solid-phase source term by species and cell center.",
+        variable_name="S_sol",
+    ),
+    "reaction_rate": ReportDefinition(
+        id="reaction_rate",
+        description="Reaction rate by reaction and cell center.",
+        variable_name="R_rxn",
+    ),
     "gas_enthalpy_flux": ReportDefinition(
         id="gas_enthalpy_flux",
         description="Gas enthalpy flux by species and face.",
         variable_name="J_gas_face",
-    ),
-    "material_balance": ReportDefinition(
-        id="material_balance",
-        description="Material balance totals and error over time.",
     ),
     "heat_balance": ReportDefinition(
         id="heat_balance",
