@@ -4,16 +4,16 @@ references:
   solids_file: ../default_case/solids.yaml
 simulation:
   system_name: XuFromentCase
-  time_horizon_s: 100.0
-  reporting_interval_s: 10.0
-  repeat_program: false
+  time_horizon_s: 8000.0
+  reporting_interval_s: 1.0
+  repeat_program: true
   mass_scheme: weno3
   heat_scheme: weno3
   report_time_derivatives: false
 model:
   bed_length_m: 2.5
   bed_radius_m: 0.1
-  axial_cells: 20
+  axial_cells: 10
 solver:
   relative_tolerance: 1.0e-6
 outputs:
@@ -23,4 +23,3 @@ outputs:
     - temperature
     - pressure
     - gas_mole_fraction
-    - reaction_rate

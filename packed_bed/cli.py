@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 from .config import RunBundle, RunResult, load_run_bundle
 from .properties import PROPERTY_REGISTRY
+from .result_plots import render_run_result_plots
 from .reactions import REACTION_CATALOG
 from .solver import assemble_simulation, run_assembled_simulation
 from .visualization import build_system_graph, render_initial_solid_profile, render_operating_program, render_system_graph
@@ -45,13 +47,21 @@ def run_simulation(
     )
     reporter = run_assembled_simulation(assembly)
 
-    return RunResult(
+    run_result = RunResult(
         run_bundle=run_bundle,
         output_directory=output_directory,
         success=True,
         artifact_paths=dict(artifact_paths or {}),
         reporter=reporter,
         simulation=assembly.simulation,
+    )
+    plot_paths = render_run_result_plots(run_result)
+    return replace(
+        run_result,
+        artifact_paths={
+            **run_result.artifact_paths,
+            **plot_paths,
+        },
     )
 
 
