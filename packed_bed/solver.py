@@ -14,6 +14,7 @@ from daetools.pyDAE import *
 
 from .axial_schemes import reconstruct_face_states
 from .config import ModelConfig, ProgramSegment, RunBundle, ScalarProgram, SolidConfig, VectorProgram
+from .kinetics import KineticsContext, resolve_kinetics_hooks
 from .reactions import ReactionNetwork, build_reaction_network
 from .solid_profiles import (
     build_cell_scalar_profile,
@@ -92,6 +93,7 @@ class CLBed_mass(daeModel):
         gas_species,
         solid_species,
         reaction_network: ReactionNetwork,
+        reaction_rate_hooks,
         property_registry,
         mass_scheme,
         heat_scheme,
@@ -103,6 +105,7 @@ class CLBed_mass(daeModel):
         self.gas_species = list(gas_species)
         self.solid_species = list(solid_species)
         self.reaction_network = reaction_network
+        self.reaction_rate_hooks = tuple(reaction_rate_hooks)
         self.property_registry = property_registry
         self.mass_scheme = mass_scheme
         self.heat_scheme = heat_scheme
@@ -110,6 +113,16 @@ class CLBed_mass(daeModel):
         self.inlet_composition_segments = []
         self.inlet_temperature_segments = []
         self.outlet_pressure_segments = []
+        self.gas_species_index = {species_id: idx for idx, species_id in enumerate(self.gas_species)}
+        self.solid_species_index = {species_id: idx for idx, species_id in enumerate(self.solid_species)}
+        self.reaction_index = {
+            reaction.id: idx for idx, reaction in enumerate(self.reaction_network.reactions)
+        }
+
+        if self.reaction_network.has_reactions and len(self.reaction_rate_hooks) != self.reaction_network.reaction_count:
+            raise ValueError("Reaction rate hooks must align one-to-one with the selected reaction network.")
+        if not self.reaction_network.has_reactions and self.reaction_rate_hooks:
+            raise ValueError("Reaction rate hooks were provided for a non-reactive simulation.")
 
         self.R_gas = daeParameter("R_gas", (Pa * m**3) / (mol * K), self, "Gas constant")
         self.pi = daeParameter("&pi;", dimless, self, "Circle constant")
@@ -189,6 +202,15 @@ class CLBed_mass(daeModel):
         self.P_out = daeVariable("P_out", pres_type, self, "Pressure at the outlet boundary")
 
         self.mw_mix = daeVariable("mw_mix", molecular_weight_type, self, "Gas mixture molecular weight in a cell", [self.x_centers])
+
+    def build_kinetics_context(self, idx_cell):
+        return KineticsContext(
+            model=self,
+            idx_cell=idx_cell,
+            gas_species_index=self.gas_species_index,
+            solid_species_index=self.solid_species_index,
+            reaction_index=self.reaction_index,
+        )
 
     def SetAxialGridFromFaces(self, face_locations):
         face_locations = np.asarray(face_locations, dtype=float)
@@ -629,9 +651,12 @@ class CLBed_mass(daeModel):
                 eq.Residual = residual
 
             for reaction_idx, reaction in enumerate(self.reaction_network.reactions):
-                eq = self.CreateEquation(f"reaction_rate_placeholder_{reaction.id}")
+                eq = self.CreateEquation(f"reaction_rate_{reaction.id}")
                 idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-                eq.Residual = self.R_rxn(reaction_idx, idx_cell)
+                kinetics_context = self.build_kinetics_context(idx_cell)
+                eq.Residual = self.R_rxn(reaction_idx, idx_cell) - self.reaction_rate_hooks[reaction_idx](
+                    kinetics_context
+                )
         else:
             eq = self.CreateEquation("gas_source_term_placeholder")
             idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
@@ -650,6 +675,7 @@ class simBed(daeSimulation):
         gas_species,
         solid_species,
         reaction_network: ReactionNetwork,
+        reaction_rate_hooks,
         solid_config: SolidConfig,
         property_registry,
         mass_scheme,
@@ -668,6 +694,7 @@ class simBed(daeSimulation):
         self.gas_species = list(gas_species)
         self.solid_species = list(solid_species)
         self.reaction_network = reaction_network
+        self.reaction_rate_hooks = tuple(reaction_rate_hooks)
         self.model_config = model_config
         self.solid_config = solid_config
         self.mass_scheme = mass_scheme
@@ -684,6 +711,7 @@ class simBed(daeSimulation):
             self.gas_species,
             self.solid_species,
             reaction_network=self.reaction_network,
+            reaction_rate_hooks=self.reaction_rate_hooks,
             property_registry=self.property_registry,
             mass_scheme=self.mass_scheme,
             heat_scheme=self.heat_scheme,
@@ -944,23 +972,7 @@ def assemble_simulation(
         run_bundle.solids.solid_species,
         reaction_catalog=reaction_catalog,
     )
-
-    missing_hooks = [
-        reaction_id
-        for reaction_id in reaction_network.reaction_ids
-        if reaction_catalog[reaction_id].kinetics_hook is None
-    ]
-    if missing_hooks:
-        raise NotImplementedError(
-            "Selected reactions do not have kinetics implementations: " + ", ".join(missing_hooks)
-        )
-
-    if reaction_network.has_reactions:
-        raise NotImplementedError(
-            "Reaction stoichiometry is wired into S_gas/S_sol, but kinetics are still placeholder zero-rate "
-            "equations in packed_bed/solver.py. Replace the reaction_rate_placeholder_* equations before running "
-            "reactive cases."
-        )
+    reaction_rate_hooks = resolve_kinetics_hooks(reaction_network)
 
     inlet_flow_program = run_bundle.program.inlet_flow.compile_program(
         repeat=run_bundle.run.repeat_program,
@@ -984,6 +996,7 @@ def assemble_simulation(
         gas_species=run_bundle.chemistry.gas_species,
         solid_species=run_bundle.solids.solid_species,
         reaction_network=reaction_network,
+        reaction_rate_hooks=reaction_rate_hooks,
         solid_config=run_bundle.solids,
         property_registry=property_registry,
         mass_scheme=run_bundle.run.mass_scheme,

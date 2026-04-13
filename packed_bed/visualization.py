@@ -283,7 +283,7 @@ def render_system_graph(system_graph: SystemGraph, output_dir) -> dict[str, Path
     output_dir.mkdir(parents=True, exist_ok=True)
     svg_path = output_dir / "system_graph.svg"
     graph = _build_system_agraph(system_graph)
-    graph.draw(str(svg_path), prog="fdp")
+    graph.draw(str(svg_path), prog="neato")
 
     return {"system_graph_svg": svg_path}
 

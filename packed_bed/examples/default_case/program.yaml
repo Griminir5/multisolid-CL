@@ -31,32 +31,41 @@ outlet_pressure:
 
 inlet_composition:
   initial:
-    AR: 1.0
-    H2: 0.0
-    H2O: 0.0
-    O2: 0.0
+    Ar: 0.0
+    CH4: 0.0
     CO: 0.0
     CO2: 0.0
+    H2: 0.0
+    H2O: 0.0
+    He: 0.0
+    N2: 1.0
+    O2: 0.0
   steps:
     - kind: hold
       duration_s: 20.0
     - kind: ramp
       duration_s: 1000.0
       target:
-        AR: 0.5
-        H2: 0.5
-        H2O: 0.0
-        O2: 0.0
+        Ar: 1.0
+        CH4: 0.0
         CO: 0.0
         CO2: 0.0
+        H2: 0.0
+        H2O: 0.0
+        He: 0.0
+        N2: 0.0
+        O2: 0.0
     - kind: hold
       duration_s: 100.0
     - kind: ramp
       duration_s: 3000.0
       target:
-        AR: 1.0
-        H2: 0.0
-        H2O: 0.0
-        O2: 0.0
+        Ar: 0.6
+        CH4: 0.0
         CO: 0.0
         CO2: 0.0
+        H2: 0.0
+        H2O: 0.0
+        He: 0.4
+        N2: 0.0
+        O2: 0.0

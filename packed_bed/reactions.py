@@ -236,6 +236,18 @@ REACTION_CATALOG = {
         reversible=False,
         notes="Catalogued as metadata only in v1; assembly must reject it until kinetics are implemented.",
     ),
+    "smr_reaction_numaguchi": ReactionDefinition(
+        id="smr_reaction_numaguchi",
+        name="Steam methane reforming on Ni",
+        phase="gas_gas",
+        stoichiometry={"CH4": -1.0, "H2O": -1.0, "CO": 1.0, "H2": 3.0},
+        required_species=("CH4", "H2O", "CO", "H2", "Ni"),
+        catalyst_species=("Ni",),
+        reversible=True,
+        kinetics_hook=None,
+        source_reference="...",
+        notes="Nickel-catalysed reversible steam methane reforming with kinetics metadata retained for future work.",
+    ),
     "wgs_reaction_numaguchi": ReactionDefinition(
         id="wgs_reaction_numaguchi",
         name="Water-gas shift on Ni",
@@ -246,7 +258,7 @@ REACTION_CATALOG = {
         reversible=True,
         kinetics_hook=None,
         source_reference="...",
-        notes="Nickel-catalysed reversible water gas shift reaction with kinetics taken from Numaguchi and Kikuchi"
+        notes="Nickel-catalysed reversible water-gas shift with kinetics metadata retained for future work.",
     ),
     "wgs_reaction_iron": ReactionDefinition(
         id="wgs_reaction_iron",
@@ -258,8 +270,44 @@ REACTION_CATALOG = {
         reversible=True,
         kinetics_hook=None,
         source_reference="...",
-        notes="Iron-catalysed reversible water gas shift reaction with kinetics taken from TBD"
-)
+        notes="Iron-catalysed reversible water-gas shift reaction with kinetics taken from TBD.",
+    ),
+    "smr_reaction_xu_froment": ReactionDefinition(
+        id="smr_reaction_xu_froment",
+        name="Steam methane reforming on Ni (Xu-Froment)",
+        phase="gas_gas",
+        stoichiometry={"CH4": -1.0, "H2O": -1.0, "CO": 1.0, "H2": 3.0},
+        required_species=("CH4", "H2O", "CO", "H2", "Ni"),
+        catalyst_species=("Ni",),
+        reversible=True,
+        kinetics_hook="xu_froment_smr",
+        source_reference="Xu and Froment, AIChE Journal 1989, https://doi.org/10.1002/aic.690350109",
+        notes="One-reaction-one-hook Xu-Froment steam methane reforming rate expression.",
+    ),
+    "wgs_reaction_xu_froment": ReactionDefinition(
+        id="wgs_reaction_xu_froment",
+        name="Water-gas shift on Ni (Xu-Froment)",
+        phase="gas_gas",
+        stoichiometry={"CO": -1.0, "H2O": -1.0, "CO2": 1.0, "H2": 1.0},
+        required_species=("CO", "H2O", "CO2", "H2", "Ni"),
+        catalyst_species=("Ni",),
+        reversible=True,
+        kinetics_hook="xu_froment_wgs",
+        source_reference="Xu and Froment, AIChE Journal 1989, https://doi.org/10.1002/aic.690350109",
+        notes="One-reaction-one-hook Xu-Froment water-gas shift rate expression.",
+    ),
+    "overall_reforming_xu_froment": ReactionDefinition(
+        id="overall_reforming_xu_froment",
+        name="Overall steam reforming on Ni (Xu-Froment)",
+        phase="gas_gas",
+        stoichiometry={"CH4": -1.0, "H2O": -2.0, "CO2": 1.0, "H2": 4.0},
+        required_species=("CH4", "H2O", "CO2", "H2", "Ni"),
+        catalyst_species=("Ni",),
+        reversible=True,
+        kinetics_hook="xu_froment_overall",
+        source_reference="Xu and Froment, AIChE Journal 1989, https://doi.org/10.1002/aic.690350109",
+        notes="One-reaction-one-hook Xu-Froment overall reforming rate expression.",
+    ),
 }
 
 DEFAULT_REACTION_CATALOG = REACTION_CATALOG

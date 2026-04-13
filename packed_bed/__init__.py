@@ -22,6 +22,7 @@ from .config import (
     load_run_bundle,
     validate_run_bundle,
 )
+from .kinetics import KINETICS_HOOK_REGISTRY, KineticsContext, resolve_kinetics_hooks
 from .properties import DEFAULT_PROPERTY_REGISTRY, PROPERTY_REGISTRY, PropertyRegistry, SpeciesPropertyRecord
 from .reactions import (
     DEFAULT_REACTION_CATALOG,
@@ -38,6 +39,8 @@ __all__ = [
     "DEFAULT_PROPERTY_REGISTRY",
     "DEFAULT_REACTION_CATALOG",
     "HoldStep",
+    "KINETICS_HOOK_REGISTRY",
+    "KineticsContext",
     "ModelConfig",
     "OutputConfig",
     "PROPERTY_REGISTRY",
@@ -62,6 +65,7 @@ __all__ = [
     "build_reaction_network",
     "load_run_bundle",
     "main",
+    "resolve_kinetics_hooks",
     "run_simulation",
     "validate_run_bundle",
 ]

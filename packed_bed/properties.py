@@ -330,7 +330,7 @@ class PropertyRegistry:
 
 PROPERTY_REGISTRY = PropertyRegistry(
     records={
-        "AR": SpeciesPropertyRecord(
+        "Ar": SpeciesPropertyRecord(
             name="Argon",
             phase="gas",
             mw=39.948e-3,
@@ -402,7 +402,7 @@ PROPERTY_REGISTRY = PropertyRegistry(
             ),
             viscosity=ViscosityQuadratic(a0=3.77371020e-05, a1=4.16760701e-08, a2=1.73653811e-12),
         ),
-        "HE": SpeciesPropertyRecord(
+        "He": SpeciesPropertyRecord(
             name="Helium",
             phase="gas",
             mw=4.002602e-3,

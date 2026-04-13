@@ -1,0 +1,12 @@
+gas_species:
+  - CH4
+  - CO
+  - CO2
+  - H2
+  - H2O
+  - N2
+
+reaction_ids:
+  - smr_reaction_xu_froment
+  - wgs_reaction_xu_froment
+  - overall_reforming_xu_froment

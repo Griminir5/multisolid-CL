@@ -1,8 +1,12 @@
 gas_species:
-  - AR
-  - H2
-  - H2O
-  - O2
+  - Ar
+  - CH4
   - CO
   - CO2
-reaction_ids: ["wgs_reaction_iron", "wgs_reaction_numaguchi", "ni_oxidation_o2_medrano", "ni_reduction_co_medrano", "ni_reduction_h2_medrano"]
+  - H2
+  - H2O
+  - He
+  - N2
+  - O2
+
+reaction_ids: ["smr_reaction_numaguchi", "wgs_reaction_numaguchi", "ni_oxidation_o2_medrano", "ni_reduction_co_medrano", "ni_reduction_h2_medrano"]

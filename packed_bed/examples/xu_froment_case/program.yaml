@@ -1,0 +1,29 @@
+inlet_flow:
+  initial: 1.0
+  steps:
+    - kind: hold
+      duration_s: 100.0
+
+inlet_temperature:
+  initial: 900.0
+  steps:
+    - kind: hold
+      duration_s: 100.0
+
+outlet_pressure:
+  initial: 500000.0
+  steps:
+    - kind: hold
+      duration_s: 100.0
+
+inlet_composition:
+  initial:
+    CH4: 0.2
+    CO: 0.0
+    CO2: 0.0
+    H2: 0.1
+    H2O: 0.6
+    N2: 0.1
+  steps:
+    - kind: hold
+      duration_s: 100.0
