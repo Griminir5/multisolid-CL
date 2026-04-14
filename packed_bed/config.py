@@ -396,7 +396,7 @@ class SolidConfig(FrozenConfigModel):
 
 class ScalarChannelConfig(FrozenConfigModel):
     initial: PositiveFloat
-    steps: tuple[ScalarStep, ...]
+    steps: tuple[ScalarStep, ...] = Field(default_factory=tuple)
 
     @field_validator("steps", mode="before")
     @classmethod
@@ -418,7 +418,7 @@ class ScalarChannelConfig(FrozenConfigModel):
 
 class CompositionChannelConfig(FrozenConfigModel):
     initial: dict[ConfigString, NonNegativeFloat]
-    steps: tuple[CompositionStep, ...]
+    steps: tuple[CompositionStep, ...] = Field(default_factory=tuple)
 
     @field_validator("steps", mode="before")
     @classmethod

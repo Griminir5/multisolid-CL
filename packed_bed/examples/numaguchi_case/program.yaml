@@ -1,0 +1,42 @@
+inlet_flow:
+  initial: 1.0
+
+inlet_temperature:
+  initial: 900.0
+  steps:
+    - kind: hold
+      duration_s: 2000.0
+    - kind: ramp
+      duration_s: 10.0
+      target: 400.0
+    - kind: hold
+      duration_s: 1000.0
+    - kind: ramp
+      duration_s: 10.0
+      target: 900.0
+
+outlet_pressure:
+  initial: 500000.0
+
+inlet_composition:
+  initial:
+    CH4: 0.0
+    CO: 0.0
+    CO2: 0.0
+    H2: 0.0
+    H2O: 0.0
+    N2: 1.0
+  steps:
+    - kind: hold
+      duration_s: 100.0
+    - kind: ramp
+      duration_s: 100.0
+      target:
+        CH4: 0.2
+        CO: 0.05
+        CO2: 0.05
+        H2: 0.0
+        H2O: 0.5
+        N2: 0.2
+    - kind: hold
+      duration_s: 10000.0

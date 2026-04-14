@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import matplotlib
-import pygraphviz
+#import pygraphviz
 
 matplotlib.use("Agg")
 
@@ -130,8 +130,10 @@ def build_system_graph(
     return SystemGraph(nodes=tuple(nodes), edges=tuple(edges))
 
 
-def _series_from_segments(segments, initial_value):
+def _series_from_segments(segments, initial_value, *, final_time: float | None = None):
     if not segments:
+        if final_time is not None and final_time > 0.0:
+            return [0.0, float(final_time)], [initial_value, initial_value]
         return [0.0], [initial_value]
 
     times = [0.0]
@@ -142,12 +144,17 @@ def _series_from_segments(segments, initial_value):
             values.append(float(segment.start_value))
         times.append(float(segment.end_time))
         values.append(float(segment.end_value))
+    if final_time is not None and final_time > times[-1]:
+        times.append(float(final_time))
+        values.append(values[-1])
     return times, values
 
 
-def _vector_series_from_segments(segments, initial_value):
+def _vector_series_from_segments(segments, initial_value, *, final_time: float | None = None):
     initial_components = tuple(float(value) for value in initial_value)
     if not segments:
+        if final_time is not None and final_time > 0.0:
+            return [0.0, float(final_time)], [[value, value] for value in initial_components]
         return [0.0], [[value] for value in initial_components]
 
     times = [0.0]
@@ -165,6 +172,10 @@ def _vector_series_from_segments(segments, initial_value):
         times.append(float(segment.end_time))
         for component_values, end_value in zip(values_by_component, end_values):
             component_values.append(end_value)
+    if final_time is not None and final_time > times[-1]:
+        times.append(float(final_time))
+        for component_values in values_by_component:
+            component_values.append(component_values[-1])
     return times, values_by_component
 
 
@@ -199,93 +210,93 @@ def _save_figure(figure, path: Path) -> None:
     plt.close(figure)
 
 
-def _build_system_agraph(system_graph: SystemGraph):
-    graph = pygraphviz.AGraph(name="system_graph", strict=False, directed=True)
-    graph.graph_attr.update(
-        bgcolor="white",
-        pad="0.35",
-        outputorder="edgesfirst",
-        overlap="false",
-        splines="true",
-        labelloc="t",
-        labeljust="c",
-        fontname="Arial",
-        fontsize="20",
-        label="Species and Reaction System Graph",
-        rankdir="LR",
-        nodesep="0.55",
-        ranksep="0.85",
-        newrank="true",
-    )
+# def _build_system_agraph(system_graph: SystemGraph):
+#     graph = pygraphviz.AGraph(name="system_graph", strict=False, directed=True)
+#     graph.graph_attr.update(
+#         bgcolor="white",
+#         pad="0.35",
+#         outputorder="edgesfirst",
+#         overlap="false",
+#         splines="true",
+#         labelloc="t",
+#         labeljust="c",
+#         fontname="Arial",
+#         fontsize="20",
+#         label="Species and Reaction System Graph",
+#         rankdir="LR",
+#         nodesep="0.55",
+#         ranksep="0.85",
+#         newrank="true",
+#     )
 
-    graph.node_attr.update(
-        fontname="Arial",
-        fontsize="13",
-        penwidth="1.6",
-        margin="0.18,0.12",
-    )
-    graph.edge_attr.update(
-        fontname="Arial",
-        fontsize="13",
-        penwidth="2.0",
-        arrowsize="0.95",
-    )
+#     graph.node_attr.update(
+#         fontname="Arial",
+#         fontsize="13",
+#         penwidth="1.6",
+#         margin="0.18,0.12",
+#     )
+#     graph.edge_attr.update(
+#         fontname="Arial",
+#         fontsize="13",
+#         penwidth="2.0",
+#         arrowsize="0.95",
+#     )
 
-    for node in system_graph.nodes:
-        if node.kind == "reaction":
-            attributes = {
-                "label": node.label,
-                "shape": "box",
-                "style": "rounded,filled",
-                "fillcolor": node.color,
-                "color": "#3d405b",
-                "fontcolor": "white",
-                "margin": "0.22,0.14",
-            }
-        else:
-            attributes = {
-                "label": node.label,
-                "shape": "ellipse",
-                "style": "filled",
-                "fillcolor": node.color,
-                "color": "#2f3e46",
-                "fontcolor": "#1f2933",
-            }
-        graph.add_node(node.id, **attributes)
+#     for node in system_graph.nodes:
+#         if node.kind == "reaction":
+#             attributes = {
+#                 "label": node.label,
+#                 "shape": "box",
+#                 "style": "rounded,filled",
+#                 "fillcolor": node.color,
+#                 "color": "#3d405b",
+#                 "fontcolor": "white",
+#                 "margin": "0.22,0.14",
+#             }
+#         else:
+#             attributes = {
+#                 "label": node.label,
+#                 "shape": "ellipse",
+#                 "style": "filled",
+#                 "fillcolor": node.color,
+#                 "color": "#2f3e46",
+#                 "fontcolor": "#1f2933",
+#             }
+#         graph.add_node(node.id, **attributes)
 
-    for edge in system_graph.edges:
-        if edge.coefficient < 0.0:
-            edge_color = "#355070"
-        elif edge.coefficient > 0.0:
-            edge_color = "#bc6c25"
-        else:
-            edge_color = "#6d597a"
+#     for edge in system_graph.edges:
+#         if edge.coefficient < 0.0:
+#             edge_color = "#355070"
+#         elif edge.coefficient > 0.0:
+#             edge_color = "#bc6c25"
+#         else:
+#             edge_color = "#6d597a"
 
-        attributes = {
-            "label": _format_edge_label(edge),
-            "color": edge_color,
-            "fontcolor": edge_color,
-            "dir": "both" if edge.reversible else "forward",
-            "arrowhead": "normal",
-            "arrowtail": "normal" if edge.reversible else "none",
-            "style": "dashed" if edge.coefficient == 0.0 else "solid",
-            "constraint": "false" if edge.coefficient == 0.0 else "true",
-            "penwidth": "1.8" if edge.coefficient == 0.0 else "2.2",
-            "arrowsize": "0.85" if edge.coefficient == 0.0 else "0.95",
-        }
-        graph.add_edge(edge.source, edge.target, **attributes)
+#         attributes = {
+#             "label": _format_edge_label(edge),
+#             "color": edge_color,
+#             "fontcolor": edge_color,
+#             "dir": "both" if edge.reversible else "forward",
+#             "arrowhead": "normal",
+#             "arrowtail": "normal" if edge.reversible else "none",
+#             "style": "dashed" if edge.coefficient == 0.0 else "solid",
+#             "constraint": "false" if edge.coefficient == 0.0 else "true",
+#             "penwidth": "1.8" if edge.coefficient == 0.0 else "2.2",
+#             "arrowsize": "0.85" if edge.coefficient == 0.0 else "0.95",
+#         }
+#         graph.add_edge(edge.source, edge.target, **attributes)
 
-    return graph
+#     return graph
 
 
-def render_system_graph(system_graph: SystemGraph, output_dir) -> dict[str, Path]:
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    svg_path = output_dir / "system_graph.svg"
-    graph = _build_system_agraph(system_graph)
-    graph.draw(str(svg_path), prog="neato")
+# def render_system_graph(system_graph: SystemGraph, output_dir) -> dict[str, Path]:
+#     output_dir = Path(output_dir)
+#     output_dir.mkdir(parents=True, exist_ok=True)
+#     svg_path = output_dir / "system_graph.svg"
+#     graph = _build_system_agraph(system_graph)
+#     graph.draw(str(svg_path), prog="neato")
 
-    return {"system_graph_svg": svg_path}
+#     return {"system_graph_svg": svg_path}
 
 
 def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Path]:
@@ -318,6 +329,7 @@ def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Pat
     flow_times, flow_values = _series_from_segments(
         inlet_flow_program.build_segments(),
         inlet_flow_program.initial_value,
+        final_time=time_horizon,
     )
     axes[0].plot(flow_times, flow_values, color="#1d3557", linewidth=2)
     axes[0].set_ylabel("mol/s")
@@ -326,6 +338,7 @@ def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Pat
     temp_times, temp_values = _series_from_segments(
         inlet_temperature_program.build_segments(),
         inlet_temperature_program.initial_value,
+        final_time=time_horizon,
     )
     axes[1].plot(temp_times, temp_values, color="#e76f51", linewidth=2)
     axes[1].set_ylabel("K")
@@ -334,6 +347,7 @@ def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Pat
     pressure_times, pressure_values = _series_from_segments(
         outlet_pressure_program.build_segments(),
         outlet_pressure_program.initial_value,
+        final_time=time_horizon,
     )
     axes[2].plot(pressure_times, pressure_values, color="#264653", linewidth=2)
     axes[2].set_ylabel("Pa")
@@ -342,6 +356,7 @@ def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Pat
     composition_times, series_by_species = _vector_series_from_segments(
         inlet_composition_program.build_segments(),
         inlet_composition_program.initial_value,
+        final_time=time_horizon,
     )
     for species_id, series in zip(gas_species, series_by_species):
         axes[3].plot(composition_times, series, linewidth=2, label=species_id)

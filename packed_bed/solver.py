@@ -1016,6 +1016,24 @@ def _set_reporting_on(simulation):
     simulation.model.SetReportingOn(True)
 
 
+def _warm_start_first_reporting_interval(simulation, *, max_step_s=0.1):
+    first_report_time = min(float(simulation.ReportingInterval), float(simulation.TimeHorizon))
+    current_time = float(simulation.CurrentTime)
+    tolerance = 1e-12
+
+    if first_report_time <= current_time + tolerance:
+        return
+    if first_report_time <= max_step_s + tolerance:
+        return
+
+    while current_time + tolerance < first_report_time:
+        next_time = min(current_time + max_step_s, first_report_time)
+        simulation.IntegrateUntilTime(next_time, eStopAtModelDiscontinuity, False)
+        current_time = float(simulation.CurrentTime)
+
+    simulation.ReportData(current_time)
+
+
 def run_assembled_simulation(assembly: SimulationAssembly):
     configure_evaluation_mode()
     simulation = assembly.simulation
@@ -1031,6 +1049,9 @@ def run_assembled_simulation(assembly: SimulationAssembly):
 
     simulation.Initialize(solver, reporter, log)
     simulation.SolveInitial()
+    # IDAS can struggle if the first reported interval is much larger than the startup transient.
+    # Warm the model up in bounded substeps, then continue with the user-facing reporting cadence.
+    _warm_start_first_reporting_interval(simulation)
     simulation.Run()
     return reporter
 
