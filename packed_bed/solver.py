@@ -1016,7 +1016,153 @@ def _set_reporting_on(simulation):
     simulation.model.SetReportingOn(True)
 
 
-def _warm_start_first_reporting_interval(simulation, *, max_step_s=0.1):
+def _sorted_unique_times(times, *, tolerance=1e-12):
+    unique_times = []
+    for time_value in sorted(float(value) for value in times):
+        if unique_times and math.isclose(time_value, unique_times[-1], rel_tol=0.0, abs_tol=tolerance):
+            continue
+        unique_times.append(time_value)
+    return tuple(unique_times)
+
+
+def _program_breakpoint_times(simulation, *, tolerance=1e-12):
+    time_horizon = float(simulation.TimeHorizon)
+    segment_groups = [
+        simulation.model.inlet_flow_segments,
+        simulation.model.inlet_temperature_segments,
+        simulation.model.outlet_pressure_segments,
+        *simulation.model.inlet_composition_segments,
+    ]
+    return _sorted_unique_times(
+        segment.end_time
+        for segments in segment_groups
+        for segment in segments
+        if tolerance < float(segment.end_time) < time_horizon - tolerance
+    )
+
+
+def _current_breakpoint_time(current_time, breakpoint_times, *, tolerance=1e-12):
+    for breakpoint_time in breakpoint_times:
+        if math.isclose(current_time, breakpoint_time, rel_tol=0.0, abs_tol=tolerance):
+            return breakpoint_time
+    return None
+
+
+def _next_breakpoint_time(current_time, breakpoint_times, *, tolerance=1e-12):
+    for breakpoint_time in breakpoint_times:
+        if breakpoint_time > current_time + tolerance:
+            return breakpoint_time
+    return None
+
+
+def _nudge_target_time(current_time, target_time, next_breakpoint_time, *, tolerance=1e-12):
+    window_end = target_time if next_breakpoint_time is None else min(target_time, next_breakpoint_time)
+    available_window = window_end - current_time
+    if available_window <= tolerance:
+        raise RuntimeError(
+            f"Cannot advance past the model discontinuity at t={current_time:.16g}; "
+            "the next breakpoint is too close to resolve safely."
+        )
+
+    preferred_delta = max(1e-9, 1e-6 * max(1.0, abs(current_time)))
+    delta = min(preferred_delta, 0.5 * available_window)
+    if delta <= tolerance:
+        delta = 0.5 * available_window
+    return current_time + delta
+
+
+def _integrate_until_time_with_breakpoints(
+    simulation,
+    target_time,
+    breakpoint_times,
+    *,
+    max_step_s=None,
+    tolerance=1e-12,
+):
+    current_time = float(simulation.CurrentTime)
+
+    if target_time < current_time - tolerance:
+        raise ValueError(
+            f"Cannot integrate backwards from t={current_time:.16g} to t={target_time:.16g}."
+        )
+
+    while current_time + tolerance < target_time:
+        current_breakpoint = _current_breakpoint_time(
+            current_time,
+            breakpoint_times,
+            tolerance=tolerance,
+        )
+        if current_breakpoint is not None:
+            next_time = _nudge_target_time(
+                current_time,
+                target_time,
+                _next_breakpoint_time(current_breakpoint, breakpoint_times, tolerance=tolerance),
+                tolerance=tolerance,
+            )
+        else:
+            next_time = target_time
+            if max_step_s is not None:
+                next_time = min(next_time, current_time + max_step_s)
+
+        simulation.IntegrateUntilTime(next_time, eDoNotStopAtDiscontinuity, False)
+        updated_time = float(simulation.CurrentTime)
+        if updated_time <= current_time + tolerance:
+            raise RuntimeError(
+                f"Failed to advance the simulation from t={current_time:.16g} toward t={target_time:.16g}."
+            )
+        current_time = updated_time
+
+
+def _nudge_past_breakpoint_if_needed(simulation, breakpoint_times, *, target_time, tolerance=1e-12):
+    current_time = float(simulation.CurrentTime)
+    current_breakpoint = _current_breakpoint_time(
+        current_time,
+        breakpoint_times,
+        tolerance=tolerance,
+    )
+    if current_breakpoint is None or target_time <= current_time + tolerance:
+        return
+
+    next_time = _nudge_target_time(
+        current_time,
+        target_time,
+        _next_breakpoint_time(current_breakpoint, breakpoint_times, tolerance=tolerance),
+        tolerance=tolerance,
+    )
+    original_time_horizon = float(simulation.TimeHorizon)
+    simulation.model.SetReportingOn(False)
+    try:
+        simulation.TimeHorizon = next_time
+        simulation.Run()
+    finally:
+        simulation.TimeHorizon = original_time_horizon
+        simulation.model.SetReportingOn(True)
+
+    if float(simulation.CurrentTime) <= current_time + tolerance:
+        raise RuntimeError(
+            f"Failed to nudge the simulation past the breakpoint at t={current_time:.16g}."
+        )
+
+
+def _run_with_breakpoint_nudges(simulation, breakpoint_times, *, tolerance=1e-12):
+    final_time_horizon = float(simulation.TimeHorizon)
+    for segment_end in (*breakpoint_times, final_time_horizon):
+        if segment_end <= float(simulation.CurrentTime) + tolerance:
+            continue
+
+        _nudge_past_breakpoint_if_needed(
+            simulation,
+            breakpoint_times,
+            target_time=segment_end,
+            tolerance=tolerance,
+        )
+        simulation.TimeHorizon = segment_end
+        simulation.Run()
+
+    simulation.TimeHorizon = final_time_horizon
+
+
+def _warm_start_first_reporting_interval(simulation, breakpoint_times, *, max_step_s=0.1):
     first_report_time = min(float(simulation.ReportingInterval), float(simulation.TimeHorizon))
     current_time = float(simulation.CurrentTime)
     tolerance = 1e-12
@@ -1026,12 +1172,14 @@ def _warm_start_first_reporting_interval(simulation, *, max_step_s=0.1):
     if first_report_time <= max_step_s + tolerance:
         return
 
-    while current_time + tolerance < first_report_time:
-        next_time = min(current_time + max_step_s, first_report_time)
-        simulation.IntegrateUntilTime(next_time, eStopAtModelDiscontinuity, False)
-        current_time = float(simulation.CurrentTime)
-
-    simulation.ReportData(current_time)
+    _integrate_until_time_with_breakpoints(
+        simulation,
+        first_report_time,
+        breakpoint_times,
+        max_step_s=max_step_s,
+        tolerance=tolerance,
+    )
+    simulation.ReportData(float(simulation.CurrentTime))
 
 
 def run_assembled_simulation(assembly: SimulationAssembly):
@@ -1049,10 +1197,11 @@ def run_assembled_simulation(assembly: SimulationAssembly):
 
     simulation.Initialize(solver, reporter, log)
     simulation.SolveInitial()
+    breakpoint_times = _program_breakpoint_times(simulation)
     # IDAS can struggle if the first reported interval is much larger than the startup transient.
     # Warm the model up in bounded substeps, then continue with the user-facing reporting cadence.
-    _warm_start_first_reporting_interval(simulation)
-    simulation.Run()
+    _warm_start_first_reporting_interval(simulation, breakpoint_times)
+    _run_with_breakpoint_nudges(simulation, breakpoint_times)
     return reporter
 
 

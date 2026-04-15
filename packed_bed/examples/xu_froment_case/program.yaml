@@ -16,7 +16,7 @@ inlet_temperature:
       target: 900.0
 
 outlet_pressure:
-  initial: 500000.0
+  initial: 5000000.0
 
 inlet_composition:
   initial:

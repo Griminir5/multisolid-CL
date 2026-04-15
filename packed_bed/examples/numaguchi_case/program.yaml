@@ -7,16 +7,16 @@ inlet_temperature:
     - kind: hold
       duration_s: 2000.0
     - kind: ramp
-      duration_s: 10.0
+      duration_s: 100.0
       target: 400.0
     - kind: hold
       duration_s: 1000.0
     - kind: ramp
-      duration_s: 10.0
+      duration_s: 100.0
       target: 900.0
 
 outlet_pressure:
-  initial: 500000.0
+  initial: 5000000.0
 
 inlet_composition:
   initial:

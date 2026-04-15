@@ -19,13 +19,17 @@ STEAM_REFORMING_H2O_ORDER = 1.596
 NI_MW_KG_PER_MOL = PROPERTY_REGISTRY.get_record("Ni").mw
 
 NUMAGUCHI_RATE_COEFFICIENTS = {
-    "smr": 3.65e2,
-    "wgs": 2.45e2,
+    "smr": 3.65e5,
+    "wgs": 2.45e5,
 }
 NUMAGUCHI_ACTIVATION_ENERGIES_J_PER_MOL = {
     "smr": 42800.0,
-    "wgs": 54500.0,
+    "wgs": 54531.0,
 }
+SMR_EQUILIBRIUM_INTERCEPT = 30.114
+SMR_EQUILIBRIUM_TEMPERATURE_TERM = -26830.0
+WGS_EQUILIBRIUM_INTERCEPT = -4.036
+WGS_EQUILIBRIUM_TEMPERATURE_TERM = 4400.0
 
 
 @dataclass(frozen=True)
@@ -76,12 +80,24 @@ def rate_constant_value(
     )
 
 
+def _equilibrium_constant_value(intercept: float, temperature_term: float, temperature_k: float) -> float:
+    return math.exp(intercept + temperature_term / temperature_k)
+
+
 def equilibrium_constant_smr_value(temperature_k: float) -> float:
-    return math.exp(-2683.0 / temperature_k + 30.114)
+    return _equilibrium_constant_value(
+        SMR_EQUILIBRIUM_INTERCEPT,
+        SMR_EQUILIBRIUM_TEMPERATURE_TERM,
+        temperature_k,
+    )
 
 
 def equilibrium_constant_wgs_value(temperature_k: float) -> float:
-    return math.exp(4400.0 / temperature_k - 4.036)
+    return _equilibrium_constant_value(
+        WGS_EQUILIBRIUM_INTERCEPT,
+        WGS_EQUILIBRIUM_TEMPERATURE_TERM,
+        temperature_k,
+    )
 
 
 
@@ -154,12 +170,24 @@ def _rate_constant_expression(rate_key: str, temperature_k, catalyst_mass_densit
     )
 
 
+def _equilibrium_constant_expression(intercept: float, temperature_term: float, temperature_k) -> Any:
+    return Exp(Constant(intercept) + Constant(temperature_term) / temperature_k)
+
+
 def _equilibrium_constant_smr_expression(temperature_k) -> Any:
-    return Exp(-Constant(2683.0) / temperature_k + Constant(30.114))
+    return _equilibrium_constant_expression(
+        SMR_EQUILIBRIUM_INTERCEPT,
+        SMR_EQUILIBRIUM_TEMPERATURE_TERM,
+        temperature_k,
+    )
 
 
 def _equilibrium_constant_wgs_expression(temperature_k) -> Any:
-    return Exp(Constant(4400.0) / temperature_k - Constant(4.036))
+    return _equilibrium_constant_expression(
+        WGS_EQUILIBRIUM_INTERCEPT,
+        WGS_EQUILIBRIUM_TEMPERATURE_TERM,
+        temperature_k,
+    )
 
 
 def _partial_pressure_bar_expression(context: KineticsContext, species_id: str):
