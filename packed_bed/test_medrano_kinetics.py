@@ -46,15 +46,16 @@ class MedranoKineticsTests(unittest.TestCase):
         )
 
         gas_safe = medrano.safe_gas_concentration_value(gas_concentration_molm3)
-        f_power = reactant_fraction + medrano.F_FLOOR
-        gate = reactant_fraction / (reactant_fraction + medrano.F_GATE)
+        f_power = medrano.F_FLOOR + (1.0 - medrano.F_FLOOR) * reactant_fraction
+        gas_gate = gas_concentration_molm3 / (gas_concentration_molm3 + medrano.CG_GATE)
+        solid_gate = reactant_fraction / (reactant_fraction + medrano.F_GATE)
         k = medrano.k_value("O2", temperature_k=temperature_k)
         diffusivity = medrano.D_value("O2", temperature_k=temperature_k, conv=conversion)
         denominator = (
             (1.0 / k) * f_power ** (-2.0 / 3.0)
             + (medrano.R0_M["O2"] / diffusivity) * (f_power ** (-1.0 / 3.0) - 1.0)
         )
-        uncorrected_b_rate = gate * (
+        uncorrected_b_rate = gas_gate * solid_gate * (
             3.0
             * gas_safe ** medrano.REACTION_ORDER["O2"]
             / (medrano.R0_M["O2"] * medrano.CS_MOL_PER_M3["O2"])
@@ -112,6 +113,30 @@ class MedranoKineticsTests(unittest.TestCase):
 
         self.assertTrue(math.isfinite(rate))
 
+    def test_no_gas_reactant_gives_zero_rate(self) -> None:
+        rate = medrano.medrano_reaction_rate_value(
+            "H2",
+            temperature_k=900.0,
+            gas_concentration_molm3=0.0,
+            conversion=0.5,
+            reactant_fraction=0.5,
+            active_inventory_molm3=1000.0,
+        )
+
+        self.assertEqual(rate, 0.0)
+
+    def test_negative_reactant_fraction_gives_zero_rate(self) -> None:
+        rate = medrano.medrano_reaction_rate_value(
+            "H2",
+            temperature_k=900.0,
+            gas_concentration_molm3=2.0,
+            conversion=1.0,
+            reactant_fraction=-0.5 * medrano.F_FLOOR,
+            active_inventory_molm3=1000.0,
+        )
+
+        self.assertEqual(rate, 0.0)
+
     def test_positive_available_solid_and_gas_produce_positive_rate(self) -> None:
         rate = medrano.medrano_reaction_rate_value(
             "CO",
@@ -124,6 +149,19 @@ class MedranoKineticsTests(unittest.TestCase):
 
         self.assertTrue(math.isfinite(rate))
         self.assertGreater(rate, 0.0)
+
+    def test_reactant_fraction_at_one_keeps_co_reduction_positive(self) -> None:
+        rate = medrano.medrano_reaction_rate_value(
+            "CO",
+            temperature_k=600.0,
+            gas_concentration_molm3=1.0e-4,
+            conversion=0.0,
+            reactant_fraction=1.0,
+            active_inventory_molm3=1143.0,
+        )
+
+        self.assertTrue(math.isfinite(rate))
+        self.assertGreaterEqual(rate, 0.0)
 
 
 class MedranoRegistryTests(unittest.TestCase):
