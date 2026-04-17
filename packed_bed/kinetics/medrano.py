@@ -6,14 +6,12 @@ from typing import Any
 
 from daetools.pyDAE import Constant, Exp, Sqrt
 
-from pyUnits import K, Pa, m, mol, s
+from pyUnits import K, m, mol, s
 
-from ..properties import PROPERTY_REGISTRY
 from . import KineticsContext, register_kinetics_hook
 
 
 GAS_CONSTANT_J_PER_MOL_K = 8.31446261815324
-PRESSURE_PA_PER_BAR = 1.0e5
 
 POS_EPS = 1.0e-10
 F_FLOOR = 1.0e-4
@@ -69,9 +67,7 @@ B = {
 @dataclass(frozen=True)
 class MedranoTerms:
     temperature_k: Any
-    h2_conc_molm3: Any
-    co_conc_molm3: Any
-    o2_conc_molm3: Any
+    gas_conc_molm3: Any
     ni_conc_molm3: Any
     nio_conc_molm3: Any
     frac_reduced: Any
@@ -87,28 +83,22 @@ def _temperature_k_expression(temperature) -> Any:
     return temperature / Constant(1.0 * K)
 
 def _concentration_expression(conc) -> Any:
-    return conc / Constant(1.0 * mol * m**3)
+    return conc / Constant(1.0 * mol / m**3)
 
-def _medrano_terms(context: KineticsContext) -> MedranoTerms:
+def _medrano_terms(context: KineticsContext, gas_species_id: str) -> MedranoTerms:
     nickel_idx = context.solid_index("Ni")
     nickel_oxide_idx = context.solid_index("NiO")
-    h2_idx = context.gas_index("H2")
-    co_idx = context.gas_index("CO")
-    o2_idx = context.gas_index("O2")
+    gas_idx = context.gas_index(gas_species_id)
     temperature_k = _temperature_k_expression(context.model.T(context.idx_cell))
     c_ni  = _concentration_expression(context.model.c_sol(nickel_idx, context.idx_cell))
     c_nio = _concentration_expression(context.model.c_sol(nickel_oxide_idx, context.idx_cell))
-    c_h2  = _concentration_expression(context.model.c_gas(h2_idx, context.idx_cell))
-    c_co  = _concentration_expression(context.model.c_gas(co_idx, context.idx_cell))
-    c_o2  = _concentration_expression(context.model.c_gas(o2_idx, context.idx_cell))
+    c_gas  = _concentration_expression(context.model.c_gas(gas_idx, context.idx_cell))
 
     return MedranoTerms(
         temperature_k=temperature_k,
-        h2_conc_molm3=c_h2,
-        co_conc_molm3=c_co,
-        o2_conc_molm3=c_o2,
+        gas_conc_molm3=c_gas,
         ni_conc_molm3=c_ni,
-        ni_conc_molm3=c_nio,
+        nio_conc_molm3=c_nio,
         frac_reduced=c_ni / (c_ni+c_nio),
         frac_oxidised=c_nio / (c_ni+c_nio),
     )
@@ -142,7 +132,7 @@ def D_value(
     conv: float,
 ) -> float:
     preexp = D0_M2_PER_S[comp_key]
-    activation_energy = ACTIVATION_ENERGY_J_PER_MOL[comp_key]
+    activation_energy = ED_J_PER_MOL[comp_key]
     kx = KX[comp_key]
     return preexp * math.exp(
         -activation_energy / (GAS_CONSTANT_J_PER_MOL_K * temperature_k)
@@ -158,7 +148,168 @@ def D_expr(
     conv,
 ) -> Any:
     preexp = D0_M2_PER_S[comp_key]
-    activation_energy = ACTIVATION_ENERGY_J_PER_MOL[comp_key]
+    activation_energy = ED_J_PER_MOL[comp_key]
     kx = KX[comp_key]
     return Constant(preexp) * Exp(
         -Constant(activation_energy / GAS_CONSTANT_J_PER_MOL_K) / temperature_k) * Exp(-Constant(kx)*conv)
+
+
+def safe_gas_concentration_value(concentration_molm3: float) -> float:
+    return _smooth_pos_value(concentration_molm3) + CG_FLOOR
+
+
+def medrano_conversion_rate_value(
+    comp_key: str,
+    *,
+    temperature_k: float,
+    gas_concentration_molm3: float,
+    conversion: float,
+    reactant_fraction: float,
+) -> float:
+    k = k_value(comp_key, temperature_k=temperature_k)
+    diffusivity = D_value(comp_key, temperature_k=temperature_k, conv=conversion)
+    gas_concentration_safe = safe_gas_concentration_value(gas_concentration_molm3)
+    f_power = reactant_fraction + F_FLOOR
+    gate = reactant_fraction / (reactant_fraction + F_GATE)
+    numerator = (
+        3.0
+        * B[comp_key]
+        * gas_concentration_safe ** REACTION_ORDER[comp_key]
+        / (R0_M[comp_key] * CS_MOL_PER_M3[comp_key])
+    )
+    denominator = (
+        (1.0 / k) * f_power ** (-2.0 / 3.0)
+        + (R0_M[comp_key] / diffusivity) * (f_power ** (-1.0 / 3.0) - 1.0)
+    )
+    return gate * numerator / denominator
+
+
+def medrano_reaction_rate_value(
+    comp_key: str,
+    *,
+    temperature_k: float,
+    gas_concentration_molm3: float,
+    conversion: float,
+    reactant_fraction: float,
+    active_inventory_molm3: float,
+) -> float:
+    return active_inventory_molm3 * medrano_conversion_rate_value(
+        comp_key,
+        temperature_k=temperature_k,
+        gas_concentration_molm3=gas_concentration_molm3,
+        conversion=conversion,
+        reactant_fraction=reactant_fraction,
+    )
+
+
+def _safe_gas_concentration_expr(concentration_molm3):
+    return _smooth_pos_expr(concentration_molm3) + Constant(CG_FLOOR)
+
+
+def _medrano_conversion_rate_expr(
+    comp_key: str,
+    *,
+    temperature_k,
+    gas_concentration_molm3,
+    conversion,
+    reactant_fraction,
+):
+    k = k_expr(comp_key, temperature_k=temperature_k)
+    diffusivity = D_expr(comp_key, temperature_k=temperature_k, conv=conversion)
+    gas_concentration_safe = _safe_gas_concentration_expr(gas_concentration_molm3)
+    f_power = reactant_fraction + Constant(F_FLOOR)
+    gate = reactant_fraction / (reactant_fraction + Constant(F_GATE))
+    numerator = (
+        Constant(3.0 * B[comp_key])
+        * gas_concentration_safe ** REACTION_ORDER[comp_key]
+        / Constant(R0_M[comp_key] * CS_MOL_PER_M3[comp_key])
+    )
+    denominator = (
+        Constant(1.0) / k * f_power ** (-2.0 / 3.0)
+        + Constant(R0_M[comp_key]) / diffusivity * (f_power ** (-1.0 / 3.0) - Constant(1.0))
+    )
+    return gate * numerator / denominator
+
+
+def _medrano_reaction_rate_expr(
+    comp_key: str,
+    *,
+    temperature_k,
+    gas_concentration_molm3,
+    conversion,
+    reactant_fraction,
+    active_inventory_molm3,
+):
+    return active_inventory_molm3 * _medrano_conversion_rate_expr(
+        comp_key,
+        temperature_k=temperature_k,
+        gas_concentration_molm3=gas_concentration_molm3,
+        conversion=conversion,
+        reactant_fraction=reactant_fraction,
+    )
+
+
+@register_kinetics_hook("medrano_reduction_h2")
+def medrano_reduction_h2(context: KineticsContext):
+    terms = _medrano_terms(context, "H2")
+    rate_expression = _medrano_reaction_rate_expr(
+        "H2",
+        temperature_k=terms.temperature_k,
+        gas_concentration_molm3=terms.gas_conc_molm3,
+        conversion=terms.frac_reduced,
+        reactant_fraction=terms.frac_oxidised,
+        active_inventory_molm3=terms.ni_conc_molm3 + terms.nio_conc_molm3,
+    )
+    return Constant(1.0 * mol / (m**3 * s)) * rate_expression
+
+
+@register_kinetics_hook("medrano_reduction_co")
+def medrano_reduction_co(context: KineticsContext):
+    terms = _medrano_terms(context, "CO")
+    rate_expression = _medrano_reaction_rate_expr(
+        "CO",
+        temperature_k=terms.temperature_k,
+        gas_concentration_molm3=terms.gas_conc_molm3,
+        conversion=terms.frac_reduced,
+        reactant_fraction=terms.frac_oxidised,
+        active_inventory_molm3=terms.ni_conc_molm3 + terms.nio_conc_molm3,
+    )
+    return Constant(1.0 * mol / (m**3 * s)) * rate_expression
+
+
+@register_kinetics_hook("medrano_oxidation_o2")
+def medrano_oxidation_o2(context: KineticsContext):
+    terms = _medrano_terms(context, "O2")
+    rate_expression = _medrano_reaction_rate_expr(
+        "O2",
+        temperature_k=terms.temperature_k,
+        gas_concentration_molm3=terms.gas_conc_molm3,
+        conversion=terms.frac_oxidised,
+        reactant_fraction=terms.frac_reduced,
+        active_inventory_molm3=terms.ni_conc_molm3 + terms.nio_conc_molm3,
+    )
+    return Constant(1.0 * mol / (m**3 * s)) * rate_expression
+
+
+__all__ = [
+    "ACTIVATION_ENERGY_J_PER_MOL",
+    "B",
+    "CG_FLOOR",
+    "CS_MOL_PER_M3",
+    "D0_M2_PER_S",
+    "ED_J_PER_MOL",
+    "F_FLOOR",
+    "F_GATE",
+    "GAS_CONSTANT_J_PER_MOL_K",
+    "K0_M_PER_S",
+    "KX",
+    "MedranoTerms",
+    "POS_EPS",
+    "R0_M",
+    "REACTION_ORDER",
+    "D_value",
+    "k_value",
+    "medrano_conversion_rate_value",
+    "medrano_reaction_rate_value",
+    "safe_gas_concentration_value",
+]

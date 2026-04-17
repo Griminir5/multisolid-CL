@@ -4,7 +4,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from . import solver_ignore_discontinuities as solver_alt
+try:
+    from . import solver_ignore_discontinuities as solver_alt
+except ImportError:  # pragma: no cover - supports unittest discovery with -s packed_bed
+    from packed_bed import solver_ignore_discontinuities as solver_alt
 
 
 class _FakeModel:

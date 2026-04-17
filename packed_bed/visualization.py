@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import matplotlib
-#import pygraphviz
+import pygraphviz
 
 matplotlib.use("Agg")
 
@@ -210,93 +210,93 @@ def _save_figure(figure, path: Path) -> None:
     plt.close(figure)
 
 
-# def _build_system_agraph(system_graph: SystemGraph):
-#     graph = pygraphviz.AGraph(name="system_graph", strict=False, directed=True)
-#     graph.graph_attr.update(
-#         bgcolor="white",
-#         pad="0.35",
-#         outputorder="edgesfirst",
-#         overlap="false",
-#         splines="true",
-#         labelloc="t",
-#         labeljust="c",
-#         fontname="Arial",
-#         fontsize="20",
-#         label="Species and Reaction System Graph",
-#         rankdir="LR",
-#         nodesep="0.55",
-#         ranksep="0.85",
-#         newrank="true",
-#     )
+def _build_system_agraph(system_graph: SystemGraph):
+    graph = pygraphviz.AGraph(name="system_graph", strict=False, directed=True)
+    graph.graph_attr.update(
+        bgcolor="white",
+        pad="0.35",
+        outputorder="edgesfirst",
+        overlap="false",
+        splines="true",
+        labelloc="t",
+        labeljust="c",
+        fontname="Arial",
+        fontsize="20",
+        label="Species and Reaction System Graph",
+        rankdir="LR",
+        nodesep="0.55",
+        ranksep="0.85",
+        newrank="true",
+    )
 
-#     graph.node_attr.update(
-#         fontname="Arial",
-#         fontsize="13",
-#         penwidth="1.6",
-#         margin="0.18,0.12",
-#     )
-#     graph.edge_attr.update(
-#         fontname="Arial",
-#         fontsize="13",
-#         penwidth="2.0",
-#         arrowsize="0.95",
-#     )
+    graph.node_attr.update(
+        fontname="Arial",
+        fontsize="13",
+        penwidth="1.6",
+        margin="0.18,0.12",
+    )
+    graph.edge_attr.update(
+        fontname="Arial",
+        fontsize="13",
+        penwidth="2.0",
+        arrowsize="0.95",
+    )
 
-#     for node in system_graph.nodes:
-#         if node.kind == "reaction":
-#             attributes = {
-#                 "label": node.label,
-#                 "shape": "box",
-#                 "style": "rounded,filled",
-#                 "fillcolor": node.color,
-#                 "color": "#3d405b",
-#                 "fontcolor": "white",
-#                 "margin": "0.22,0.14",
-#             }
-#         else:
-#             attributes = {
-#                 "label": node.label,
-#                 "shape": "ellipse",
-#                 "style": "filled",
-#                 "fillcolor": node.color,
-#                 "color": "#2f3e46",
-#                 "fontcolor": "#1f2933",
-#             }
-#         graph.add_node(node.id, **attributes)
+    for node in system_graph.nodes:
+        if node.kind == "reaction":
+            attributes = {
+                "label": node.label,
+                "shape": "box",
+                "style": "rounded,filled",
+                "fillcolor": node.color,
+                "color": "#3d405b",
+                "fontcolor": "white",
+                "margin": "0.22,0.14",
+            }
+        else:
+            attributes = {
+                "label": node.label,
+                "shape": "ellipse",
+                "style": "filled",
+                "fillcolor": node.color,
+                "color": "#2f3e46",
+                "fontcolor": "#1f2933",
+            }
+        graph.add_node(node.id, **attributes)
 
-#     for edge in system_graph.edges:
-#         if edge.coefficient < 0.0:
-#             edge_color = "#355070"
-#         elif edge.coefficient > 0.0:
-#             edge_color = "#bc6c25"
-#         else:
-#             edge_color = "#6d597a"
+    for edge in system_graph.edges:
+        if edge.coefficient < 0.0:
+            edge_color = "#355070"
+        elif edge.coefficient > 0.0:
+            edge_color = "#bc6c25"
+        else:
+            edge_color = "#6d597a"
 
-#         attributes = {
-#             "label": _format_edge_label(edge),
-#             "color": edge_color,
-#             "fontcolor": edge_color,
-#             "dir": "both" if edge.reversible else "forward",
-#             "arrowhead": "normal",
-#             "arrowtail": "normal" if edge.reversible else "none",
-#             "style": "dashed" if edge.coefficient == 0.0 else "solid",
-#             "constraint": "false" if edge.coefficient == 0.0 else "true",
-#             "penwidth": "1.8" if edge.coefficient == 0.0 else "2.2",
-#             "arrowsize": "0.85" if edge.coefficient == 0.0 else "0.95",
-#         }
-#         graph.add_edge(edge.source, edge.target, **attributes)
+        attributes = {
+            "label": _format_edge_label(edge),
+            "color": edge_color,
+            "fontcolor": edge_color,
+            "dir": "both" if edge.reversible else "forward",
+            "arrowhead": "normal",
+            "arrowtail": "normal" if edge.reversible else "none",
+            "style": "dashed" if edge.coefficient == 0.0 else "solid",
+            "constraint": "false" if edge.coefficient == 0.0 else "true",
+            "penwidth": "1.8" if edge.coefficient == 0.0 else "2.2",
+            "arrowsize": "0.85" if edge.coefficient == 0.0 else "0.95",
+        }
+        graph.add_edge(edge.source, edge.target, **attributes)
 
-#     return graph
+    return graph
 
 
-# def render_system_graph(system_graph: SystemGraph, output_dir) -> dict[str, Path]:
-#     output_dir = Path(output_dir)
-#     output_dir.mkdir(parents=True, exist_ok=True)
-#     svg_path = output_dir / "system_graph.svg"
-#     graph = _build_system_agraph(system_graph)
-#     graph.draw(str(svg_path), prog="neato")
+def render_system_graph(system_graph: SystemGraph, output_dir) -> dict[str, Path]:
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    svg_path = output_dir / "system_graph.svg"
+    graph = _build_system_agraph(system_graph)
+    graph.draw(str(svg_path), prog="neato")
 
-#     return {"system_graph_svg": svg_path}
+    return {"system_graph_svg": svg_path}
 
 
 def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Path]:
