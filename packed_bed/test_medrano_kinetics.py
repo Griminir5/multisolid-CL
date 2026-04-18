@@ -89,6 +89,32 @@ class MedranoKineticsTests(unittest.TestCase):
 
         self.assertEqual(rate, 0.0)
 
+    def test_active_inventory_uses_current_solid_reactant(self) -> None:
+        self.assertEqual(
+            medrano.active_solid_inventory_value(
+                "O2",
+                ni_concentration_molm3=2.0,
+                nio_concentration_molm3=5.0,
+            ),
+            2.0,
+        )
+        self.assertEqual(
+            medrano.active_solid_inventory_value(
+                "H2",
+                ni_concentration_molm3=2.0,
+                nio_concentration_molm3=5.0,
+            ),
+            5.0,
+        )
+        self.assertEqual(
+            medrano.active_solid_inventory_value(
+                "CO",
+                ni_concentration_molm3=2.0,
+                nio_concentration_molm3=5.0,
+            ),
+            5.0,
+        )
+
     def test_slightly_negative_reactant_fraction_within_floor_is_finite(self) -> None:
         rate = medrano.medrano_reaction_rate_value(
             "H2",

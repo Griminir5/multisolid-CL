@@ -79,19 +79,34 @@ def _warm_start_first_reporting_interval(simulation, *, max_step_s=0.1):
     if first_report_time <= max_step_s + tolerance:
         return
 
+    warm_start_time = min(first_report_time, current_time + max(1.0, max_step_s))
     _integrate_until_time(
         simulation,
-        first_report_time,
+        warm_start_time,
         max_step_s=max_step_s,
         tolerance=tolerance,
     )
-    simulation.ReportData(float(simulation.CurrentTime))
+    if math.isclose(float(simulation.CurrentTime), first_report_time, rel_tol=0.0, abs_tol=tolerance):
+        simulation.ReportData(float(simulation.CurrentTime))
 
 
-def run_assembled_simulation(assembly: SimulationAssembly):
+def run_assembled_simulation(
+    assembly: SimulationAssembly,
+    *,
+    report_ids=None,
+    include_plot_variables=False,
+    include_benchmark_snapshot=False,
+):
     configure_evaluation_mode()
     simulation = assembly.simulation
-    _base._set_reporting_on(simulation)
+    if report_ids is None:
+        report_ids = _base._requested_report_ids(assembly)
+    _base._set_reporting_on(
+        simulation,
+        report_ids,
+        include_plot_variables=include_plot_variables,
+        include_benchmark_snapshot=include_benchmark_snapshot,
+    )
     simulation.ReportTimeDerivatives = assembly.run_bundle.run.report_time_derivatives
     simulation.ReportingInterval = assembly.run_bundle.run.reporting_interval_s
     simulation.TimeHorizon = assembly.run_bundle.run.time_horizon_s

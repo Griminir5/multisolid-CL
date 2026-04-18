@@ -45,7 +45,7 @@ def run_simulation(
         property_registry=property_registry,
         reaction_catalog=reaction_catalog,
     )
-    reporter = run_assembled_simulation(assembly)
+    reporter = run_assembled_simulation(assembly, include_plot_variables=True)
 
     run_result = RunResult(
         run_bundle=run_bundle,

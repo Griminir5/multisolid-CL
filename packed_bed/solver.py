@@ -15,6 +15,7 @@ from daetools.pyDAE import *
 from .axial_schemes import reconstruct_face_states
 from .config import ModelConfig, ProgramSegment, RunBundle, ScalarProgram, SolidConfig, VectorProgram
 from .kinetics import KineticsContext, resolve_kinetics_hooks
+from .reporting import reporting_targets
 from .reactions import ReactionNetwork, build_reaction_network
 from .solid_profiles import (
     build_cell_scalar_profile,
@@ -97,6 +98,8 @@ class CLBed_mass(daeModel):
         property_registry,
         mass_scheme,
         heat_scheme,
+        materialize_source_terms=False,
+        materialize_solid_mole_fractions=False,
         Description="",
         Parent=None,
     ):
@@ -109,6 +112,7 @@ class CLBed_mass(daeModel):
         self.property_registry = property_registry
         self.mass_scheme = mass_scheme
         self.heat_scheme = heat_scheme
+        self.materialize_solid_mole_fractions = bool(materialize_solid_mole_fractions)
         self.inlet_flow_segments = []
         self.inlet_composition_segments = []
         self.inlet_temperature_segments = []
@@ -152,19 +156,25 @@ class CLBed_mass(daeModel):
         self.xval_cells.DistributeOnDomain(self.x_centers)
         self.xval_faces.DistributeOnDomain(self.x_faces)
 
-        self.gasfrac = daeVariable("gasfrac", fraction_type, self, "Fraction of total bed volume occupied by gas", [self.x_centers])
-        self.solfrac = daeVariable("solfrac", fraction_type, self, "Fraction of total bed volume occupied by solid", [self.x_centers])
+        self.gasfrac = daeParameter("gasfrac", dimless, self, "Fraction of total bed volume occupied by gas", [self.x_centers])
+        self.solfrac = daeParameter("solfrac", dimless, self, "Fraction of total bed volume occupied by solid", [self.x_centers])
 
         self.c_gas = daeVariable("c_gas", molar_conc_type, self, "Concentration of gaseous component i per total bed volume", [self.N_gas, self.x_centers])
         self.c_sol = daeVariable("c_sol", molar_conc_sol_type, self, "Concentration of solid component i per total bed volume", [self.N_sol, self.x_centers])
         self.ct_gas = daeVariable("c_gas_tot", molar_conc_type, self, "Total concentration of gas per total bed volume", [self.x_centers])
         self.ct_sol = daeVariable("c_sol_tot", molar_conc_sol_type, self, "Total concentration of solid per total bed volume", [self.x_centers])
         self.y_gas = daeVariable("y_gas", molar_frac_type, self, "Molar fraction of gaseous component i", [self.N_gas, self.x_centers])
-        self.y_sol = daeVariable("y_sol", molar_frac_type, self, "Molar fraction of solid component i", [self.N_sol, self.x_centers])
+        self.y_sol = None
+        if self.materialize_solid_mole_fractions:
+            self.y_sol = daeVariable("y_sol", molar_frac_type, self, "Molar fraction of solid component i", [self.N_sol, self.x_centers])
         self.N_gas_face = daeVariable("N_gas_face", molar_flux_type, self, "Species i molar flux at cell faces", [self.N_gas, self.x_faces])
 
-        self.S_gas = daeVariable("S_gas", molar_source_type, self, "Net source of gas component i per total bed volume", [self.N_gas, self.x_centers])
-        self.S_sol = daeVariable("S_sol", molar_source_type, self, "Net source of solid component i per total bed volume", [self.N_sol, self.x_centers])
+        self.materialize_source_terms = bool(materialize_source_terms)
+        self.S_gas = None
+        self.S_sol = None
+        if self.materialize_source_terms:
+            self.S_gas = daeVariable("S_gas", molar_source_type, self, "Net source of gas component i per total bed volume", [self.N_gas, self.x_centers])
+            self.S_sol = daeVariable("S_sol", molar_source_type, self, "Net source of solid component i per total bed volume", [self.N_sol, self.x_centers])
         if self.reaction_network.has_reactions:
             self.R_rxn = daeVariable("R_rxn", molar_source_type, self, "Reaction rate of reaction k per total bed volume", [self.N_rxn, self.x_centers])
         else:
@@ -200,8 +210,6 @@ class CLBed_mass(daeModel):
         self.T_in = daeVariable("T_in", temp_type, self, "Temperature at the inlet")
         self.P_in = daeVariable("P_in", pres_type, self, "Pressure at the inlet boundary")
         self.P_out = daeVariable("P_out", pres_type, self, "Pressure at the outlet boundary")
-
-        self.mw_mix = daeVariable("mw_mix", molecular_weight_type, self, "Gas mixture molecular weight in a cell", [self.x_centers])
 
     def build_kinetics_context(self, idx_cell):
         return KineticsContext(
@@ -271,6 +279,60 @@ class CLBed_mass(daeModel):
         ]
         self.inlet_temperature_segments = inlet_temperature_program.build_segments()
         self.outlet_pressure_segments = outlet_pressure_program.build_segments()
+
+    def _source_expression(self, coefficients, idx_cell):
+        source = Constant(0.0 * mol / (m**3 * s))
+        if self.R_rxn is None:
+            return source
+
+        for reaction_idx, coefficient in enumerate(coefficients):
+            if coefficient != 0.0:
+                source = source + Constant(coefficient) * self.R_rxn(reaction_idx, idx_cell)
+        return source
+
+    def _gas_source_expression(self, gas_idx, idx_cell):
+        return self._source_expression(
+            self.reaction_network.gas_source_matrix[gas_idx],
+            idx_cell,
+        )
+
+    def _solid_source_expression(self, sol_idx, idx_cell):
+        return self._source_expression(
+            self.reaction_network.solid_source_matrix[sol_idx],
+            idx_cell,
+        )
+
+    def _gas_mixture_molecular_weight_expression(self, idx_cell):
+        mw_mix_expr = Constant(0.0 * kg / mol)
+        for gas_idx, species_name in enumerate(self.gas_species):
+            mw_mix_expr = mw_mix_expr + self.y_gas(gas_idx, idx_cell) * Constant(
+                self.property_registry.get_record(species_name).mw * kg / mol
+            )
+        return mw_mix_expr
+
+    def _gas_mixture_viscosity_expression(self, idx_cell):
+        quadratic_coefficients = []
+        shared_t_ref = None
+        for species_name in self.gas_species:
+            viscosity = self.property_registry.get_record(species_name).viscosity
+            if viscosity is None or not all(hasattr(viscosity, attr) for attr in ("t_ref", "a0", "a1", "a2")):
+                return None
+            if shared_t_ref is None:
+                shared_t_ref = float(viscosity.t_ref)
+            elif not math.isclose(shared_t_ref, float(viscosity.t_ref), rel_tol=0.0, abs_tol=1e-12):
+                return None
+            quadratic_coefficients.append((float(viscosity.a0), float(viscosity.a1), float(viscosity.a2)))
+
+        d_t = self.T(idx_cell) - Constant(shared_t_ref * K)
+        a0_mix = Constant(0.0 * Pa * s)
+        a1_mix = Constant(0.0 * (Pa * s) / K)
+        a2_mix = Constant(0.0 * (Pa * s) / K**2)
+        for gas_idx, (a0, a1, a2) in enumerate(quadratic_coefficients):
+            mole_fraction = self.y_gas(gas_idx, idx_cell)
+            a0_mix = a0_mix + mole_fraction * Constant(a0 * Pa * s)
+            a1_mix = a1_mix + mole_fraction * Constant(a1 * (Pa * s) / K)
+            a2_mix = a2_mix + mole_fraction * Constant(a2 * (Pa * s) / K**2)
+        return a0_mix + d_t * (a1_mix + d_t * a2_mix)
 
     def _segment_expression(self, segment, units):
         start_value = Constant(segment.start_value * units)
@@ -385,18 +447,6 @@ class CLBed_mass(daeModel):
             "Active_outlet_pressure",
         )
 
-
-
-        eq = self.CreateEquation("gas_bed_fraction")
-        idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-        eq.Residual = self.gasfrac(idx_cell) - self.e_b(idx_cell) - (1 - self.e_b(idx_cell)) * self.e_p(idx_cell)
-
-        eq = self.CreateEquation("solid_bed_fraction")
-        idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-        eq.Residual = 1 - self.gasfrac(idx_cell) - self.solfrac(idx_cell)
-
-
-
         eq = self.CreateEquation("total_concentration_closure")
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
         eq.Residual = self.ct_gas(idx_cell) - Sum(self.c_gas.array("*", idx_cell))
@@ -406,23 +456,16 @@ class CLBed_mass(daeModel):
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
         eq.Residual = self.y_gas(idx_gas, idx_cell) * self.ct_gas(idx_cell) - self.c_gas(idx_gas, idx_cell)
 
-        eq = self.CreateEquation("gas_mixture_molecular_weight")
-        idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-        mw_mix_expr = Constant(0 * (Pa * m * s**2) / mol)
-        for gas_idx, species_name in enumerate(self.gas_species):
-            mw_mix_expr = mw_mix_expr + self.y_gas(gas_idx, idx_cell) * Constant(
-                self.property_registry.get_record(species_name).mw * (Pa * m * s**2) / mol
-            )
-        eq.Residual = self.mw_mix(idx_cell) - mw_mix_expr
-
         eq = self.CreateEquation("gas_mixture_viscosity")
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-        mu_mix_expr = Constant(0 * Pa * s)
-        for gas_idx, species_name in enumerate(self.gas_species):
-            mu_mix_expr = mu_mix_expr + self.y_gas(gas_idx, idx_cell) * self.property_registry.viscosity_expression(
-                species_name,
-                self.T(idx_cell),
-            )
+        mu_mix_expr = self._gas_mixture_viscosity_expression(idx_cell)
+        if mu_mix_expr is None:
+            mu_mix_expr = Constant(0 * Pa * s)
+            for gas_idx, species_name in enumerate(self.gas_species):
+                mu_mix_expr = mu_mix_expr + self.y_gas(gas_idx, idx_cell) * self.property_registry.viscosity_expression(
+                    species_name,
+                    self.T(idx_cell),
+                )
         eq.Residual = self.mu_g(idx_cell) - mu_mix_expr
 
         eq = self.CreateEquation("gas_equation_of_state")
@@ -431,7 +474,7 @@ class CLBed_mass(daeModel):
 
         eq = self.CreateEquation("gas_density_closure")
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-        eq.Residual = self.rho_g(idx_cell) - self.P(idx_cell) * self.mw_mix(idx_cell) / (self.R_gas() * self.T(idx_cell))
+        eq.Residual = self.rho_g(idx_cell) - self.P(idx_cell) * self._gas_mixture_molecular_weight_expression(idx_cell) / (self.R_gas() * self.T(idx_cell))
 
 
 
@@ -439,10 +482,11 @@ class CLBed_mass(daeModel):
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
         eq.Residual = self.ct_sol(idx_cell) - Sum(self.c_sol.array("*", idx_cell))
 
-        eq = self.CreateEquation("solid_molar_fraction_calc")
-        idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, "j")
-        idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-        eq.Residual = self.y_sol(idx_sol, idx_cell) * self.ct_sol(idx_cell) - self.c_sol(idx_sol, idx_cell)
+        if self.y_sol is not None:
+            eq = self.CreateEquation("solid_molar_fraction_calc")
+            idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, "j")
+            idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+            eq.Residual = self.y_sol(idx_sol, idx_cell) * self.ct_sol(idx_cell) - self.c_sol(idx_sol, idx_cell)
 
 
 
@@ -502,15 +546,27 @@ class CLBed_mass(daeModel):
         for idx_cell in range(Nc):
             dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
 
-            eq = self.CreateEquation(f"species_balance_cell_{idx_cell}")
-            idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
-            eq.Residual = dt(self.c_gas(idx_gas, idx_cell)) + (
-                self.N_gas_face(idx_gas, idx_cell + 1) - self.N_gas_face(idx_gas, idx_cell)
-            ) / dx - self.S_gas(idx_gas, idx_cell)
+            if self.S_gas is not None:
+                eq = self.CreateEquation(f"species_balance_cell_{idx_cell}")
+                idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
+                eq.Residual = dt(self.c_gas(idx_gas, idx_cell)) + (
+                    self.N_gas_face(idx_gas, idx_cell + 1) - self.N_gas_face(idx_gas, idx_cell)
+                ) / dx - self.S_gas(idx_gas, idx_cell)
+            else:
+                for gas_idx in range(Ng):
+                    eq = self.CreateEquation(f"species_balance_cell_{idx_cell}_{self.gas_species[gas_idx]}")
+                    eq.Residual = dt(self.c_gas(gas_idx, idx_cell)) + (
+                        self.N_gas_face(gas_idx, idx_cell + 1) - self.N_gas_face(gas_idx, idx_cell)
+                    ) / dx - self._gas_source_expression(gas_idx, idx_cell)
 
-            eq = self.CreateEquation(f"solid_species_balance_cell_{idx_cell}")
-            idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, "j")
-            eq.Residual = dt(self.c_sol(idx_sol, idx_cell)) - self.S_sol(idx_sol, idx_cell)
+            if self.S_sol is not None:
+                eq = self.CreateEquation(f"solid_species_balance_cell_{idx_cell}")
+                idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, "j")
+                eq.Residual = dt(self.c_sol(idx_sol, idx_cell)) - self.S_sol(idx_sol, idx_cell)
+            else:
+                for sol_idx in range(Ns):
+                    eq = self.CreateEquation(f"solid_species_balance_cell_{idx_cell}_{self.solid_species[sol_idx]}")
+                    eq.Residual = dt(self.c_sol(sol_idx, idx_cell)) - self._solid_source_expression(sol_idx, idx_cell)
 
         eq = self.CreateEquation("rhs_boundary_flux")
         idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
@@ -625,31 +681,18 @@ class CLBed_mass(daeModel):
         eq = self.CreateEquation("heat_bed_total_definition")
         eq.Residual = self.heat_bed_total() - heat_bed_total
 
-        if self.reaction_network.has_reactions:
+        if self.materialize_source_terms:
             for gas_idx, species_name in enumerate(self.gas_species):
-                coefficients = self.reaction_network.gas_source_matrix[gas_idx]
                 eq = self.CreateEquation(f"gas_source_assembly_{species_name}")
                 idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-                residual = self.S_gas(gas_idx, idx_cell)
-                for reaction_idx, coefficient in enumerate(coefficients):
-                    if coefficient != 0.0:
-                        residual = residual - Constant(coefficient * mol / (m**3 * s)) * (
-                            self.R_rxn(reaction_idx, idx_cell) / Constant(1.0 * mol / (m**3 * s))
-                        )
-                eq.Residual = residual
+                eq.Residual = self.S_gas(gas_idx, idx_cell) - self._gas_source_expression(gas_idx, idx_cell)
 
             for sol_idx, species_name in enumerate(self.solid_species):
-                coefficients = self.reaction_network.solid_source_matrix[sol_idx]
                 eq = self.CreateEquation(f"solid_source_assembly_{species_name}")
                 idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-                residual = self.S_sol(sol_idx, idx_cell)
-                for reaction_idx, coefficient in enumerate(coefficients):
-                    if coefficient != 0.0:
-                        residual = residual - Constant(coefficient * mol / (m**3 * s)) * (
-                            self.R_rxn(reaction_idx, idx_cell) / Constant(1.0 * mol / (m**3 * s))
-                        )
-                eq.Residual = residual
+                eq.Residual = self.S_sol(sol_idx, idx_cell) - self._solid_source_expression(sol_idx, idx_cell)
 
+        if self.reaction_network.has_reactions:
             for reaction_idx, reaction in enumerate(self.reaction_network.reactions):
                 eq = self.CreateEquation(f"reaction_rate_{reaction.id}")
                 idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
@@ -657,7 +700,7 @@ class CLBed_mass(daeModel):
                 eq.Residual = self.R_rxn(reaction_idx, idx_cell) - self.reaction_rate_hooks[reaction_idx](
                     kinetics_context
                 )
-        else:
+        elif self.materialize_source_terms:
             eq = self.CreateEquation("gas_source_term_placeholder")
             idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
             idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
@@ -687,6 +730,8 @@ class simBed(daeSimulation):
         operation_time_horizon,
         model_config: ModelConfig,
         system_name,
+        materialize_source_terms=False,
+        materialize_solid_mole_fractions=False,
     ):
         daeSimulation.__init__(self)
 
@@ -705,6 +750,8 @@ class simBed(daeSimulation):
         self.outlet_pressure_program = outlet_pressure_program
         self.operation_time_horizon = operation_time_horizon
         self.system_name = system_name
+        self.materialize_source_terms = bool(materialize_source_terms)
+        self.materialize_solid_mole_fractions = bool(materialize_solid_mole_fractions)
 
         self.model = CLBed_mass(
             self.system_name,
@@ -715,6 +762,8 @@ class simBed(daeSimulation):
             property_registry=self.property_registry,
             mass_scheme=self.mass_scheme,
             heat_scheme=self.heat_scheme,
+            materialize_source_terms=self.materialize_source_terms,
+            materialize_solid_mole_fractions=self.materialize_solid_mole_fractions,
         )
         self.model.SetOperationProgram(
             inlet_flow_program=self.inlet_flow_program,
@@ -745,6 +794,11 @@ class simBed(daeSimulation):
         self.model.e_b.SetValues(build_cell_scalar_profile(self.solid_config, center_coords, "e_b"))
         self.model.e_p.SetValues(build_cell_scalar_profile(self.solid_config, center_coords, "e_p"))
         self.model.d_p.SetValues(build_face_scalar_profile(self.solid_config, face_coords, "d_p"))
+        e_b_values = np.asarray(self.model.e_b.npyValues, dtype=float)
+        e_p_values = np.asarray(self.model.e_p.npyValues, dtype=float)
+        gas_fraction = gas_fraction_from_voidages(e_b_values, e_p_values)
+        self.model.gasfrac.SetValues(gas_fraction)
+        self.model.solfrac.SetValues(solid_fraction_from_voidages(e_b_values, e_p_values))
 
     def SetUpVariables(self):
         ng = self.model.N_gas.NumberOfPoints
@@ -890,13 +944,10 @@ class simBed(daeSimulation):
         face_flux = inlet_y * molar_flux_in
 
         for cell_idx in range(nc):
-            self.model.gasfrac.SetInitialGuess(cell_idx, gasfrac0[cell_idx])
-            self.model.solfrac.SetInitialGuess(cell_idx, 1.0 - gasfrac0[cell_idx])
             self.model.T.SetInitialGuess(cell_idx, inlet_temperature * K)
             self.model.P.SetInitialGuess(cell_idx, p0[cell_idx] * Pa)
             self.model.mu_g.SetInitialGuess(cell_idx, mu_mix0[cell_idx] * Pa * s)
             self.model.rho_g.SetInitialGuess(cell_idx, rho0[cell_idx] * (Pa * s**2) / m**2)
-            self.model.mw_mix.SetInitialGuess(cell_idx, mw_mix0[cell_idx] * (Pa * m * s**2) / mol)
             self.model.ct_gas.SetInitialGuess(cell_idx, ct0[cell_idx] * mol / m**3)
             self.model.ct_sol.SetInitialGuess(cell_idx, ct0_sol[cell_idx] * mol / m**3)
             self.model.h_cell.SetInitialCondition(cell_idx, h_cell0[cell_idx] * J / m**3)
@@ -906,15 +957,18 @@ class simBed(daeSimulation):
             for cell_idx in range(nc):
                 self.model.c_gas.SetInitialCondition(gas_idx, cell_idx, c0[gas_idx, cell_idx] * mol / m**3)
                 self.model.y_gas.SetInitialGuess(gas_idx, cell_idx, inlet_y[gas_idx])
-                self.model.S_gas.SetInitialGuess(gas_idx, cell_idx, 0.0 * mol / (m**3 * s))
+                if self.model.S_gas is not None:
+                    self.model.S_gas.SetInitialGuess(gas_idx, cell_idx, 0.0 * mol / (m**3 * s))
                 self.model.h_gas.SetInitialGuess(gas_idx, cell_idx, gas_h0[gas_idx] * J / mol)
 
         for sol_idx in range(ns):
             for cell_idx in range(nc):
                 self.model.c_sol.SetInitialCondition(sol_idx, cell_idx, c0_sol[sol_idx, cell_idx] * mol / m**3)
-                y0_sol = 0.0 if ct0_sol[cell_idx] <= 0.0 else c0_sol[sol_idx, cell_idx] / ct0_sol[cell_idx]
-                self.model.y_sol.SetInitialGuess(sol_idx, cell_idx, y0_sol)
-                self.model.S_sol.SetInitialGuess(sol_idx, cell_idx, 0.0 * mol / (m**3 * s))
+                if self.model.y_sol is not None:
+                    y0_sol = 0.0 if ct0_sol[cell_idx] <= 0.0 else c0_sol[sol_idx, cell_idx] / ct0_sol[cell_idx]
+                    self.model.y_sol.SetInitialGuess(sol_idx, cell_idx, y0_sol)
+                if self.model.S_sol is not None:
+                    self.model.S_sol.SetInitialGuess(sol_idx, cell_idx, 0.0 * mol / (m**3 * s))
                 self.model.h_sol.SetInitialGuess(sol_idx, cell_idx, solid_h0[sol_idx] * J / mol)
 
         self.model.F_in.SetInitialGuess(fin * mol / s)
@@ -991,6 +1045,9 @@ def assemble_simulation(
         repeat=run_bundle.run.repeat_program,
         time_horizon=run_bundle.run.time_horizon_s,
     )
+    requested_reports = set(run_bundle.run.outputs.requested_reports)
+    materialize_source_terms = reaction_network.has_reactions or bool(requested_reports & {"gas_source", "solid_source"})
+    materialize_solid_mole_fractions = "solid_mole_fraction" in requested_reports
 
     simulation = simBed(
         gas_species=run_bundle.chemistry.gas_species,
@@ -1008,12 +1065,75 @@ def assemble_simulation(
         operation_time_horizon=run_bundle.run.time_horizon_s,
         model_config=run_bundle.run.model,
         system_name=run_bundle.run.system_name,
+        materialize_source_terms=materialize_source_terms,
+        materialize_solid_mole_fractions=materialize_solid_mole_fractions,
     )
     return SimulationAssembly(run_bundle=run_bundle, simulation=simulation)
 
 
-def _set_reporting_on(simulation):
-    simulation.model.SetReportingOn(True)
+def _requested_report_ids(assembly: SimulationAssembly):
+    try:
+        return tuple(assembly.run_bundle.run.outputs.requested_reports)
+    except AttributeError:
+        return None
+
+
+def _set_named_reporting(model, names, *, object_registry_name):
+    registry = getattr(model, object_registry_name, {})
+    missing_names = []
+    for name in names:
+        reporting_object = registry.get(name)
+        if reporting_object is None:
+            missing_names.append(name)
+            continue
+        reporting_object.ReportingOn = True
+    if missing_names:
+        available = ", ".join(sorted(registry))
+        missing = ", ".join(missing_names)
+        raise ValueError(
+            f"Cannot enable reporting for unknown {object_registry_name} entries: {missing}. "
+            f"Available entries: {available}."
+        )
+
+
+def _set_reporting_on(
+    simulation,
+    report_ids=None,
+    *,
+    include_plot_variables=False,
+    include_benchmark_snapshot=False,
+):
+    if report_ids is None:
+        simulation.model.SetReportingOn(True)
+        simulation._packed_bed_reporting_options = None
+        return
+
+    variable_names, parameter_names = reporting_targets(
+        report_ids,
+        include_plot_variables=include_plot_variables,
+        include_benchmark_snapshot=include_benchmark_snapshot,
+    )
+    simulation.model.SetReportingOn(False)
+    _set_named_reporting(simulation.model, variable_names, object_registry_name="dictVariables")
+    _set_named_reporting(simulation.model, parameter_names, object_registry_name="dictParameters")
+    simulation._packed_bed_reporting_options = {
+        "report_ids": tuple(report_ids),
+        "include_plot_variables": include_plot_variables,
+        "include_benchmark_snapshot": include_benchmark_snapshot,
+    }
+
+
+def _restore_reporting_on(simulation):
+    reporting_options = getattr(simulation, "_packed_bed_reporting_options", None)
+    if reporting_options is None:
+        simulation.model.SetReportingOn(True)
+        return
+    _set_reporting_on(
+        simulation,
+        reporting_options["report_ids"],
+        include_plot_variables=reporting_options["include_plot_variables"],
+        include_benchmark_snapshot=reporting_options["include_benchmark_snapshot"],
+    )
 
 
 def _sorted_unique_times(times, *, tolerance=1e-12):
@@ -1136,7 +1256,7 @@ def _nudge_past_breakpoint_if_needed(simulation, breakpoint_times, *, target_tim
         simulation.Run()
     finally:
         simulation.TimeHorizon = original_time_horizon
-        simulation.model.SetReportingOn(True)
+        _restore_reporting_on(simulation)
 
     if float(simulation.CurrentTime) <= current_time + tolerance:
         raise RuntimeError(
@@ -1172,20 +1292,35 @@ def _warm_start_first_reporting_interval(simulation, breakpoint_times, *, max_st
     if first_report_time <= max_step_s + tolerance:
         return
 
+    warm_start_time = min(first_report_time, current_time + max(1.0, max_step_s))
     _integrate_until_time_with_breakpoints(
         simulation,
-        first_report_time,
+        warm_start_time,
         breakpoint_times,
         max_step_s=max_step_s,
         tolerance=tolerance,
     )
-    simulation.ReportData(float(simulation.CurrentTime))
+    if math.isclose(float(simulation.CurrentTime), first_report_time, rel_tol=0.0, abs_tol=tolerance):
+        simulation.ReportData(float(simulation.CurrentTime))
 
 
-def run_assembled_simulation(assembly: SimulationAssembly):
+def run_assembled_simulation(
+    assembly: SimulationAssembly,
+    *,
+    report_ids=None,
+    include_plot_variables=False,
+    include_benchmark_snapshot=False,
+):
     configure_evaluation_mode()
     simulation = assembly.simulation
-    _set_reporting_on(simulation)
+    if report_ids is None:
+        report_ids = _requested_report_ids(assembly)
+    _set_reporting_on(
+        simulation,
+        report_ids,
+        include_plot_variables=include_plot_variables,
+        include_benchmark_snapshot=include_benchmark_snapshot,
+    )
     simulation.ReportTimeDerivatives = assembly.run_bundle.run.report_time_derivatives
     simulation.ReportingInterval = assembly.run_bundle.run.reporting_interval_s
     simulation.TimeHorizon = assembly.run_bundle.run.time_horizon_s

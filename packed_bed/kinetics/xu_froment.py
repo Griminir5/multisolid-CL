@@ -318,23 +318,31 @@ def _catalyst_mass_density_expression(context: KineticsContext):
 
 def _xu_froment_terms(context: KineticsContext) -> XuFromentTerms:
     temperature_k = _temperature_k_expression(context.model.T(context.idx_cell))
+    pressure_pa = _pressure_pa_expression(context.model.P(context.idx_cell))
+    p_ch4_pa = pressure_pa * context.model.y_gas(context.gas_index("CH4"), context.idx_cell)
+    p_co_pa = pressure_pa * context.model.y_gas(context.gas_index("CO"), context.idx_cell)
+    p_co2_pa = pressure_pa * context.model.y_gas(context.gas_index("CO2"), context.idx_cell)
+    p_h2_pa = pressure_pa * context.model.y_gas(context.gas_index("H2"), context.idx_cell)
+    p_h2o_pa = pressure_pa * context.model.y_gas(context.gas_index("H2O"), context.idx_cell)
+    hydrogen_mole_fraction = context.model.y_gas(context.gas_index("H2"), context.idx_cell)
+    blended_floor = Constant(MIN_H2_MOLE_FRACTION) * Exp(Constant(math.log(LOW_H2_BLEND_BASE)) * hydrogen_mole_fraction)
+    p_inv_h2_pa_inv = Constant(1.0) / (pressure_pa * (hydrogen_mole_fraction + blended_floor))
+    denominator = (
+        Constant(1.0)
+        + _adsorption_constant_expression("CO", temperature_k) * p_co_pa
+        + _adsorption_constant_expression("H2", temperature_k) * p_h2_pa
+        + _adsorption_constant_expression("CH4", temperature_k) * p_ch4_pa
+        + _adsorption_constant_expression("H2O", temperature_k) * p_h2o_pa * p_inv_h2_pa_inv
+    )
     return XuFromentTerms(
         temperature_k=temperature_k,
-        p_ch4_pa=_partial_pressure_pa_expression(context, "CH4"),
-        p_co_pa=_partial_pressure_pa_expression(context, "CO"),
-        p_co2_pa=_partial_pressure_pa_expression(context, "CO2"),
-        p_h2_pa=_partial_pressure_pa_expression(context, "H2"),
-        p_h2o_pa=_partial_pressure_pa_expression(context, "H2O"),
-        p_inv_h2_pa_inv=_hydrogen_inverse_pressure_expression(context),
-        denominator=(
-            Constant(1.0)
-            + _adsorption_constant_expression("CO", temperature_k) * _partial_pressure_pa_expression(context, "CO")
-            + _adsorption_constant_expression("H2", temperature_k) * _partial_pressure_pa_expression(context, "H2")
-            + _adsorption_constant_expression("CH4", temperature_k) * _partial_pressure_pa_expression(context, "CH4")
-            + _adsorption_constant_expression("H2O", temperature_k)
-            * _partial_pressure_pa_expression(context, "H2O")
-            * _hydrogen_inverse_pressure_expression(context)
-        ),
+        p_ch4_pa=p_ch4_pa,
+        p_co_pa=p_co_pa,
+        p_co2_pa=p_co2_pa,
+        p_h2_pa=p_h2_pa,
+        p_h2o_pa=p_h2o_pa,
+        p_inv_h2_pa_inv=p_inv_h2_pa_inv,
+        denominator=denominator,
         catalyst_mass_density_kg_per_m3=_catalyst_mass_density_expression(context),
     )
 
