@@ -1008,9 +1008,28 @@ def configure_evaluation_mode():
     cfg.SetString("daetools.core.equations.evaluationMode", "computeStack_OpenMP")
 
 
+def _create_sparse_linear_solver():
+    try:
+        from daetools.solvers.trilinos import pyTrilinos
+
+        return pyTrilinos.daeCreateTrilinosSolver("Amesos_Klu", "")
+    except Exception:
+        pass
+
+    try:
+        from daetools.solvers.superlu import pySuperLU
+
+        return pySuperLU.daeCreateSuperLUSolver()
+    except Exception:
+        return None
+
+
 def build_idas_solver(relative_tolerance=1e-6):
     solver = daeIDAS()
     solver.RelativeTolerance = relative_tolerance
+    linear_solver = _create_sparse_linear_solver()
+    if linear_solver is not None:
+        solver.SetLASolver(linear_solver)
     return solver
 
 
@@ -1046,7 +1065,7 @@ def assemble_simulation(
         time_horizon=run_bundle.run.time_horizon_s,
     )
     requested_reports = set(run_bundle.run.outputs.requested_reports)
-    materialize_source_terms = reaction_network.has_reactions or bool(requested_reports & {"gas_source", "solid_source"})
+    materialize_source_terms = bool(requested_reports & {"gas_source", "solid_source"})
     materialize_solid_mole_fractions = "solid_mole_fraction" in requested_reports
 
     simulation = simBed(
