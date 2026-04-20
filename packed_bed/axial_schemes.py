@@ -142,7 +142,7 @@ def _linear_upwind5_value(v0, v1, v2, v3, v4):
     return (2.0 * v0 - 13.0 * v1 + 47.0 * v2 + 27.0 * v3 - 3.0 * v4) / 60.0
 
 
-def reconstruct_face_left_value(cell_accessor, face_index, scheme_name, small_eps, n_cells=None):
+def reconstruct_face_left_value(cell_accessor, face_index, n_cells, scheme_name, small_eps):
     scheme_name = validate_scheme_name(scheme_name)
 
     idx_cell_L = face_index - 1
@@ -262,6 +262,6 @@ def reconstruct_face_right_value(cell_accessor, face_index, n_cells, scheme_name
 
 def reconstruct_face_states(cell_accessor, face_index, n_cells, scheme_name, small_eps):
     return (
-        reconstruct_face_left_value(cell_accessor, face_index, scheme_name, small_eps, n_cells=n_cells),
+        reconstruct_face_left_value(cell_accessor, face_index, n_cells, scheme_name, small_eps),
         reconstruct_face_right_value(cell_accessor, face_index, n_cells, scheme_name, small_eps),
     )

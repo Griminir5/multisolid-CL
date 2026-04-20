@@ -3,12 +3,13 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 from pathlib import Path
-
+import datetime
 from .config import RunBundle, RunResult, load_run_bundle
 from .properties import PROPERTY_REGISTRY
 from .result_plots import render_run_result_plots
 from .reactions import REACTION_CATALOG
-from .solver import assemble_simulation, run_assembled_simulation
+#from .solver import assemble_simulation, run_assembled_simulation
+from .solver_smooth_program import assemble_simulation, run_assembled_simulation
 from .visualization import build_system_graph, render_initial_solid_profile, render_operating_program, render_system_graph
 
 def generate_artifacts(run_bundle: RunBundle) -> dict[str, Path]:
@@ -91,8 +92,10 @@ def main(argv=None):
     if args.validate_only:
         print(f"Validation passed: {run_bundle.run_path}")
         return 0
-
+    start_time = datetime.datetime.now()
     run_simulation(run_bundle, artifact_paths=artifact_paths)
+    end_time = datetime.datetime.now()
+    print(f"simulation took {end_time-start_time} seconds")
     return 0
 
 

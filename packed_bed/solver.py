@@ -502,7 +502,7 @@ class CLBed_mass(daeModel):
             dx = center_coords[idx_cell_R] - center_coords[idx_cell_L]
             ct_L = self.ct_gas(idx_cell_L)
             ct_R = self.ct_gas(idx_cell_R)
-            ct_face = 0.5 * (ct_L + ct_R)
+            ct_face = 0.5 * ((ct_L + ct_R)/self.gasfrac(idx_cell_L))
 
             eq = self.CreateEquation(f"face_flux_{face_index}")
             idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
