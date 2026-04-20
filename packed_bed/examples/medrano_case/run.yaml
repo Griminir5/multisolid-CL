@@ -1,0 +1,26 @@
+references:
+  chemistry_file: chemistry.yaml
+  program_file: program.yaml
+  solids_file: solids.yaml
+simulation:
+  system_name: FullNickelCase
+  time_horizon_s: 12000.0
+  reporting_interval_s: 1.0
+  repeat_program: true
+  mass_scheme: upwind1
+  heat_scheme: upwind1
+  report_time_derivatives: false
+model:
+  bed_length_m: 2.5
+  bed_radius_m: 0.1
+  axial_cells: 100
+solver:
+  relative_tolerance: 1.0e-4
+outputs:
+  directory: output
+  artifacts_directory: output/artifacts
+  requested_reports:
+    - temperature
+    - pressure
+    - gas_mole_fraction
+    - heat_balance
