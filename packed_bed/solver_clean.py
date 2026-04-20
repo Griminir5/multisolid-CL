@@ -853,20 +853,21 @@ class SimulationAssembly:
 def configure_evaluation_mode():
     cfg = daeGetConfig()
     cfg.SetString("daetools.core.equations.evaluationMode", "computeStack_OpenMP")
+    cfg.SetInteger("daetools.core.equations.computeStack_OpenMP.numThreads", 16)
 
 
 def _create_sparse_linear_solver():
 
     try:
-        from daetools.solvers.superlu import pySuperLU
-
-        return pySuperLU.daeCreateSuperLUSolver()
-    except Exception:
-        pass
-    try:
         from daetools.solvers.trilinos import pyTrilinos
 
         return pyTrilinos.daeCreateTrilinosSolver("Amesos_Klu", "")
+    except Exception:
+        pass
+    try:
+        from daetools.solvers.superlu import pySuperLU
+
+        return pySuperLU.daeCreateSuperLUSolver()
 
     except Exception:
         return None
