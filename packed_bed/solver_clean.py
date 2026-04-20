@@ -3,27 +3,12 @@ This file is a general working model of a packed-bed chemical looping reactor. T
 and program control profiles. Reactions are added in external submodules and are accessed via registered hooks.
 """
 
-import sys
-
 import math
-from dataclasses import dataclass
 
 import numpy as np
 from daetools.pyDAE import *
 
 from .axial_schemes import reconstruct_face_states
-from .config import ModelConfig, ProgramSegment, RunBundle, ScalarProgram, SolidConfig, VectorProgram
-from .kinetics import KineticsContext, resolve_kinetics_hooks
-from .reporting import reporting_targets
-from .reactions import ReactionNetwork, build_reaction_network
-from .solid_profiles import (
-    build_cell_scalar_profile,
-    build_face_scalar_profile,
-    build_solid_profile_matrix,
-    convert_solid_profile_to_bed_volume,
-    gas_fraction_from_voidages,
-    solid_fraction_from_voidages,
-)
 from pyUnits import kg, J, K, Pa, m, mol, s  # this will not show up because pylance cannot get to .pyd files
 
 molar_flux_type =       daeVariableType(name="molar_flux_type", units=mol / (s * m**2), 
@@ -78,8 +63,7 @@ class CLBed_mass(daeModel):
         Name,
         gas_species,
         solid_species,
-        reaction_network: ReactionNetwork,
-        reaction_rate_hooks,
+
         property_registry,
         mass_scheme,
         heat_scheme,
@@ -92,14 +76,7 @@ class CLBed_mass(daeModel):
 
         self.gas_species = list(gas_species)
         self.solid_species = list(solid_species)
-        self.reaction_coupling = ReactionCoupling.from_network(
-            reaction_network=reaction_network,
-            reaction_rate_hooks=reaction_rate_hooks,
-            gas_species=self.gas_species,
-            solid_species=self.solid_species,
-        )
-        self.reaction_network = self.reaction_coupling.network
-        self.reaction_rate_hooks = self.reaction_coupling.rate_hooks
+
         self.property_registry = property_registry
         self.mass_scheme = mass_scheme
         self.heat_scheme = heat_scheme
@@ -111,9 +88,16 @@ class CLBed_mass(daeModel):
         self.inlet_composition_segments = []
         self.inlet_temperature_segments = []
         self.outlet_pressure_segments = []
-        self.gas_species_index = self.reaction_coupling.gas_species_index
-        self.solid_species_index = self.reaction_coupling.solid_species_index
-        self.reaction_index = self.reaction_coupling.reaction_index
+        self.gas_species_index = {species_id: idx for idx, species_id in enumerate(self.gas_species)}
+        self.solid_species_index = {species_id: idx for idx, species_id in enumerate(self.solid_species)}
+        self.reaction_index = {
+            reaction.id: idx for idx, reaction in enumerate(self.reaction_network.reactions)
+        }
+
+        if self.reaction_network.has_reactions and len(self.reaction_rate_hooks) != self.reaction_network.reaction_count:
+            raise ValueError("Reaction rate hooks must align one-to-one with the selected reaction network.")
+        if not self.reaction_network.has_reactions and self.reaction_rate_hooks:
+            raise ValueError("Reaction rate hooks were provided for a non-reactive simulation.")
 
         self.R_gas = daeParameter("R_gas", (Pa * m**3) / (mol * K), self, "Gas constant")
         self.pi = daeParameter("&pi;", dimless, self, "Circle constant")
@@ -127,9 +111,9 @@ class CLBed_mass(daeModel):
         self.N_sol = daeDomain("Solid_comps", self, dimless, "Number of solid components")
         self.N_gas.CreateArray(len(self.gas_species))
         self.N_sol.CreateArray(len(self.solid_species))
-        if self.reaction_coupling.has_reactions:
+        if self.reaction_network.has_reactions:
             self.N_rxn = daeDomain("Reactions", self, dimless, "Number of reactions")
-            self.N_rxn.CreateArray(self.reaction_coupling.reaction_count)
+            self.N_rxn.CreateArray(self.reaction_network.reaction_count)
         else:
             self.N_rxn = None
 
@@ -157,7 +141,7 @@ class CLBed_mass(daeModel):
         self.N_gas_face = daeVariable("N_gas_face", molar_flux_type, self, "Species i molar flux at cell faces", [self.N_gas, self.x_faces])
 
         self.R_rxn = None
-        if self.reaction_coupling.has_reactions:
+        if self.reaction_network.has_reactions:
             self.R_rxn = daeVariable("R_rxn", molar_source_type, self, "Reaction rate of reaction k per total bed volume", [self.N_rxn, self.x_centers])
             
 
@@ -269,37 +253,6 @@ class CLBed_mass(daeModel):
                 self.property_registry.get_record(species_name).mw * kg / mol
             )
         return mw_mix_expr
-    
-    def build_kinetics_context(self, idx_cell):
-        return KineticsContext(
-            model=self,
-            idx_cell=idx_cell,
-            gas_species_index=self.gas_species_index,
-            solid_species_index=self.solid_species_index,
-            reaction_index=self.reaction_index,
-        )
-    
-    def _source_expression(self, coefficients, idx_cell):
-        source = Constant(0.0 * mol / (m**3 * s))
-        if self.R_rxn is None:
-            return source
-
-        for reaction_idx, coefficient in enumerate(coefficients):
-            if coefficient != 0.0:
-                source = source + Constant(coefficient) * self.R_rxn(reaction_idx, idx_cell)
-        return source
-
-    def _gas_source_expression(self, gas_idx, idx_cell):
-        return self._source_expression(
-            self.reaction_network.gas_source_matrix[gas_idx],
-            idx_cell,
-        )
-
-    def _solid_source_expression(self, sol_idx, idx_cell):
-        return self._source_expression(
-            self.reaction_network.solid_source_matrix[sol_idx],
-            idx_cell,
-        )
     
     
     def DeclareEquations(self):
@@ -429,11 +382,23 @@ class CLBed_mass(daeModel):
                 eq = self.CreateEquation(f"species_balance_cell_{idx_cell}_{self.gas_species[gas_idx]}")
                 eq.Residual = dt(self.c_gas(gas_idx, idx_cell)) + (
                     self.N_gas_face(gas_idx, idx_cell + 1) - self.N_gas_face(gas_idx, idx_cell)
-                ) / dx - self._gas_source_expression(gas_idx, idx_cell)
+                ) / dx 
+                '''
+                pseudocode for the source term below, the stoichiometry matrix is accessed and we get a vector of coeffients for every
+                reaction, so len(stoich_matrix(gas_idx)) = N_rxn, while shape(stoich_matrix) = N_rxn*N_comp
+                
+                - Sum(stoich_gas_matrix(gas_idx)*reaction_rate_vector(idx_cell,*))
+                '''
 
             for sol_idx in range(Ns):
                 eq = self.CreateEquation(f"solid_species_balance_cell_{idx_cell}_{self.solid_species[sol_idx]}")
-                eq.Residual = dt(self.c_sol(sol_idx, idx_cell)) - self._solid_source_expression(sol_idx, idx_cell)
+                eq.Residual = dt(self.c_sol(sol_idx, idx_cell)) 
+                '''
+                pseudocode for the source term below, the stoichiometry matrix is accessed and we get a vector of coeffients for every
+                reaction, so len(stoich_matrix(gas_idx)) = N_rxn, while shape(stoich_matrix) = N_rxn*N_comp
+                
+                - Sum(stoich_solid_matrix(sol_idx)*reaction_rate_vector(idx_cell,*))
+                '''
 
 
         eq = self.CreateEquation("rhs_boundary_flux")
@@ -538,11 +503,8 @@ class CLBed_mass(daeModel):
         eq = self.CreateEquation("heat_bed_total_definition")
         eq.Residual = self.heat_bed_total() - heat_bed_total
 
-        if self.reaction_network.has_reactions:
-            for reaction_idx, reaction in enumerate(self.reaction_network.reactions):
-                eq = self.CreateEquation(f"reaction_rate_{reaction.id}")
-                idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-                kinetics_context = self.build_kinetics_context(idx_cell)
-                eq.Residual = self.R_rxn(reaction_idx, idx_cell) - self.reaction_rate_hooks[reaction_idx](
-                    kinetics_context
-                )
+        #pseudocode here,
+        eq = self.CreateEquation(f"reaction_rate")
+        idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+        idx_reaction = eq.DistributeOnDomain(self.N_rxn, eClosedClosed, "j")
+        eq.Residual = self.R_rxn(idx_reaction, idx_cell) - rate_expression_from_kinetics.py
