@@ -271,6 +271,7 @@ class RunResult:
     success: bool
     artifact_paths: dict[str, Path] = field(default_factory=dict)
     report_paths: dict[str, Path] = field(default_factory=dict)
+    balance_errors: dict[str, Any] = field(default_factory=dict)
     summary_path: Path | None = None
     balances_path: Path | None = None
     reporter: Any | None = None

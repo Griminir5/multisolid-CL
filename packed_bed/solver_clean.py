@@ -48,6 +48,8 @@ heat_flux_type =        daeVariableType(name="heat_flux_type", units=J / (s * m*
                                         lowerBound=-1e12, upperBound=1e12, initialGuess=0, absTolerance=1e-5,)
 molar_inventory_type =  daeVariableType(name="molar_inventory_type", units=mol,
                                         lowerBound=-1e12, upperBound=1e12, initialGuess=0, absTolerance=1e-5,)
+mass_inventory_type =   daeVariableType(name="mass_inventory_type", units=kg,
+                                        lowerBound=-1e12, upperBound=1e12, initialGuess=0, absTolerance=1e-8,)
 energy_inventory_type = daeVariableType(name="energy_inventory_type", units=J,
                                         lowerBound=-1e20, upperBound=1e20, initialGuess=0, absTolerance=1e-2,)
 viscosity_type =        daeVariableType(name="viscosity_type", units=Pa * s,
@@ -165,6 +167,10 @@ class CLBed_mass(daeModel):
         self.h_sol = daeVariable("h_sol", molar_enthalpy_type, self, "Molar enthalpy of solid i in a cell", [self.N_sol, self.x_centers])
         self.J_gas_face = daeVariable("J_gas_face", heat_flux_type, self, "Enthalpy flow at cell faces attributable to component i", [self.N_gas, self.x_faces])
         
+        self.mass_in_total = daeVariable("mass_in_total", mass_inventory_type, self, "Cumulative gas-phase mass that has entered the bed")
+        self.mass_out_total = daeVariable("mass_out_total", mass_inventory_type, self, "Cumulative gas-phase mass that has left the bed")
+        self.mass_bed_total = daeVariable("mass_bed_total", mass_inventory_type, self, "Gas plus solid mass currently residing in the bed")
+
         self.heat_in_total = daeVariable("heat_in_total", energy_inventory_type, self, "Cumulative gas-phase enthalpy that has entered the bed")
         self.heat_out_total = daeVariable("heat_out_total", energy_inventory_type, self, "Cumulative gas-phase enthalpy that has left the bed")
         self.heat_bed_total = daeVariable("heat_bed_total", energy_inventory_type, self, "Gas plus solid enthalpy currently residing in the bed")
@@ -333,6 +339,14 @@ class CLBed_mass(daeModel):
         cross_section_area = self.pi() * self.R_bed() ** 2
         conc_eps = Constant(1e-8 * mol / m**3)
         enthalpy_eps = Constant(1e-8 * J / mol)
+        gas_molecular_weights = [
+            Constant(self.property_registry.get_record(species_name).mw * kg / mol)
+            for species_name in self.gas_species
+        ]
+        solid_molecular_weights = [
+            Constant(self.property_registry.get_record(species_name).mw * kg / mol)
+            for species_name in self.solid_species
+        ]
 
 
 
@@ -540,6 +554,7 @@ class CLBed_mass(daeModel):
         eq.Residual = self.h_cell(idx_cell) - Sum(self.c_gas.array("*", idx_cell)*self.h_gas.array("*", idx_cell)) - Sum(self.c_sol.array("*", idx_cell)*self.h_sol.array("*", idx_cell))
 
 
+        mass_bed_total = Constant(0.0 * kg)
         heat_bed_total = Constant(0.0 * J)
         for idx_cell in range(Nc):
             dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
@@ -549,7 +564,31 @@ class CLBed_mass(daeModel):
                 Sum(self.J_gas_face.array("*", idx_cell + 1)) - Sum(self.J_gas_face.array("*", idx_cell))
             ) / dx
 
+            gas_mass_density = Constant(0.0 * kg / m**3)
+            for gas_idx in range(Ng):
+                gas_mass_density = gas_mass_density + self.c_gas(gas_idx, idx_cell) * gas_molecular_weights[gas_idx]
+
+            solid_mass_density = Constant(0.0 * kg / m**3)
+            for sol_idx in range(Ns):
+                solid_mass_density = solid_mass_density + self.c_sol(sol_idx, idx_cell) * solid_molecular_weights[sol_idx]
+
+            mass_bed_total = mass_bed_total + cross_section_area * (gas_mass_density + solid_mass_density) * dx
             heat_bed_total = heat_bed_total + cross_section_area * self.h_cell(idx_cell) * dx
+
+        mass_flux_in = Constant(0.0 * kg / (s * m**2))
+        mass_flux_out = Constant(0.0 * kg / (s * m**2))
+        for gas_idx in range(Ng):
+            mass_flux_in = mass_flux_in + self.N_gas_face(gas_idx, 0) * gas_molecular_weights[gas_idx]
+            mass_flux_out = mass_flux_out + self.N_gas_face(gas_idx, Nf - 1) * gas_molecular_weights[gas_idx]
+
+        eq = self.CreateEquation("mass_in_total_accumulation")
+        eq.Residual = dt(self.mass_in_total()) - cross_section_area * mass_flux_in
+
+        eq = self.CreateEquation("mass_out_total_accumulation")
+        eq.Residual = dt(self.mass_out_total()) - cross_section_area * mass_flux_out
+
+        eq = self.CreateEquation("mass_bed_total_definition")
+        eq.Residual = self.mass_bed_total() - mass_bed_total
 
         eq = self.CreateEquation("heat_in_total_accumulation")
         eq.Residual = dt(self.heat_in_total()) - cross_section_area * Sum(self.J_gas_face.array("*", 0))
@@ -694,6 +733,10 @@ class simBed(daeSimulation):
             [self.model.property_registry.get_record(gas_name).mw for gas_name in self.gas_species],
             dtype=float,
         )
+        solid_mw = np.asarray(
+            [self.model.property_registry.get_record(sol_name).mw for sol_name in self.solid_species],
+            dtype=float,
+        )
         gas_mu = np.asarray(
             [
                 self.model.property_registry.viscosity_value(gas_name, inlet_temperature)
@@ -788,6 +831,7 @@ class simBed(daeSimulation):
         rho0 = p0 * mw_mix_scalar / (r_gas * inlet_temperature)
         h_cell0 = c0.T @ gas_h0 + c0_sol.T @ solid_h0
         cell_widths = np.diff(face_coords)
+        mass_bed_total0 = area * np.sum((c0.T @ gas_mw + c0_sol.T @ solid_mw) * cell_widths)
         heat_bed_total0 = area * np.sum(h_cell0 * cell_widths)
 
         face_velocity0 = np.empty(nf, dtype=float)
@@ -825,6 +869,9 @@ class simBed(daeSimulation):
         self.model.T_in.SetInitialGuess(inlet_temperature * K)
         self.model.P_in.SetInitialGuess(p_in0 * Pa)
         self.model.P_out.SetInitialGuess(outlet_pressure * Pa)
+        self.model.mass_in_total.SetInitialCondition(0.0 * kg)
+        self.model.mass_out_total.SetInitialCondition(0.0 * kg)
+        self.model.mass_bed_total.SetInitialGuess(mass_bed_total0 * kg)
         self.model.heat_in_total.SetInitialCondition(0.0 * J)
         self.model.heat_out_total.SetInitialCondition(0.0 * J)
         self.model.heat_bed_total.SetInitialGuess(heat_bed_total0 * J)

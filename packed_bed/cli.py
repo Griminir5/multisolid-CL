@@ -6,6 +6,7 @@ from pathlib import Path
 import datetime
 from .config import RunBundle, RunResult, load_run_bundle
 from .properties import PROPERTY_REGISTRY
+from .result_reports import compute_balance_errors, export_requested_report_csvs, format_balance_error_lines
 from .result_plots import render_run_result_plots
 from .reactions import REACTION_CATALOG
 from .solver_clean import assemble_simulation, run_assembled_simulation
@@ -50,7 +51,20 @@ def run_simulation(
         property_registry=property_registry,
         reaction_catalog=reaction_catalog,
     )
-    reporter = run_assembled_simulation(assembly, include_plot_variables=True)
+    runtime_report_ids = tuple(
+        dict.fromkeys(
+            (
+                *run_bundle.run.outputs.requested_reports,
+                "heat_balance",
+                "mass_balance",
+            )
+        )
+    )
+    reporter = run_assembled_simulation(
+        assembly,
+        report_ids=runtime_report_ids,
+        include_plot_variables=True,
+    )
 
     run_result = RunResult(
         run_bundle=run_bundle,
@@ -60,6 +74,8 @@ def run_simulation(
         reporter=reporter,
         simulation=assembly.simulation,
     )
+    report_paths = export_requested_report_csvs(run_result)
+    balance_errors = compute_balance_errors(run_result)
     plot_paths = render_run_result_plots(run_result)
     return replace(
         run_result,
@@ -67,6 +83,8 @@ def run_simulation(
             **run_result.artifact_paths,
             **plot_paths,
         },
+        report_paths=report_paths,
+        balance_errors=balance_errors,
     )
 
 
@@ -97,9 +115,11 @@ def main(argv=None):
         print(f"Validation passed: {run_bundle.run_path}")
         return 0
     start_time = datetime.datetime.now()
-    run_simulation(run_bundle, artifact_paths=artifact_paths)
+    run_result = run_simulation(run_bundle, artifact_paths=artifact_paths)
     end_time = datetime.datetime.now()
     print(f"simulation took {end_time-start_time} seconds")
+    for line in format_balance_error_lines(run_result.balance_errors):
+        print(line)
     return 0
 
 

@@ -70,6 +70,10 @@ REPORT_VARIABLE_REGISTRY = {
         id="heat_balance",
         description="Heat balance totals and error over time.",
     ),
+    "mass_balance": ReportDefinition(
+        id="mass_balance",
+        description="Mass balance totals and error over time.",
+    ),
 }
 
 
@@ -78,6 +82,11 @@ DERIVED_REPORT_VARIABLE_NAMES = {
         "heat_in_total",
         "heat_out_total",
         "heat_bed_total",
+    ),
+    "mass_balance": (
+        "mass_in_total",
+        "mass_out_total",
+        "mass_bed_total",
     ),
 }
 
@@ -104,6 +113,9 @@ BENCHMARK_SNAPSHOT_VARIABLE_NAMES = (
     "heat_in_total",
     "heat_out_total",
     "heat_bed_total",
+    "mass_in_total",
+    "mass_out_total",
+    "mass_bed_total",
     "material_in_total",
     "material_out_total",
     "material_bed_total",
