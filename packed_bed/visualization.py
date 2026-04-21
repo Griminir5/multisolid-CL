@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib.util import find_spec
 from pathlib import Path
 import matplotlib
-import pygraphviz
 
 matplotlib.use("Agg")
 
@@ -43,6 +43,10 @@ class GraphEdge:
 class SystemGraph:
     nodes: tuple[GraphNode, ...]
     edges: tuple[GraphEdge, ...]
+
+
+def is_pygraphviz_available() -> bool:
+    return find_spec("pygraphviz") is not None
 
 
 def build_system_graph(
@@ -211,6 +215,8 @@ def _save_figure(figure, path: Path) -> None:
 
 
 def _build_system_agraph(system_graph: SystemGraph):
+    import pygraphviz
+
     graph = pygraphviz.AGraph(name="system_graph", strict=False, directed=True)
     graph.graph_attr.update(
         bgcolor="white",
@@ -290,6 +296,9 @@ def _build_system_agraph(system_graph: SystemGraph):
 
 
 def render_system_graph(system_graph: SystemGraph, output_dir) -> dict[str, Path]:
+    if not is_pygraphviz_available():
+        return {}
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     svg_path = output_dir / "system_graph.svg"
