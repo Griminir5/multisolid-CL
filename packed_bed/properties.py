@@ -507,6 +507,42 @@ PROPERTY_REGISTRY = PropertyRegistry(
                 a3=1.92484328e-08,
             ),
         ),
+        "Al2O3": SpeciesPropertyRecord(
+            name="Aluminium Oxide",
+            phase="solid",
+            mw=101.961e-3,
+            enthalpy=CpCubicMolar(
+                h_form_ref=-1675700.0,
+                a0=7.9100e01,
+                a1=0.0,
+                a2=0.0,
+                a3=0.0,
+            ),
+        ),
+        "CuAlO2": SpeciesPropertyRecord(
+            name="Copper(I) Aluminate",
+            phase="solid",
+            mw=122.526e-3,
+            enthalpy=CpCubicMolar(
+                h_form_ref=-923200.0,
+                a0=1.0000e02,
+                a1=0.0,
+                a2=0.0,
+                a3=0.0,
+            ),
+        ),
+        "CuAl2O4": SpeciesPropertyRecord(
+            name="Copper(II) Aluminate",
+            phase="solid",
+            mw=181.508e-3,
+            enthalpy=CpCubicMolar(
+                h_form_ref=-1831800.0,
+                a0=1.4000e02,
+                a1=0.0,
+                a2=0.0,
+                a3=0.0,
+            ),
+        ),
         "Fe": SpeciesPropertyRecord(
             name="Iron",
             phase="solid",
