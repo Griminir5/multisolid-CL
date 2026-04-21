@@ -84,7 +84,7 @@ def resolve_kinetics_hooks(
 
 
 if __name__ != "kinetics":
-    from . import coper_redox, fe_redox, medrano, medrano_an, ni_redox, numaguchi_an, xu_froment  # noqa: E402,F401
+    from . import coper_redox, fe_redox, medrano, medrano_an, numaguchi_an, xu_froment  # noqa: E402,F401
 
 
 __all__ = [
