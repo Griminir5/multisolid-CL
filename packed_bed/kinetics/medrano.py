@@ -307,7 +307,7 @@ def medrano_reduction_h2(context: KineticsContext):
         gas_concentration_molm3=terms.gas_conc_molm3,
         conversion=terms.frac_reduced,
         reactant_fraction=terms.frac_oxidised,
-        active_inventory_molm3=_active_solid_inventory_expr("H2", terms),
+        active_inventory_molm3=(terms.ni_conc_molm3+terms.nio_conc_molm3), #_active_solid_inventory_expr("H2", terms),
     )
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
@@ -321,7 +321,7 @@ def medrano_reduction_co(context: KineticsContext):
         gas_concentration_molm3=terms.gas_conc_molm3,
         conversion=terms.frac_reduced,
         reactant_fraction=terms.frac_oxidised,
-        active_inventory_molm3=_active_solid_inventory_expr("CO", terms),
+        active_inventory_molm3=(terms.ni_conc_molm3+terms.nio_conc_molm3), #_active_solid_inventory_expr("CO", terms),
     )
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
@@ -335,7 +335,7 @@ def medrano_oxidation_o2(context: KineticsContext):
         gas_concentration_molm3=terms.gas_conc_molm3,
         conversion=terms.frac_oxidised,
         reactant_fraction=terms.frac_reduced,
-        active_inventory_molm3=_active_solid_inventory_expr("O2", terms),
+        active_inventory_molm3=(terms.ni_conc_molm3+terms.nio_conc_molm3), #_active_solid_inventory_expr("O2", terms),
     )
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 

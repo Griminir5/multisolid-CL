@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from daetools.pyDAE import Constant, Exp
+from daetools.pyDAE import Constant, Exp, Max
 
 from pyUnits import K, Pa, m, mol, s
 
@@ -69,7 +69,7 @@ def hydrogen_inverse_pressure_value(total_pressure_pa: float, hydrogen_mole_frac
 
 
 def catalyst_mass_density_value(ni_concentration_mol_per_m3: float) -> float:
-    return ni_concentration_mol_per_m3 * NI_MW_KG_PER_MOL
+    return max(0.0, ni_concentration_mol_per_m3) * NI_MW_KG_PER_MOL
 
 
 def rate_constant_value(
@@ -313,7 +313,8 @@ def _hydrogen_inverse_pressure_expression(context: KineticsContext):
 
 def _catalyst_mass_density_expression(context: KineticsContext):
     ni_idx = context.solid_index("Ni")
-    return context.model.c_sol(ni_idx, context.idx_cell) / Constant(1.0 * mol / m**3) * Constant(NI_MW_KG_PER_MOL)
+    ni_concentration = context.model.c_sol(ni_idx, context.idx_cell) / Constant(1.0 * mol / m**3)
+    return Max(ni_concentration, Constant(0.0)) * Constant(NI_MW_KG_PER_MOL)
 
 
 def _xu_froment_terms(context: KineticsContext) -> XuFromentTerms:

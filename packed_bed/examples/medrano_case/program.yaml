@@ -1,5 +1,5 @@
 inlet_flow:
-  initial: 1.0
+  initial: 10.0
   # steps:
   #   - kind: ramp
   #     duration_s: 400.0
@@ -52,34 +52,6 @@ inlet_composition:
       duration_s: 5.0
       target:
         Ar: 0.00
-        CH4: 0.20
-        CO: 0.0
-        CO2: 0.0
-        H2: 0.0
-        H2O: 0.80
-        He: 0.0
-        N2: 0.0
-        O2: 0.0
-    - kind: hold
-      duration_s: 100.0
-    - kind: ramp
-      duration_s: 5.0
-      target:
-        Ar: 0.30
-        CH4: 0.20
-        CO: 0.05
-        CO2: 0.40
-        H2: 0.0
-        H2O: 0.05
-        He: 0.0
-        N2: 0.0
-        O2: 0.0
-    - kind: hold
-      duration_s: 100.0
-    - kind: ramp
-      duration_s: 5.0
-      target:
-        Ar: 0.00
         CH4: 0.00
         CO: 0.00
         CO2: 0.00
@@ -89,4 +61,4 @@ inlet_composition:
         N2: 0.80
         O2: 0.20
     - kind: hold
-      duration_s: 100.0
+      duration_s: 15000.0

@@ -14,6 +14,8 @@ from . import KineticsContext, register_kinetics_hook
 GAS_CONSTANT_J_PER_MOL_K = 8.31446261815324
 DENOMINATOR_FLOOR = 1.0e-16
 POS_EPS = 1.0e-10
+F_GATE = 1.0e-3
+Y_GATE = 1.0e-8
 
 ONE_THIRD = 1.0 / 3.0
 TWO_THIRDS = 2.0 / 3.0
@@ -124,6 +126,18 @@ def _bounded_fraction_value(x: float) -> float:
 
 def _bounded_fraction_expr(x):
     return Min(Constant(1.0), Max(x, Constant(0.0)))
+
+
+def _availability_gate_value(x: float, gate: float) -> float:
+    available = _available_value(x)
+    if available <= 0.0:
+        return 0.0
+    return available / (available + gate)
+
+
+def _availability_gate_expr(x, gate: float):
+    available = _available_expr(x)
+    return available / (available + Constant(gate))
 
 
 def _medrano_an_terms(context: KineticsContext, gas_species_id: str) -> MedranoANTerms:
@@ -306,6 +320,7 @@ def medrano_an_conversion_rate_value(
     k_reaction = k_value(comp_key, temperature_k=temperature_k)
     conversion_bounded = _bounded_fraction_value(conversion)
     unreacted_available = _bounded_fraction_value(unreacted_fraction)
+    gas_fraction_available = _available_value(gas_mole_fraction)
     diffusivity = D_value(comp_key, temperature_k=temperature_k, conversion=conversion_bounded)
     c_power_kinetic = gas_concentration_power_value(
         total_gas_concentration_molm3=total_gas_concentration_molm3,
@@ -333,7 +348,9 @@ def medrano_an_conversion_rate_value(
         diffusivity * c_power_diffusive
         + R0_M[comp_key] * k_reaction * c_power_kinetic * (f_one_third - f_two_thirds)
     )
-    return numerator / denominator_safe_value(denominator)
+    gas_gate = _availability_gate_value(gas_fraction_available, Y_GATE)
+    solid_gate = _availability_gate_value(unreacted_available, F_GATE)
+    return gas_gate * solid_gate * numerator / denominator_safe_value(denominator)
 
 
 def medrano_an_reaction_rate_value(
@@ -369,6 +386,7 @@ def _medrano_an_conversion_rate_expr(
     k_reaction = k_expr(comp_key, temperature_k=temperature_k)
     conversion_bounded = _bounded_fraction_expr(conversion)
     unreacted_available = _bounded_fraction_expr(unreacted_fraction)
+    gas_fraction_available = _available_expr(gas_mole_fraction)
     diffusivity = D_expr(comp_key, temperature_k=temperature_k, conversion=conversion_bounded)
     c_power_kinetic = _gas_concentration_power_expr(
         total_gas_concentration_molm3=total_gas_concentration_molm3,
@@ -395,7 +413,9 @@ def _medrano_an_conversion_rate_expr(
         diffusivity * c_power_diffusive
         + Constant(R0_M[comp_key]) * k_reaction * c_power_kinetic * (f_one_third - f_two_thirds)
     )
-    return numerator / _denominator_safe_expr(denominator)
+    gas_gate = _availability_gate_expr(gas_fraction_available, Y_GATE)
+    solid_gate = _availability_gate_expr(unreacted_available, F_GATE)
+    return gas_gate * solid_gate * numerator / _denominator_safe_expr(denominator)
 
 
 def _medrano_an_reaction_rate_expr(
@@ -473,6 +493,7 @@ __all__ = [
     "D0_M2_PER_S",
     "DENOMINATOR_FLOOR",
     "ED_J_PER_MOL",
+    "F_GATE",
     "GAS_CONSTANT_J_PER_MOL_K",
     "K0_M_PER_S",
     "KX",
@@ -484,6 +505,7 @@ __all__ = [
     "RATIONAL_POWER_COEFFICIENTS",
     "REACTION_ORDER",
     "TWO_THIRDS",
+    "Y_GATE",
     "D_value",
     "denominator_safe_value",
     "gas_concentration_power_value",
