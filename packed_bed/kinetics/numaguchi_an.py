@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from daetools.pyDAE import Constant, Exp, Sqrt
+from daetools.pyDAE import Constant, Exp, Max, Sqrt
 
 from pyUnits import K, Pa, m, mol, s
 
@@ -64,7 +64,7 @@ def safe_steam_partial_pressure_bar_value(partial_pressure_bar: float) -> float:
 
 
 def catalyst_mass_density_value(ni_concentration_mol_per_m3: float) -> float:
-    return ni_concentration_mol_per_m3 * NI_MW_KG_PER_MOL
+    return max(0.0, ni_concentration_mol_per_m3) * NI_MW_KG_PER_MOL
 
 
 def rate_constant_value(
@@ -197,7 +197,8 @@ def _partial_pressure_bar_expression(context: KineticsContext, species_id: str):
 
 def _catalyst_mass_density_expression(context: KineticsContext):
     ni_idx = context.solid_index("Ni")
-    return context.model.c_sol(ni_idx, context.idx_cell) / Constant(1.0 * mol / m**3) * Constant(NI_MW_KG_PER_MOL)
+    ni_concentration = context.model.c_sol(ni_idx, context.idx_cell) / Constant(1.0 * mol / m**3)
+    return Max(ni_concentration, Constant(0.0)) * Constant(NI_MW_KG_PER_MOL)
 
 
 def _safe_steam_partial_pressure_bar_expression(partial_pressure_bar):

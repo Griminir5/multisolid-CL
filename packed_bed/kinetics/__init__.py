@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
-from ..reactions import ReactionNetwork
+try:
+    from ..reactions import ReactionNetwork
+except ImportError:  # pragma: no cover - supports unittest discovery with -s packed_bed
+    from packed_bed.reactions import ReactionNetwork
 
 
 KineticsHook = Callable[["KineticsContext"], Any]
@@ -80,7 +83,8 @@ def resolve_kinetics_hooks(
     return tuple(resolved_hooks)
 
 
-from . import coper_redox, ni_redox, numaguchi_an, xu_froment  # noqa: E402,F401
+if __name__ != "kinetics":
+    from . import medrano, medrano_an, coper_redox, ni_redox, numaguchi_an, xu_froment  # noqa: E402,F401
 
 
 __all__ = [

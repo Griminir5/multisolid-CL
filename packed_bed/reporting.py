@@ -71,3 +71,89 @@ REPORT_VARIABLE_REGISTRY = {
         description="Heat balance totals and error over time.",
     ),
 }
+
+
+DERIVED_REPORT_VARIABLE_NAMES = {
+    "heat_balance": (
+        "heat_in_total",
+        "heat_out_total",
+        "heat_bed_total",
+    ),
+}
+
+PLOT_REPORT_IDS = (
+    "temperature",
+    "pressure",
+    "gas_mole_fraction",
+    "gas_flux",
+)
+
+PLOT_EXTRA_VARIABLE_NAMES = (
+    "P_out",
+)
+
+PLOT_EXTRA_PARAMETER_NAMES = (
+    "xval_cells",
+)
+
+BENCHMARK_SNAPSHOT_VARIABLE_NAMES = (
+    "temp_bed",
+    "pres_bed",
+    "y_gas",
+    "c_sol",
+    "heat_in_total",
+    "heat_out_total",
+    "heat_bed_total",
+    "material_in_total",
+    "material_out_total",
+    "material_bed_total",
+)
+
+
+def report_variable_names(report_ids) -> tuple[str, ...]:
+    variable_names: list[str] = []
+    for report_id in report_ids:
+        definition = REPORT_VARIABLE_REGISTRY[report_id]
+        if definition.variable_name is not None:
+            variable_names.append(definition.variable_name)
+        variable_names.extend(DERIVED_REPORT_VARIABLE_NAMES.get(report_id, ()))
+    return tuple(dict.fromkeys(variable_names))
+
+
+def reporting_targets(
+    report_ids,
+    *,
+    include_plot_variables: bool = False,
+    include_benchmark_snapshot: bool = False,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    expanded_report_ids = list(report_ids)
+    variable_names: list[str] = []
+    parameter_names: list[str] = []
+
+    if include_plot_variables:
+        expanded_report_ids.extend(PLOT_REPORT_IDS)
+        variable_names.extend(PLOT_EXTRA_VARIABLE_NAMES)
+        parameter_names.extend(PLOT_EXTRA_PARAMETER_NAMES)
+
+    variable_names.extend(report_variable_names(expanded_report_ids))
+
+    if include_benchmark_snapshot:
+        variable_names.extend(BENCHMARK_SNAPSHOT_VARIABLE_NAMES)
+
+    return (
+        tuple(dict.fromkeys(variable_names)),
+        tuple(dict.fromkeys(parameter_names)),
+    )
+
+
+__all__ = [
+    "BENCHMARK_SNAPSHOT_VARIABLE_NAMES",
+    "DERIVED_REPORT_VARIABLE_NAMES",
+    "PLOT_EXTRA_PARAMETER_NAMES",
+    "PLOT_EXTRA_VARIABLE_NAMES",
+    "PLOT_REPORT_IDS",
+    "REPORT_VARIABLE_REGISTRY",
+    "ReportDefinition",
+    "report_variable_names",
+    "reporting_targets",
+]
