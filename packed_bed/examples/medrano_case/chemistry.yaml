@@ -15,6 +15,6 @@ reaction_ids:
   - smr_reaction_xu_froment
   - wgs_reaction_xu_froment
   - overall_reforming_xu_froment
-  # - ni_reduction_h2_medrano_an
-  # - ni_reduction_co_medrano_an
-  # - ni_oxidation_o2_medrano_an
+  - ni_reduction_h2_medrano_an
+  - ni_reduction_co_medrano_an
+  - ni_oxidation_o2_medrano_an

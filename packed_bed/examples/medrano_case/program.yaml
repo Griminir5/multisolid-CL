@@ -1,40 +1,40 @@
 inlet_flow:
   initial: 1.0
-  steps:
-    - kind: ramp
-      duration_s: 400.0
-      target: 2.0
-    - kind: ramp
-      duration_s: 400.0
-      target: 0.1
+  # steps:
+  #   - kind: ramp
+  #     duration_s: 400.0
+  #     target: 2.0
+  #   - kind: ramp
+  #     duration_s: 400.0
+  #     target: 0.1
 
 inlet_temperature:
-  initial: 1200.0
-  steps:
-    - kind: ramp
-      duration_s: 5.0
-      target: 600.0
-    - kind: hold
-      duration_s: 1000.0
-    - kind: ramp
-      duration_s: 5.0
-      target: 1200.0
-    - kind: hold
-      duration_s: 1000.0
+  initial: 600.0
+  # steps:
+  #   - kind: ramp
+  #     duration_s: 5.0
+  #     target: 600.0
+  #   - kind: hold
+  #     duration_s: 1000.0
+  #   - kind: ramp
+  #     duration_s: 5.0
+  #     target: 1200.0
+  #   - kind: hold
+  #     duration_s: 1000.0
 
 outlet_pressure:
   initial: 5000000.0
-  steps:
-    - kind: ramp
-      duration_s: 1300.0
-      target: 100000.0
-    - kind: hold
-      duration_s: 1000.0
-    - kind: ramp
-      duration_s: 1300.0
-      target: 5000000.0
-    - kind: hold
-      duration_s: 1000.0
+  # steps:
+  #   - kind: ramp
+  #     duration_s: 1300.0
+  #     target: 100000.0
+  #   - kind: hold
+  #     duration_s: 1000.0
+  #   - kind: ramp
+  #     duration_s: 1300.0
+  #     target: 5000000.0
+  #   - kind: hold
+  #     duration_s: 1000.0
 
 inlet_composition:
   initial:
@@ -52,11 +52,11 @@ inlet_composition:
       duration_s: 5.0
       target:
         Ar: 0.00
-        CH4: 0.50
+        CH4: 0.20
         CO: 0.0
         CO2: 0.0
         H2: 0.0
-        H2O: 0.50
+        H2O: 0.80
         He: 0.0
         N2: 0.0
         O2: 0.0
@@ -67,12 +67,26 @@ inlet_composition:
       target:
         Ar: 0.30
         CH4: 0.20
-        CO: 0.10
+        CO: 0.05
         CO2: 0.40
         H2: 0.0
-        H2O: 0.00
+        H2O: 0.05
         He: 0.0
         N2: 0.0
         O2: 0.0
+    - kind: hold
+      duration_s: 100.0
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        Ar: 0.00
+        CH4: 0.00
+        CO: 0.00
+        CO2: 0.00
+        H2: 0.0
+        H2O: 0.00
+        He: 0.0
+        N2: 0.80
+        O2: 0.20
     - kind: hold
       duration_s: 100.0

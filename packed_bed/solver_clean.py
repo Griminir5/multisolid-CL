@@ -857,6 +857,13 @@ def configure_evaluation_mode():
 
 
 def _create_sparse_linear_solver():
+    
+    try:
+        from daetools.solvers.superlu_mt import pySuperLU_MT
+        
+        return pySuperLU_MT.daeCreateSuperLUSolver()
+    except Exception:
+        pass
 
     try:
         from daetools.solvers.trilinos import pyTrilinos
