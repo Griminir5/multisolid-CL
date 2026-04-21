@@ -4,7 +4,7 @@ references:
   solids_file: solids.yaml
 simulation:
   system_name: FullNickelCase
-  time_horizon_s: 20000.0
+  time_horizon_s: 12000.0
   reporting_interval_s: 1.0
   repeat_program: true
   mass_scheme: upwind1
