@@ -89,4 +89,4 @@ inlet_composition:
         N2: 0.80
         O2: 0.20
     - kind: hold
-      duration_s: 100.0
+      duration_s: 800.0

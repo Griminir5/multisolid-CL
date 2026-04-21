@@ -17,62 +17,62 @@ MIN_ONE_MINUS_CONVERSION = 1.0e-12
 MIN_GAS_CONCENTRATION_MOL_PER_M3 = 1.0e-12
 
 
-MEDRANO_RATE_COEFFICIENTS = {
+NI_REDOX_RATE_COEFFICIENTS = {
     "h2_reduction": 9.00e-4,
     "co_reduction": 3.50e-3,
     "o2_oxidation": 1.20e-3,
 }
 
-MEDRANO_ACTIVATION_ENERGIES_J_PER_MOL = {
+NI_REDOX_ACTIVATION_ENERGIES_J_PER_MOL = {
     "h2_reduction": 30.0e3,
     "co_reduction": 45.0e3,
     "o2_oxidation": 7.0e3,
 }
 
-MEDRANO_DIFFUSIVITY_COEFFICIENTS = {
+NI_REDOX_DIFFUSIVITY_COEFFICIENTS = {
     "h2_reduction": 1.70e-3,
     "co_reduction": 7.40e6,
     "o2_oxidation": 1.0,
 }
 
-MEDRANO_DIFFUSION_ACTIVATION_ENERGIES_J_PER_MOL = {
+NI_REDOX_DIFFUSION_ACTIVATION_ENERGIES_J_PER_MOL = {
     "h2_reduction": 150.0e3,
     "co_reduction": 300.0e3,
     "o2_oxidation": 0.0,
 }
 
-MEDRANO_REACTION_ORDERS = {
+NI_REDOX_REACTION_ORDERS = {
     "h2_reduction": 0.6,
     "co_reduction": 0.65,
     "o2_oxidation": 0.9,
 }
 
-MEDRANO_GRAIN_RADII_M = {
+NI_REDOX_GRAIN_RADII_M = {
     "h2_reduction": 3.13e-8,
     "co_reduction": 3.13e-8,
     "o2_oxidation": 5.8e-7,
 }
 
-MEDRANO_SOLID_CONCENTRATIONS_MOL_PER_M3 = {
+NI_REDOX_SOLID_CONCENTRATIONS_MOL_PER_M3 = {
     "h2_reduction": 89960.0,
     "co_reduction": 89960.0,
     "o2_oxidation": 151200.0,
 }
 
-MEDRANO_KX = {
+NI_REDOX_KX = {
     "h2_reduction": 5.0,
     "co_reduction": 15.0,
     "o2_oxidation": 0.0,
 }
 
-MEDRANO_B = {
+NI_REDOX_B = {
     "h2_reduction": 1.0,
     "co_reduction": 1.0,
     "o2_oxidation": 2.0,
 }
 
 @dataclass(frozen=True)
-class MedranoNiTerms:
+class NiRedoxTerms:
     temperature_k: Any
     c_h2_mol_per_m3: Any
     c_co_mol_per_m3: Any
@@ -108,8 +108,8 @@ def rate_constant_value(
     *,
     temperature_k: float,
 ) -> float:
-    coefficient = MEDRANO_RATE_COEFFICIENTS[rate_key]
-    activation_energy = MEDRANO_ACTIVATION_ENERGIES_J_PER_MOL[rate_key]
+    coefficient = NI_REDOX_RATE_COEFFICIENTS[rate_key]
+    activation_energy = NI_REDOX_ACTIVATION_ENERGIES_J_PER_MOL[rate_key]
     return coefficient * math.exp(-activation_energy / (GAS_CONSTANT_J_PER_MOL_K * temperature_k))
 
 
@@ -119,9 +119,9 @@ def diffusivity_value(
     temperature_k: float,
     conversion: float,
 ) -> float:
-    coefficient = MEDRANO_DIFFUSIVITY_COEFFICIENTS[rate_key]
-    activation_energy = MEDRANO_DIFFUSION_ACTIVATION_ENERGIES_J_PER_MOL[rate_key]
-    kx = MEDRANO_KX[rate_key]
+    coefficient = NI_REDOX_DIFFUSIVITY_COEFFICIENTS[rate_key]
+    activation_energy = NI_REDOX_DIFFUSION_ACTIVATION_ENERGIES_J_PER_MOL[rate_key]
+    kx = NI_REDOX_KX[rate_key]
     return (
         coefficient
         * math.exp(-activation_energy / (GAS_CONSTANT_J_PER_MOL_K * temperature_k))
@@ -138,10 +138,10 @@ def conversion_rate_value(
 ) -> float:
     conversion_safe = min(max(conversion, 0.0), 1.0 - MIN_ONE_MINUS_CONVERSION)
     one_minus_x = 1.0 - conversion_safe
-    c_s = MEDRANO_SOLID_CONCENTRATIONS_MOL_PER_M3[rate_key]
-    r0 = MEDRANO_GRAIN_RADII_M[rate_key]
-    n = MEDRANO_REACTION_ORDERS[rate_key]
-    b = MEDRANO_B[rate_key]
+    c_s = NI_REDOX_SOLID_CONCENTRATIONS_MOL_PER_M3[rate_key]
+    r0 = NI_REDOX_GRAIN_RADII_M[rate_key]
+    n = NI_REDOX_REACTION_ORDERS[rate_key]
+    b = NI_REDOX_B[rate_key]
 
     k_value = rate_constant_value(rate_key, temperature_k=temperature_k)
     d_value = diffusivity_value(rate_key, temperature_k=temperature_k, conversion=conversion_safe)
@@ -207,15 +207,15 @@ def _temperature_k_expression(temperature) -> Any:
 
 
 def _rate_constant_expression(rate_key: str, temperature_k) -> Any:
-    coefficient = MEDRANO_RATE_COEFFICIENTS[rate_key]
-    activation_energy = MEDRANO_ACTIVATION_ENERGIES_J_PER_MOL[rate_key]
+    coefficient = NI_REDOX_RATE_COEFFICIENTS[rate_key]
+    activation_energy = NI_REDOX_ACTIVATION_ENERGIES_J_PER_MOL[rate_key]
     return Constant(coefficient) * Exp(-Constant(activation_energy / GAS_CONSTANT_J_PER_MOL_K) / temperature_k)
 
 
 def _diffusivity_expression(rate_key: str, temperature_k, conversion) -> Any:
-    coefficient = MEDRANO_DIFFUSIVITY_COEFFICIENTS[rate_key]
-    activation_energy = MEDRANO_DIFFUSION_ACTIVATION_ENERGIES_J_PER_MOL[rate_key]
-    kx = MEDRANO_KX[rate_key]
+    coefficient = NI_REDOX_DIFFUSIVITY_COEFFICIENTS[rate_key]
+    activation_energy = NI_REDOX_DIFFUSION_ACTIVATION_ENERGIES_J_PER_MOL[rate_key]
+    kx = NI_REDOX_KX[rate_key]
     return (
         Constant(coefficient)
         * Exp(-Constant(activation_energy / GAS_CONSTANT_J_PER_MOL_K) / temperature_k)
@@ -240,13 +240,13 @@ def _safe_division(numerator, denominator):
     return numerator / (denominator + Constant(1.0e-20))
 
 
-def _medrano_terms(context: KineticsContext) -> MedranoNiTerms:
+def _ni_redox_terms(context: KineticsContext) -> NiRedoxTerms:
     temperature_k = _temperature_k_expression(context.model.T(context.idx_cell))
     c_nio = _solid_concentration_expression(context, "NiO")
     c_ni = _solid_concentration_expression(context, "Ni")
     c_active_ni = c_nio + c_ni
 
-    return MedranoNiTerms(
+    return NiRedoxTerms(
         temperature_k=temperature_k,
         c_h2_mol_per_m3=_gas_concentration_expression(context, "H2"),
         c_co_mol_per_m3=_gas_concentration_expression(context, "CO"),
@@ -260,10 +260,10 @@ def _medrano_terms(context: KineticsContext) -> MedranoNiTerms:
 
 
 def _conversion_rate_expression(rate_key: str, temperature_k, gas_concentration_mol_per_m3, conversion) -> Any:
-    c_s = MEDRANO_SOLID_CONCENTRATIONS_MOL_PER_M3[rate_key]
-    r0 = MEDRANO_GRAIN_RADII_M[rate_key]
-    n = MEDRANO_REACTION_ORDERS[rate_key]
-    b = MEDRANO_B[rate_key]
+    c_s = NI_REDOX_SOLID_CONCENTRATIONS_MOL_PER_M3[rate_key]
+    r0 = NI_REDOX_GRAIN_RADII_M[rate_key]
+    n = NI_REDOX_REACTION_ORDERS[rate_key]
+    b = NI_REDOX_B[rate_key]
 
     one_minus_x = Constant(1.0) - conversion + Constant(MIN_ONE_MINUS_CONVERSION)
 
@@ -275,9 +275,9 @@ def _conversion_rate_expression(rate_key: str, temperature_k, gas_concentration_
     return Constant(3.0 / (b * r0 * c_s)) * gas_concentration_mol_per_m3 ** Constant(n) / denominator
 
 
-@register_kinetics_hook("medrano_ni_reduction_h2")
-def medrano_ni_reduction_h2(context: KineticsContext):
-    terms = _medrano_terms(context)
+@register_kinetics_hook("ni_redox_reduction_h2")
+def ni_redox_reduction_h2(context: KineticsContext):
+    terms = _ni_redox_terms(context)
     dxdt_expression = _conversion_rate_expression(
         "h2_reduction",
         terms.temperature_k,
@@ -287,9 +287,9 @@ def medrano_ni_reduction_h2(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * terms.c_active_ni_mol_per_m3 * dxdt_expression
 
 
-@register_kinetics_hook("medrano_ni_reduction_co")
-def medrano_ni_reduction_co(context: KineticsContext):
-    terms = _medrano_terms(context)
+@register_kinetics_hook("ni_redox_reduction_co")
+def ni_redox_reduction_co(context: KineticsContext):
+    terms = _ni_redox_terms(context)
     dxdt_expression = _conversion_rate_expression(
         "co_reduction",
         terms.temperature_k,
@@ -299,9 +299,9 @@ def medrano_ni_reduction_co(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * terms.c_active_ni_mol_per_m3 * dxdt_expression
 
 
-@register_kinetics_hook("medrano_ni_oxidation_o2")
-def medrano_ni_oxidation_o2(context: KineticsContext):
-    terms = _medrano_terms(context)
+@register_kinetics_hook("ni_redox_oxidation_o2")
+def ni_redox_oxidation_o2(context: KineticsContext):
+    terms = _ni_redox_terms(context)
     dxdt_expression = _conversion_rate_expression(
         "o2_oxidation",
         terms.temperature_k,
@@ -312,16 +312,16 @@ def medrano_ni_oxidation_o2(context: KineticsContext):
 
 
 __all__ = [
-    "MEDRANO_ACTIVATION_ENERGIES_J_PER_MOL",
-    "MEDRANO_B",
-    "MEDRANO_DIFFUSION_ACTIVATION_ENERGIES_J_PER_MOL",
-    "MEDRANO_DIFFUSIVITY_COEFFICIENTS",
-    "MEDRANO_GRAIN_RADII_M",
-    "MEDRANO_KX",
+    "NI_REDOX_ACTIVATION_ENERGIES_J_PER_MOL",
+    "NI_REDOX_B",
+    "NI_REDOX_DIFFUSION_ACTIVATION_ENERGIES_J_PER_MOL",
+    "NI_REDOX_DIFFUSIVITY_COEFFICIENTS",
+    "NI_REDOX_GRAIN_RADII_M",
+    "NI_REDOX_KX",
     "MIN_GAS_CONCENTRATION_MOL_PER_M3",
-    "MEDRANO_RATE_COEFFICIENTS",
-    "MEDRANO_REACTION_ORDERS",
-    "MEDRANO_SOLID_CONCENTRATIONS_MOL_PER_M3",
+    "NI_REDOX_RATE_COEFFICIENTS",
+    "NI_REDOX_REACTION_ORDERS",
+    "NI_REDOX_SOLID_CONCENTRATIONS_MOL_PER_M3",
     "active_ni_concentration_value",
     "co_reduction_rate_value",
     "conversion_rate_value",

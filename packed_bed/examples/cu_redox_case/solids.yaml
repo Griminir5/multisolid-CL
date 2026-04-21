@@ -16,7 +16,7 @@ initial_profile:
       values:
         Cu: 0.0
         Cu2O: 0.0
-        CuO: 20.0
+        CuO: 200.0
         CuAl2O4: 5.0
         CuAlO2: 0.0
         Al2O3: 1000.0
