@@ -499,6 +499,8 @@ class ModelConfig(FrozenConfigModel):
     bed_length_m: PositiveFloat
     bed_radius_m: PositiveFloat
     axial_cells: int
+    wall_heat_transfer_coefficient_w_m2_k: NonNegativeFloat = 0.0
+    wall_temperature_k: PositiveFloat = 900.0
 
     @field_validator("axial_cells")
     @classmethod

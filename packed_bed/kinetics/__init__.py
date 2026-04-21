@@ -80,7 +80,7 @@ def resolve_kinetics_hooks(
     return tuple(resolved_hooks)
 
 
-from . import numaguchi_an, xu_froment  # noqa: E402,F401
+from . import coper_redox, ni_redox, numaguchi_an, xu_froment  # noqa: E402,F401
 
 
 __all__ = [

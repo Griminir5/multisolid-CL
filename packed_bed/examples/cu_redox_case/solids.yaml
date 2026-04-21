@@ -1,0 +1,22 @@
+solid_species:
+  - Cu
+  - Cu2O
+  - CuO
+  - CuAl2O4
+  - CuAlO2
+  - Al2O3
+initial_profile:
+  basis: solid
+  zones:
+    - x_start_m: 0.0
+      x_end_m: 2.5
+      e_b: 0.5
+      e_p: 0.5
+      d_p: 0.01
+      values:
+        Cu: 0.0
+        Cu2O: 0.0
+        CuO: 20.0
+        CuAl2O4: 5.0
+        CuAlO2: 0.0
+        Al2O3: 1000.0

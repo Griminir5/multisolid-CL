@@ -20,6 +20,7 @@ class RunResultPlotData:
     time_s: np.ndarray
     axial_positions_m: np.ndarray
     gas_species: tuple[str, ...]
+    inlet_composition: np.ndarray
     outlet_composition: np.ndarray
     outlet_temperature_k: np.ndarray
     outlet_pressure_pa: np.ndarray
@@ -153,13 +154,56 @@ def _centers_to_edges(centers: np.ndarray) -> np.ndarray:
     return edges
 
 
-def _active_species_indices(outlet_composition: np.ndarray) -> list[int]:
+def _active_species_indices(*composition_series: np.ndarray) -> list[int]:
+    if not composition_series:
+        return []
+
+    species_count = composition_series[0].shape[1]
     indices = [
         species_index
-        for species_index in range(outlet_composition.shape[1])
-        if np.nanmax(np.abs(outlet_composition[:, species_index])) > 1e-10
+        for species_index in range(species_count)
+        if any(np.nanmax(np.abs(series[:, species_index])) > 1e-10 for series in composition_series)
     ]
-    return indices or list(range(outlet_composition.shape[1]))
+    return indices or list(range(species_count))
+
+
+def _sample_inlet_composition(run_result: RunResult, time_s: np.ndarray, gas_species: tuple[str, ...]) -> np.ndarray:
+    program = run_result.run_bundle.program.inlet_composition.compile_program(
+        gas_species,
+        repeat=run_result.run_bundle.run.repeat_program,
+        time_horizon=run_result.run_bundle.run.time_horizon_s,
+    )
+    segments = program.build_segments()
+    initial_value = np.asarray(program.initial_value, dtype=float)
+    sampled = np.empty((time_s.size, initial_value.size), dtype=float)
+
+    if not segments:
+        sampled[:, :] = initial_value
+        return sampled
+
+    segment_index = 0
+    tolerance = 1e-12
+    for time_index, time_value in enumerate(time_s):
+        while segment_index < len(segments) and time_value > segments[segment_index].end_time + tolerance:
+            segment_index += 1
+
+        if segment_index >= len(segments):
+            sampled[time_index, :] = np.asarray(segments[-1].end_value, dtype=float)
+            continue
+
+        segment = segments[segment_index]
+        start_value = np.asarray(segment.start_value, dtype=float)
+        end_value = np.asarray(segment.end_value, dtype=float)
+        duration = segment.end_time - segment.start_time
+        if duration <= tolerance:
+            sampled[time_index, :] = end_value
+            continue
+
+        fraction = (time_value - segment.start_time) / duration
+        fraction = min(max(fraction, 0.0), 1.0)
+        sampled[time_index, :] = start_value + (end_value - start_value) * fraction
+
+    return sampled
 
 
 def extract_run_result_plot_data(run_result: RunResult) -> RunResultPlotData:
@@ -254,10 +298,13 @@ def extract_run_result_plot_data(run_result: RunResult) -> RunResultPlotData:
     if outlet_pressure_pa is None:
         outlet_pressure_pa = pressure_profile_pa[:, -1]
 
+    inlet_composition = _sample_inlet_composition(run_result, time_s, gas_species)
+
     return RunResultPlotData(
         time_s=time_s,
         axial_positions_m=axial_positions_m,
         gas_species=gas_species,
+        inlet_composition=inlet_composition,
         outlet_composition=outlet_composition,
         outlet_temperature_k=temperature_profile_k[:, -1],
         outlet_pressure_pa=outlet_pressure_pa,
@@ -278,26 +325,31 @@ def render_outlet_composition_plot(
     image_format: str = "svg",
 ) -> Path:
     output_path = Path(output_dir) / f"outlet_composition_vs_time.{image_format}"
-    figure, axis = plt.subplots(figsize=(12, 6))
+    figure, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
 
-    active_indices = _active_species_indices(plot_data.outlet_composition)
+    active_indices = _active_species_indices(plot_data.inlet_composition, plot_data.outlet_composition)
     cmap = plt.get_cmap("tab10", max(len(active_indices), 1))
-    for color_index, species_index in enumerate(active_indices):
-        axis.plot(
-            plot_data.time_s,
-            plot_data.outlet_composition[:, species_index],
-            linewidth=2,
-            color=cmap(color_index),
-            label=plot_data.gas_species[species_index],
-        )
 
-    axis.set_title("Outlet Composition vs Time")
-    axis.set_xlabel("Time [s]")
-    axis.set_ylabel("Mole fraction [-]")
-    axis.set_ylim(-0.02, 1.02)
-    axis.grid(True, alpha=0.3)
-    axis.margins(x=0.0)
-    axis.legend(
+    for axis, title, composition in (
+        (axes[0], "Inlet Composition Program", plot_data.inlet_composition),
+        (axes[1], "Outlet Composition", plot_data.outlet_composition),
+    ):
+        for color_index, species_index in enumerate(active_indices):
+            axis.plot(
+                plot_data.time_s,
+                composition[:, species_index],
+                linewidth=2,
+                color=cmap(color_index),
+                label=plot_data.gas_species[species_index],
+            )
+        axis.set_title(title)
+        axis.set_ylabel("Mole fraction [-]")
+        axis.set_ylim(-0.02, 1.02)
+        axis.grid(True, alpha=0.3)
+        axis.margins(x=0.0)
+
+    axes[1].set_xlabel("Time [s]")
+    axes[0].legend(
         loc="upper left",
         bbox_to_anchor=(1.01, 1.0),
         borderaxespad=0.0,

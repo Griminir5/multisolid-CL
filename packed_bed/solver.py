@@ -129,6 +129,13 @@ class CLBed_mass(daeModel):
 
         self.L_bed = daeParameter("Bed_length", m, self, "Length of the reactor bed")
         self.R_bed = daeParameter("Bed_radius", m, self, "Radius of the reactor bed")
+        self.U_wall = daeParameter(
+            "Wall_heat_transfer_coefficient",
+            J / (s * m**2 * K),
+            self,
+            "Overall wall heat-transfer coefficient to the surrounding furnace",
+        )
+        self.T_wall = daeParameter("Wall_temperature", K, self, "Surrounding furnace temperature")
 
         self.x_centers = daeDomain("Cell_centers", self, m, "Axial cell centers domain over the packed bed")
         self.x_faces = daeDomain("Cell_faces", self, m, "Axial cell faces domain over the packed bed")
@@ -598,11 +605,17 @@ class CLBed_mass(daeModel):
         heat_bed_total = Constant(0.0 * J)
         for idx_cell in range(Nc):
             dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
+            wall_heat_loss = (
+                Constant(2.0)
+                * self.U_wall()
+                / self.R_bed()
+                * (self.T(idx_cell) - self.T_wall())
+            )
 
             eq = self.CreateEquation(f"energy_balance_cell_{idx_cell}")
             eq.Residual = dt(self.h_cell(idx_cell)) + (
                 Sum(self.J_gas_face.array("*", idx_cell + 1)) - Sum(self.J_gas_face.array("*", idx_cell))
-            ) / dx
+            ) / dx + wall_heat_loss
 
             material_bed_total = material_bed_total + cross_section_area * (self.ct_gas(idx_cell) + self.ct_sol(idx_cell)) * dx
             heat_bed_total = heat_bed_total + cross_section_area * self.h_cell(idx_cell) * dx
@@ -728,6 +741,10 @@ class simBed(daeSimulation):
         self.model.pi.SetValue(3.14159)
         self.model.L_bed.SetValue(self.model_config.bed_length_m * m)
         self.model.R_bed.SetValue(self.model_config.bed_radius_m * m)
+        self.model.U_wall.SetValue(
+            self.model_config.wall_heat_transfer_coefficient_w_m2_k * J / (s * m**2 * K)
+        )
+        self.model.T_wall.SetValue(self.model_config.wall_temperature_k * K)
         inlet_temperature = self.inlet_temperature_program.initial_value
         outlet_pressure = self.outlet_pressure_program.initial_value
         inlet_flow = self.inlet_flow_program.initial_value
