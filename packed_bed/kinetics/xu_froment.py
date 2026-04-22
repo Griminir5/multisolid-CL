@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from daetools.pyDAE import Constant, Exp, Max
+from daetools.pyDAE import Constant, Exp, Max, Sqrt
 
 from pyUnits import K, Pa, m, mol, s
 
@@ -14,7 +14,7 @@ from . import KineticsContext, register_kinetics_hook
 
 GAS_CONSTANT_J_PER_MOL_K = 8.31446261815324
 MIN_H2_MOLE_FRACTION = 0.001
-LOW_H2_BLEND_BASE = 8.43458496001593e-11
+H2_MOLE_FRACTION_SMOOTH_EPS_SQUARED = 1.0e-4
 NI_MW_KG_PER_MOL = PROPERTY_REGISTRY.get_record("Ni").mw
 
 if NI_MW_KG_PER_MOL is None:
@@ -61,11 +61,15 @@ def partial_pressure_value(total_pressure_pa: float, mole_fraction: float) -> fl
     return total_pressure_pa * mole_fraction
 
 
-def hydrogen_inverse_pressure_value(total_pressure_pa: float, hydrogen_mole_fraction: float) -> float:
-    return 1.0 / (
-        total_pressure_pa
-        * (hydrogen_mole_fraction + MIN_H2_MOLE_FRACTION * (LOW_H2_BLEND_BASE**hydrogen_mole_fraction))
+def controlled_hydrogen_mole_fraction_value(hydrogen_mole_fraction: float) -> float:
+    return MIN_H2_MOLE_FRACTION + 0.5 * (
+        hydrogen_mole_fraction
+        + math.sqrt(hydrogen_mole_fraction**2 + H2_MOLE_FRACTION_SMOOTH_EPS_SQUARED)
     )
+
+
+def hydrogen_inverse_pressure_value(total_pressure_pa: float, hydrogen_mole_fraction: float) -> float:
+    return 1.0 / (total_pressure_pa * controlled_hydrogen_mole_fraction_value(hydrogen_mole_fraction))
 
 
 def catalyst_mass_density_value(ni_concentration_mol_per_m3: float) -> float:
@@ -299,16 +303,19 @@ def _equilibrium_constant_overall_expression(temperature_k) -> Any:
     )
 
 
-def _partial_pressure_pa_expression(context: KineticsContext, species_id: str):
-    species_idx = context.gas_index(species_id)
-    return _pressure_pa_expression(context.model.P(context.idx_cell)) * context.model.y_gas(species_idx, context.idx_cell)
+def _controlled_hydrogen_mole_fraction_expression(hydrogen_mole_fraction):
+    return Constant(MIN_H2_MOLE_FRACTION) + Constant(0.5) * (
+        hydrogen_mole_fraction
+        + Sqrt(hydrogen_mole_fraction**2 + Constant(H2_MOLE_FRACTION_SMOOTH_EPS_SQUARED))
+    )
 
 
 def _hydrogen_inverse_pressure_expression(context: KineticsContext):
     pressure_pa = _pressure_pa_expression(context.model.P(context.idx_cell))
     hydrogen_mole_fraction = context.model.y_gas(context.gas_index("H2"), context.idx_cell)
-    blended_floor = Constant(MIN_H2_MOLE_FRACTION) * Exp(Constant(math.log(LOW_H2_BLEND_BASE)) * hydrogen_mole_fraction)
-    return Constant(1.0) / (pressure_pa * (hydrogen_mole_fraction + blended_floor))
+    return Constant(1.0) / (
+        pressure_pa * _controlled_hydrogen_mole_fraction_expression(hydrogen_mole_fraction)
+    )
 
 
 def _catalyst_mass_density_expression(context: KineticsContext):
@@ -325,9 +332,7 @@ def _xu_froment_terms(context: KineticsContext) -> XuFromentTerms:
     p_co2_pa = pressure_pa * context.model.y_gas(context.gas_index("CO2"), context.idx_cell)
     p_h2_pa = pressure_pa * context.model.y_gas(context.gas_index("H2"), context.idx_cell)
     p_h2o_pa = pressure_pa * context.model.y_gas(context.gas_index("H2O"), context.idx_cell)
-    hydrogen_mole_fraction = context.model.y_gas(context.gas_index("H2"), context.idx_cell)
-    blended_floor = Constant(MIN_H2_MOLE_FRACTION) * Exp(Constant(math.log(LOW_H2_BLEND_BASE)) * hydrogen_mole_fraction)
-    p_inv_h2_pa_inv = Constant(1.0) / (pressure_pa * (hydrogen_mole_fraction + blended_floor))
+    p_inv_h2_pa_inv = _hydrogen_inverse_pressure_expression(context)
     denominator = (
         Constant(1.0)
         + _adsorption_constant_expression("CO", temperature_k) * p_co_pa
@@ -393,7 +398,6 @@ def xu_froment_overall(context: KineticsContext):
 
 
 __all__ = [
-    "LOW_H2_BLEND_BASE",
     "MIN_H2_MOLE_FRACTION",
     "XU_FROMENT_ACTIVATION_ENERGIES_J_PER_MOL",
     "XU_FROMENT_ADSORPTION_COEFFICIENTS",
@@ -401,9 +405,11 @@ __all__ = [
     "XU_FROMENT_RATE_COEFFICIENTS",
     "adsorption_constant_value",
     "catalyst_mass_density_value",
+    "controlled_hydrogen_mole_fraction_value",
     "equilibrium_constant_overall_value",
     "equilibrium_constant_smr_value",
     "equilibrium_constant_wgs_value",
+    "H2_MOLE_FRACTION_SMOOTH_EPS_SQUARED",
     "hydrogen_inverse_pressure_value",
     "overall_reforming_rate_value",
     "partial_pressure_value",
