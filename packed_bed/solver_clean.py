@@ -1047,6 +1047,7 @@ def run_assembled_simulation(
     report_ids=None,
     include_plot_variables=False,
     include_benchmark_snapshot=False,
+    data_reporter=None,
 ):
     configure_evaluation_mode()
     simulation = assembly.simulation
@@ -1063,13 +1064,39 @@ def run_assembled_simulation(
     simulation.TimeHorizon = assembly.run_bundle.run.time_horizon_s
 
     solver = build_idas_solver(relative_tolerance=assembly.run_bundle.run.solver.relative_tolerance)
-    reporter = daeNoOpDataReporter()
+    reporter = data_reporter if data_reporter is not None else daeNoOpDataReporter()
+    if data_reporter is not None and hasattr(reporter, "IsConnected") and not reporter.IsConnected():
+        process_name = assembly.run_bundle.run.system_name
+        if not reporter.Connect(str(assembly.run_bundle.output_directory), process_name):
+            raise RuntimeError(f"Cannot connect data reporter for process '{process_name}'.")
+
     log = daePythonStdOutLog()
     log.PrintProgress = False
 
-    simulation.Initialize(solver, reporter, log)
-    simulation.SolveInitial()
-    simulation.Run()
+    initialized = False
+    try:
+        simulation.Initialize(solver, reporter, log)
+        initialized = True
+        simulation.SolveInitial()
+        simulation.Run()
+    finally:
+        if initialized:
+            simulation.Finalize()
+
+    if (
+        data_reporter is not None
+        and hasattr(reporter, "write_outputs")
+        and not getattr(reporter, "_written", False)
+        and getattr(reporter, "write_error", None) is None
+    ):
+        try:
+            reporter.write_outputs()
+        except Exception as exc:
+            raise RuntimeError("Data reporter failed while writing simulation reports.") from exc
+
+    write_error = getattr(reporter, "write_error", None)
+    if write_error is not None:
+        raise RuntimeError("Data reporter failed while writing simulation reports.") from write_error
     return reporter
 
 

@@ -7,7 +7,7 @@ import datetime
 
 from .config import RunBundle, RunResult, load_run_bundle
 from .properties import PROPERTY_REGISTRY
-from .result_reports import compute_balance_errors, export_requested_report_csvs, format_balance_error_lines
+from .result_reports import PackedBedDataFrameReporter, compute_balance_errors, format_balance_error_lines
 from .result_plots import render_run_result_plots
 from .reactions import REACTION_CATALOG
 from .solver_clean import assemble_simulation, run_assembled_simulation
@@ -94,10 +94,12 @@ def run_simulation(
             )
         )
     )
+    dataframe_reporter = PackedBedDataFrameReporter(run_bundle)
     reporter = run_assembled_simulation(
         assembly,
         report_ids=runtime_report_ids,
         include_plot_variables=True,
+        data_reporter=dataframe_reporter,
     )
 
     run_result = RunResult(
@@ -108,7 +110,7 @@ def run_simulation(
         reporter=reporter,
         simulation=assembly.simulation,
     )
-    report_paths = export_requested_report_csvs(run_result)
+    report_paths = dict(dataframe_reporter.report_paths)
     balance_errors = compute_balance_errors(run_result)
     plot_paths = render_run_result_plots(run_result)
     return replace(
@@ -119,6 +121,7 @@ def run_simulation(
         },
         report_paths=report_paths,
         balance_errors=balance_errors,
+        balances_path=report_paths.get("balances"),
     )
 
 

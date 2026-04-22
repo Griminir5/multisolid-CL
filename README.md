@@ -17,6 +17,7 @@ root.
 - DAETools 2.6.0, including the dependencies normally required by DAETools.
 - Runtime Python dependencies used directly by this package:
   - `numpy`
+  - `pandas`
   - `pydantic`
   - `PyYAML`
   - `matplotlib`
@@ -31,7 +32,7 @@ Example environment setup:
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install numpy pydantic PyYAML matplotlib
+python -m pip install numpy pandas pydantic PyYAML matplotlib
 ```
 Afterwards follow `daetools` installation guide.
 
@@ -73,6 +74,21 @@ The top-level `run.yaml` points to three sibling input files:
 
 Outputs are written under the `outputs.directory` configured in `run.yaml`.
 Artifact SVGs are written under `outputs.artifacts_directory`.
+
+Requested report data are written as pickled pandas dataframes:
+
+- `reports.pkl` contains spatial-only reports such as temperature and pressure
+  with multi-indexed columns `(feature, x_cell_m)`.
+- `balances.pkl` contains requested mass and heat balance totals and errors.
+- species/spatial reports are written one feature per file, for example
+  `gas_mole_fraction.pkl`, with multi-indexed columns such as
+  `(gas_species, x_cell_m)`.
+
+Each report can be loaded in one line:
+
+```python
+reports = pd.read_pickle("output/reports.pkl")
+```
 
 ## Input file shape
 

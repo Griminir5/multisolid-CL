@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import csv
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
+from daetools.pyDAE import daeDataReporterLocal
 
 from .config import RunResult
 from .reporting import DERIVED_REPORT_VARIABLE_NAMES, REPORT_VARIABLE_REGISTRY
@@ -120,27 +122,31 @@ VARIABLE_REPORT_SPECS = {
 BALANCE_REPORT_SPECS = {
     "heat_balance": {
         "variables": DERIVED_REPORT_VARIABLE_NAMES["heat_balance"],
-        "columns": (
-            "heat_in_total_J",
-            "heat_out_total_J",
-            "heat_bed_total_J",
-            "heat_balance_error_J",
+        "terms": (
+            "in_total_J",
+            "out_total_J",
+            "bed_total_J",
+            "balance_error_J",
         ),
         "error_key": "heat",
         "unit": "J",
     },
     "mass_balance": {
         "variables": DERIVED_REPORT_VARIABLE_NAMES["mass_balance"],
-        "columns": (
-            "mass_in_total_kg",
-            "mass_out_total_kg",
-            "mass_bed_total_kg",
-            "mass_balance_error_kg",
+        "terms": (
+            "in_total_kg",
+            "out_total_kg",
+            "bed_total_kg",
+            "balance_error_kg",
         ),
         "error_key": "mass",
         "unit": "kg",
     },
 }
+
+SPATIAL_AXIS_KINDS = {"x_cell", "x_face"}
+REPORTS_FILENAME = "reports.pkl"
+BALANCES_FILENAME = "balances.pkl"
 
 
 def _require_process(run_result: RunResult):
@@ -226,7 +232,41 @@ def _axis_values(
     return tuple(values)
 
 
-def _write_variable_report_csv(run_result: RunResult, report_id: str, output_path: Path) -> None:
+def _axis_column_multi_index(
+    axes: tuple[ReportAxisSpec, ...],
+    axis_values: tuple[tuple[Any, ...], ...],
+) -> pd.MultiIndex:
+    if not axes:
+        return pd.MultiIndex.from_tuples([("value",)], names=("value",))
+
+    tuples = [
+        tuple(axis_values[axis_index][coordinate] for axis_index, coordinate in enumerate(value_index))
+        for value_index in np.ndindex(*(len(values_for_axis) for values_for_axis in axis_values))
+    ]
+    return pd.MultiIndex.from_tuples(
+        tuples,
+        names=tuple(axis.column_name for axis in axes),
+    )
+
+
+def _with_feature_level(dataframe: pd.DataFrame, feature_name: str) -> pd.DataFrame:
+    tuples = [(feature_name, *tuple(column)) for column in dataframe.columns]
+    return pd.DataFrame(
+        dataframe.to_numpy(copy=False),
+        index=dataframe.index,
+        columns=pd.MultiIndex.from_tuples(
+            tuples,
+            names=("feature", *tuple(dataframe.columns.names)),
+        ),
+    )
+
+
+def _is_spatial_only_report(report_id: str) -> bool:
+    spec = VARIABLE_REPORT_SPECS[report_id]
+    return len(spec.axes) == 1 and spec.axes[0].kind in SPATIAL_AXIS_KINDS
+
+
+def _build_variable_report_dataframe(run_result: RunResult, report_id: str) -> pd.DataFrame:
     spec = VARIABLE_REPORT_SPECS[report_id]
     variable = _find_variable(_require_process(run_result), spec.variable_name)
     times, values = _time_and_values(variable, label=f"{report_id} report")
@@ -241,24 +281,12 @@ def _write_variable_report_csv(run_result: RunResult, report_id: str, output_pat
         for axis_index, (axis_spec, axis_size) in enumerate(zip(spec.axes, values.shape[1:]))
     )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(("time_s", *(axis.column_name for axis in spec.axes), spec.value_column_name))
-
-        if axis_values:
-            for time_index, time_s in enumerate(times):
-                for value_index in np.ndindex(*(len(values_for_axis) for values_for_axis in axis_values)):
-                    writer.writerow(
-                        (
-                            float(time_s),
-                            *(axis_values[axis_index][coordinate] for axis_index, coordinate in enumerate(value_index)),
-                            float(values[(time_index, *value_index)]),
-                        )
-                    )
-        else:
-            for time_s, value in zip(times, values):
-                writer.writerow((float(time_s), float(value)))
+    columns = _axis_column_multi_index(spec.axes, axis_values)
+    return pd.DataFrame(
+        values.reshape(times.size, -1),
+        index=pd.Index(times, name="time_s"),
+        columns=columns,
+    )
 
 
 def _balance_series(run_result: RunResult, report_id: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -284,41 +312,187 @@ def _balance_series(run_result: RunResult, report_id: str) -> tuple[np.ndarray, 
     return first_time, in_total, out_total, bed_total, balance_error
 
 
-def _write_balance_report_csv(run_result: RunResult, report_id: str, output_path: Path) -> None:
+def _build_balance_dataframe(run_result: RunResult, report_id: str) -> pd.DataFrame:
     spec = BALANCE_REPORT_SPECS[report_id]
     time_s, in_total, out_total, bed_total, balance_error = _balance_series(run_result, report_id)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(("time_s", *spec["columns"]))
-        for row in zip(time_s, in_total, out_total, bed_total, balance_error):
-            writer.writerow(tuple(float(value) for value in row))
+    return pd.DataFrame(
+        np.column_stack((in_total, out_total, bed_total, balance_error)),
+        index=pd.Index(time_s, name="time_s"),
+        columns=pd.MultiIndex.from_product(
+            ((report_id,), spec["terms"]),
+            names=("balance", "term"),
+        ),
+    )
 
 
-def _report_csv_path(output_dir: Path, report_id: str) -> Path:
+def _concat_same_time_axis(frames: list[pd.DataFrame], *, label: str) -> pd.DataFrame:
+    if not frames:
+        raise ValueError(f"Cannot build {label} output without any dataframes.")
+
+    reference = frames[0].index.to_numpy(dtype=float)
+    for index, frame in enumerate(frames[1:], start=1):
+        candidate = frame.index.to_numpy(dtype=float)
+        _require_same_time_axis(reference, candidate, label=f"{label} dataframe {index}")
+    return pd.concat(frames, axis=1)
+
+
+def _write_dataframe_pickle(dataframe: pd.DataFrame, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    dataframe.to_pickle(path)
+
+
+def _safe_pickle_path(output_dir: Path, report_id: str) -> Path:
     safe_report_id = "".join(char if char.isalnum() or char in ("-", "_") else "_" for char in report_id)
-    return output_dir / f"{safe_report_id}.csv"
+    return output_dir / f"{safe_report_id}.pkl"
 
 
-def export_requested_report_csvs(run_result: RunResult, output_dir: str | Path | None = None) -> dict[str, Path]:
-    resolved_output_dir = Path(output_dir) if output_dir is not None else run_result.output_directory / "reports"
+def build_requested_report_dataframes(run_result: RunResult) -> dict[str, pd.DataFrame]:
+    requested_report_ids = tuple(run_result.run_bundle.run.outputs.requested_reports)
+    dataframes: dict[str, pd.DataFrame] = {}
+
+    unknown_reports = [report_id for report_id in requested_report_ids if report_id not in REPORT_VARIABLE_REGISTRY]
+    if unknown_reports:
+        raise ValueError(f"Unknown report ids: {', '.join(unknown_reports)}.")
+
+    spatial_frames: list[pd.DataFrame] = []
+    balance_frames: list[pd.DataFrame] = []
+
+    for report_id in requested_report_ids:
+        if report_id in BALANCE_REPORT_SPECS:
+            balance_frames.append(_build_balance_dataframe(run_result, report_id))
+            continue
+
+        if report_id not in VARIABLE_REPORT_SPECS:
+            raise ValueError(f"Report '{report_id}' does not have a dataframe exporter.")
+
+        dataframe = _build_variable_report_dataframe(run_result, report_id)
+        if _is_spatial_only_report(report_id):
+            spatial_frames.append(_with_feature_level(dataframe, VARIABLE_REPORT_SPECS[report_id].value_column_name))
+            continue
+
+        dataframes[report_id] = dataframe
+
+    if spatial_frames:
+        dataframes["reports"] = _concat_same_time_axis(spatial_frames, label="reports")
+
+    if balance_frames:
+        dataframes["balances"] = _concat_same_time_axis(balance_frames, label="balances")
+
+    return dataframes
+
+
+def _write_report_dataframes(
+    dataframes: dict[str, pd.DataFrame],
+    requested_report_ids: tuple[str, ...],
+    output_dir: Path,
+) -> dict[str, Path]:
     report_paths: dict[str, Path] = {}
 
-    for report_id in run_result.run_bundle.run.outputs.requested_reports:
-        if report_id not in REPORT_VARIABLE_REGISTRY:
-            raise ValueError(f"Unknown report id '{report_id}'.")
-
-        output_path = _report_csv_path(resolved_output_dir, report_id)
-        if report_id in VARIABLE_REPORT_SPECS:
-            _write_variable_report_csv(run_result, report_id, output_path)
-        elif report_id in BALANCE_REPORT_SPECS:
-            _write_balance_report_csv(run_result, report_id, output_path)
+    for dataframe_id, dataframe in dataframes.items():
+        if dataframe_id == "reports":
+            output_path = output_dir / REPORTS_FILENAME
+        elif dataframe_id == "balances":
+            output_path = output_dir / BALANCES_FILENAME
         else:
-            raise ValueError(f"Report '{report_id}' does not have a CSV exporter.")
-        report_paths[report_id] = output_path
+            output_path = _safe_pickle_path(output_dir, dataframe_id)
+        _write_dataframe_pickle(dataframe, output_path)
+        report_paths[dataframe_id] = output_path
+
+    if "reports" in report_paths:
+        for report_id in requested_report_ids:
+            if report_id in VARIABLE_REPORT_SPECS and _is_spatial_only_report(report_id):
+                report_paths[report_id] = report_paths["reports"]
+
+    if "balances" in report_paths:
+        for report_id in requested_report_ids:
+            if report_id in BALANCE_REPORT_SPECS:
+                report_paths[report_id] = report_paths["balances"]
 
     return report_paths
+
+
+def export_requested_report_pickles(run_result: RunResult, output_dir: str | Path | None = None) -> dict[str, Path]:
+    resolved_output_dir = Path(output_dir) if output_dir is not None else run_result.output_directory
+    requested_report_ids = tuple(run_result.run_bundle.run.outputs.requested_reports)
+    dataframes = build_requested_report_dataframes(run_result)
+    return _write_report_dataframes(dataframes, requested_report_ids, resolved_output_dir)
+
+
+class PackedBedDataFrameReporter(daeDataReporterLocal):
+    """DAE Tools reporter that writes requested packed-bed reports as pickled dataframes."""
+
+    def __init__(self, run_bundle, requested_report_ids: tuple[str, ...] | None = None):
+        daeDataReporterLocal.__init__(self)
+        self.run_bundle = run_bundle
+        self.requested_report_ids = (
+            tuple(requested_report_ids)
+            if requested_report_ids is not None
+            else tuple(run_bundle.run.outputs.requested_reports)
+        )
+        self.output_directory = Path(run_bundle.output_directory)
+        self.ProcessName = ""
+        self.ConnectString = ""
+        self.report_paths: dict[str, Path] = {}
+        self.dataframes: dict[str, pd.DataFrame] = {}
+        self.write_error: Exception | None = None
+        self._connected = False
+        self._written = False
+
+    def Connect(self, ConnectString, ProcessName):
+        try:
+            self.ProcessName = ProcessName
+            self.ConnectString = ConnectString
+            if ConnectString:
+                self.output_directory = Path(ConnectString)
+            self.output_directory.mkdir(parents=True, exist_ok=True)
+            self._connected = True
+            return True
+        except Exception:
+            traceback.print_exc()
+            self._connected = False
+            return False
+
+    def Disconnect(self):
+        try:
+            if not self._written:
+                self.write_outputs()
+            self._connected = False
+            return True
+        except Exception as exc:
+            self.write_error = exc
+            traceback.print_exc()
+            self._connected = False
+            return False
+
+    def IsConnected(self):
+        return self._connected
+
+    def write_outputs(self) -> dict[str, Path]:
+        run_result = RunResult(
+            run_bundle=self.run_bundle.model_copy(
+                update={
+                    "run": self.run_bundle.run.model_copy(
+                        update={
+                            "outputs": self.run_bundle.run.outputs.model_copy(
+                                update={"requested_reports": self.requested_report_ids}
+                            )
+                        }
+                    )
+                }
+            ),
+            output_directory=self.output_directory,
+            success=True,
+            reporter=self,
+        )
+        self.dataframes = build_requested_report_dataframes(run_result)
+        self.report_paths = _write_report_dataframes(
+            self.dataframes,
+            self.requested_report_ids,
+            self.output_directory,
+        )
+        self._written = True
+        return self.report_paths
 
 
 def compute_balance_errors(run_result: RunResult) -> dict[str, BalanceError]:
@@ -351,9 +525,13 @@ def format_balance_error_lines(balance_errors: dict[str, Any]) -> tuple[str, ...
 
 __all__ = [
     "BalanceError",
+    "BALANCES_FILENAME",
+    "PackedBedDataFrameReporter",
+    "REPORTS_FILENAME",
     "ReportAxisSpec",
     "VariableReportSpec",
+    "build_requested_report_dataframes",
     "compute_balance_errors",
-    "export_requested_report_csvs",
+    "export_requested_report_pickles",
     "format_balance_error_lines",
 ]
