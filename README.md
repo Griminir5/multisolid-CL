@@ -31,8 +31,9 @@ Example environment setup:
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install daetools==2.6.0 numpy pydantic PyYAML matplotlib
+python -m pip install numpy pydantic PyYAML matplotlib
 ```
+Afterwards follow `daetools` installation guide.
 
 Install optional graph rendering support only if you need `system_graph.svg`:
 
@@ -144,8 +145,7 @@ initial_profile:
 ```
 
 `run.yaml` selects geometry, solver settings, numerical schemes, and reports.
-Supported axial schemes are `upwind1`, `central`, `linear_upwind2`,
-`linear_upwind5`, `muscl_minmod`, `weno3`, `weno5`, and `weno7`.
+Supported axial schemes are `upwind1`, `central`, `linear_upwind2`, `muscl_minmod`, `weno3`, `weno5`.
 
 Common report IDs include `temperature`, `pressure`, `gas_concentration`,
 `gas_mole_fraction`, `solid_concentration`, `solid_mole_fraction`, `gas_flux`,
