@@ -81,6 +81,7 @@ DERIVED_REPORT_VARIABLE_NAMES = {
     "heat_balance": (
         "heat_in_total",
         "heat_out_total",
+        "heat_loss_total",
         "heat_bed_total",
     ),
     "mass_balance": (
@@ -112,6 +113,7 @@ BENCHMARK_SNAPSHOT_VARIABLE_NAMES = (
     "c_sol",
     "heat_in_total",
     "heat_out_total",
+    "heat_loss_total",
     "heat_bed_total",
     "mass_in_total",
     "mass_out_total",

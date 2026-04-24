@@ -6,11 +6,11 @@ initial_profile:
   basis: bed
   zones:
     - x_start_m: 0.0
-      x_end_m: 2.5
+      x_end_m: 6.0
       e_b: 0.5
       e_p: 0.5
-      d_p: 0.01
+      d_p: 0.0012
       values:
-        Ni: 1143.0
+        Ni: 1613.73
         NiO: 0.0
-        CaAl2O4: 4572.0
+        CaAl2O4: 4321.90

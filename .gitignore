@@ -6,7 +6,12 @@ pyrightconfig.json
 Barin_Extraction/Thermochemical Data of Pure Substances - 1995 - Barin.pdf
 
 .vscode/settings.json
-packed_bed/examples/
+packed_bed/examples/*
+!packed_bed/examples/default_case/
+packed_bed/examples/default_case/*
+!packed_bed/examples/default_case/*.yaml
 
 OpenCL/
 OpenCS-2.6.0/
+
+transitive_validation/**

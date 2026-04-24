@@ -10,8 +10,6 @@ gas_species:
   - O2
 
 reaction_ids:
-  # - smr_reaction_numaguchi_an
-  # - wgs_reaction_numaguchi_an
   - smr_reaction_xu_froment
   - wgs_reaction_xu_froment
   - overall_reforming_xu_froment

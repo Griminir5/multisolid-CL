@@ -3,16 +3,16 @@ references:
   program_file: program.yaml
   solids_file: solids.yaml
 simulation:
-  system_name: oxygenbreakthrough
-  time_horizon_s: 1000.0
+  system_name: FullNickelCase
+  time_horizon_s: 7200.0
   reporting_interval_s: 1.0
   repeat_program: true
   mass_scheme: weno3
   heat_scheme: weno3
   report_time_derivatives: false
 model:
-  bed_length_m: 0.4
-  bed_radius_m: 0.017214
+  bed_length_m: 6.0
+  bed_radius_m: 0.5
   axial_cells: 20
 solver:
   relative_tolerance: 1.0e-5
@@ -23,5 +23,6 @@ outputs:
     - temperature
     - pressure
     - gas_mole_fraction
+    - solid_mole_fraction
     - heat_balance
     - mass_balance

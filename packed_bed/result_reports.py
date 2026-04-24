@@ -125,6 +125,7 @@ BALANCE_REPORT_SPECS = {
         "terms": (
             "in_total_J",
             "out_total_J",
+            "loss_total_J",
             "bed_total_J",
             "balance_error_J",
         ),
@@ -289,7 +290,7 @@ def _build_variable_report_dataframe(run_result: RunResult, report_id: str) -> p
     )
 
 
-def _balance_series(run_result: RunResult, report_id: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _balance_series(run_result: RunResult, report_id: str) -> tuple[np.ndarray, tuple[np.ndarray, ...]]:
     spec = BALANCE_REPORT_SPECS[report_id]
     process = _require_process(run_result)
     variable_names = spec["variables"]
@@ -307,17 +308,29 @@ def _balance_series(run_result: RunResult, report_id: str) -> tuple[np.ndarray, 
         _require_same_time_axis(first_time, times, label=variable_name)
         series.append(values)
 
-    in_total, out_total, bed_total = series
-    balance_error = (bed_total - bed_total[0]) + (out_total - in_total)
-    return first_time, in_total, out_total, bed_total, balance_error
+    if len(series) < 3:
+        raise ValueError(f"Balance report '{report_id}' must contain at least inlet, outlet, and bed totals.")
+
+    in_total = series[0]
+    bed_total = series[-1]
+    balance_error = (bed_total - bed_total[0]) - in_total
+    for exported_total in series[1:-1]:
+        balance_error = balance_error + exported_total
+
+    balance_terms = (*series, balance_error)
+    if len(spec["terms"]) != len(balance_terms):
+        raise ValueError(
+            f"Balance report '{report_id}' declares {len(spec['terms'])} terms but produced {len(balance_terms)} series."
+        )
+    return first_time, balance_terms
 
 
 def _build_balance_dataframe(run_result: RunResult, report_id: str) -> pd.DataFrame:
     spec = BALANCE_REPORT_SPECS[report_id]
-    time_s, in_total, out_total, bed_total, balance_error = _balance_series(run_result, report_id)
+    time_s, balance_terms = _balance_series(run_result, report_id)
 
     return pd.DataFrame(
-        np.column_stack((in_total, out_total, bed_total, balance_error)),
+        np.column_stack(balance_terms),
         index=pd.Index(time_s, name="time_s"),
         columns=pd.MultiIndex.from_product(
             ((report_id,), spec["terms"]),
@@ -498,7 +511,8 @@ class PackedBedDataFrameReporter(daeDataReporterLocal):
 def compute_balance_errors(run_result: RunResult) -> dict[str, BalanceError]:
     errors: dict[str, BalanceError] = {}
     for report_id, spec in BALANCE_REPORT_SPECS.items():
-        time_s, _, _, _, balance_error = _balance_series(run_result, report_id)
+        time_s, balance_terms = _balance_series(run_result, report_id)
+        balance_error = balance_terms[-1]
         if balance_error.size == 0:
             continue
         max_index = int(np.nanargmax(np.abs(balance_error)))

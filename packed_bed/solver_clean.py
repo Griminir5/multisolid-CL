@@ -173,6 +173,7 @@ class CLBed_mass(daeModel):
 
         self.heat_in_total = daeVariable("heat_in_total", energy_inventory_type, self, "Cumulative gas-phase enthalpy that has entered the bed")
         self.heat_out_total = daeVariable("heat_out_total", energy_inventory_type, self, "Cumulative gas-phase enthalpy that has left the bed")
+        self.heat_loss_total = daeVariable("heat_loss_total", energy_inventory_type, self, "Cumulative heat transferred from the bed to the environment")
         self.heat_bed_total = daeVariable("heat_bed_total", energy_inventory_type, self, "Gas plus solid enthalpy currently residing in the bed")
         
         self.Dax = daeVariable("Dax", dispersion_type, self, "Face axial dispersion coefficient", [self.x_faces])
@@ -191,6 +192,9 @@ class CLBed_mass(daeModel):
         self.T_in = daeVariable("T_in", temp_type, self, "Temperature at the inlet")
         self.P_in = daeVariable("P_in", pres_type, self, "Pressure at the inlet boundary")
         self.P_out = daeVariable("P_out", pres_type, self, "Pressure at the outlet boundary")
+
+        self.T_env = daeParameter("T_env", K, self, "Temperature of the ambient environment outisde the reactor")
+        self.U_eff = daeParameter("U_eff", J / (K * s * m**2), self, "Heat transfer coefficient from inside of the bed to the environment")
 
     def build_kinetics_context(self, idx_cell):
         return KineticsContext(
@@ -556,13 +560,17 @@ class CLBed_mass(daeModel):
 
         mass_bed_total = Constant(0.0 * kg)
         heat_bed_total = Constant(0.0 * J)
+        heat_loss_rate_total = Constant(0.0 * J / s)
         for idx_cell in range(Nc):
             dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
+            heat_loss_density = (
+                (self.T(idx_cell) - self.T_env()) * (2.0 * self.U_eff()) / self.R_bed()
+            )
 
             eq = self.CreateEquation(f"energy_balance_cell_{idx_cell}")
             eq.Residual = dt(self.h_cell(idx_cell)) + (
                 Sum(self.J_gas_face.array("*", idx_cell + 1)) - Sum(self.J_gas_face.array("*", idx_cell))
-            ) / dx
+            ) / dx + heat_loss_density
 
             gas_mass_density = Constant(0.0 * kg / m**3)
             for gas_idx in range(Ng):
@@ -574,6 +582,7 @@ class CLBed_mass(daeModel):
 
             mass_bed_total = mass_bed_total + cross_section_area * (gas_mass_density + solid_mass_density) * dx
             heat_bed_total = heat_bed_total + cross_section_area * self.h_cell(idx_cell) * dx
+            heat_loss_rate_total = heat_loss_rate_total + cross_section_area * heat_loss_density * dx
 
         mass_flux_in = Constant(0.0 * kg / (s * m**2))
         mass_flux_out = Constant(0.0 * kg / (s * m**2))
@@ -595,6 +604,9 @@ class CLBed_mass(daeModel):
 
         eq = self.CreateEquation("heat_out_total_accumulation")
         eq.Residual = dt(self.heat_out_total()) - cross_section_area * Sum(self.J_gas_face.array("*", Nf - 1))
+
+        eq = self.CreateEquation("heat_loss_total_accumulation")
+        eq.Residual = dt(self.heat_loss_total()) - heat_loss_rate_total
 
         eq = self.CreateEquation("heat_bed_total_definition")
         eq.Residual = self.heat_bed_total() - heat_bed_total
@@ -675,6 +687,9 @@ class simBed(daeSimulation):
         self.model.pi.SetValue(3.14159)
         self.model.L_bed.SetValue(self.model_config.bed_length_m * m)
         self.model.R_bed.SetValue(self.model_config.bed_radius_m * m)
+
+        self.model.T_env.SetValue(873.15 * K)
+        self.model.U_eff.SetValue(100.0 * J / (K * s * m**2))
 
         inlet_temperature = self.inlet_temperature_program.initial_value
         outlet_pressure = self.outlet_pressure_program.initial_value
@@ -874,6 +889,7 @@ class simBed(daeSimulation):
         self.model.mass_bed_total.SetInitialGuess(mass_bed_total0 * kg)
         self.model.heat_in_total.SetInitialCondition(0.0 * J)
         self.model.heat_out_total.SetInitialCondition(0.0 * J)
+        self.model.heat_loss_total.SetInitialCondition(0.0 * J)
         self.model.heat_bed_total.SetInitialGuess(heat_bed_total0 * J)
 
         for face_idx in range(nf):
