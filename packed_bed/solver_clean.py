@@ -688,8 +688,10 @@ class simBed(daeSimulation):
         self.model.L_bed.SetValue(self.model_config.bed_length_m * m)
         self.model.R_bed.SetValue(self.model_config.bed_radius_m * m)
 
-        self.model.T_env.SetValue(873.15 * K)
-        self.model.U_eff.SetValue(100.0 * J / (K * s * m**2))
+        self.model.T_env.SetValue(self.model_config.ambient_temperature_k * K)
+        self.model.U_eff.SetValue(
+            self.model_config.heat_transfer_coefficient_w_per_m2_k * J / (K * s * m**2)
+        )
 
         inlet_temperature = self.inlet_temperature_program.initial_value
         outlet_pressure = self.outlet_pressure_program.initial_value
