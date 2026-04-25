@@ -73,7 +73,7 @@ The top-level `run.yaml` points to three sibling input files:
 - `solids.yaml`: selected solid species and the initial axial solid profile.
 
 Outputs are written under the `outputs.directory` configured in `run.yaml`.
-Artifact SVGs are written under `outputs.artifacts_directory`.
+Artifacts are written under `outputs.artifacts_directory`.
 
 Requested report data are written as pickled pandas dataframes:
 
@@ -167,6 +167,10 @@ Common report IDs include `temperature`, `pressure`, `gas_concentration`,
 `gas_mole_fraction`, `solid_concentration`, `solid_mole_fraction`, `gas_flux`,
 `gas_source`, `solid_source`, `reaction_rate`, `gas_enthalpy_flux`,
 `heat_balance`, and `mass_balance`.
+
+Set `outputs.solver_incidence_matrix: true` to write solver sparsity artifacts
+after DAETools initializes the model. The run writes the raw DAETools XPM plus a
+labelled HTML incidence matrix and a CSV edge list under `artifacts_directory`.
 
 ## Adding new components
 

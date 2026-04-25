@@ -519,6 +519,7 @@ class OutputConfig(FrozenConfigModel):
     directory: ConfigString
     artifacts_directory: ConfigString
     requested_reports: tuple[ConfigString, ...]
+    solver_incidence_matrix: bool = False
 
     @field_validator("requested_reports", mode="before")
     @classmethod

@@ -6,6 +6,7 @@ from pathlib import Path
 import datetime
 
 from .config import RunBundle, RunResult, load_run_bundle
+from .incidence_matrix import write_solver_incidence_artifacts
 from .properties import PROPERTY_REGISTRY
 from .result_reports import PackedBedDataFrameReporter, compute_balance_errors, format_balance_error_lines
 from .result_plots import render_run_result_plots
@@ -79,6 +80,7 @@ def run_simulation(
 ) -> RunResult:
     output_directory = run_bundle.output_directory
     output_directory.mkdir(parents=True, exist_ok=True)
+    solver_artifact_paths: dict[str, Path] = {}
 
     assembly = assemble_simulation(
         run_bundle,
@@ -95,18 +97,35 @@ def run_simulation(
         )
     )
     dataframe_reporter = PackedBedDataFrameReporter(run_bundle)
+    after_initialize = None
+    if run_bundle.run.outputs.solver_incidence_matrix:
+        artifacts_directory = run_bundle.artifacts_directory
+
+        def after_initialize(simulation, solver):
+            solver_artifact_paths.update(
+                write_solver_incidence_artifacts(
+                    model=simulation.model,
+                    solver=solver,
+                    output_dir=artifacts_directory,
+                )
+            )
+
     reporter = run_assembled_simulation(
         assembly,
         report_ids=runtime_report_ids,
         include_plot_variables=True,
         data_reporter=dataframe_reporter,
+        after_initialize=after_initialize,
     )
 
     run_result = RunResult(
         run_bundle=run_bundle,
         output_directory=output_directory,
         success=True,
-        artifact_paths=dict(artifact_paths or {}),
+        artifact_paths={
+            **dict(artifact_paths or {}),
+            **solver_artifact_paths,
+        },
         reporter=reporter,
         simulation=assembly.simulation,
     )

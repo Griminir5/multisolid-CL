@@ -13,7 +13,7 @@ simulation:
 model:
   bed_length_m: 6.0
   bed_radius_m: 0.5
-  axial_cells: 20
+  axial_cells: 10
   ambient_temperature_k: 873.15
   heat_transfer_coefficient_w_per_m2_k: 0.0
 solver:
@@ -21,6 +21,7 @@ solver:
 outputs:
   directory: output
   artifacts_directory: output/artifacts
+  solver_incidence_matrix: true
   requested_reports:
     - temperature
     - pressure

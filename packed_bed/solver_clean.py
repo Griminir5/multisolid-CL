@@ -1066,6 +1066,7 @@ def run_assembled_simulation(
     include_plot_variables=False,
     include_benchmark_snapshot=False,
     data_reporter=None,
+    after_initialize=None,
 ):
     configure_evaluation_mode()
     simulation = assembly.simulation
@@ -1095,6 +1096,8 @@ def run_assembled_simulation(
     try:
         simulation.Initialize(solver, reporter, log)
         initialized = True
+        if after_initialize is not None:
+            after_initialize(simulation, solver)
         simulation.SolveInitial()
         simulation.Run()
     finally:
