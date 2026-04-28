@@ -21,6 +21,11 @@ REPORT_VARIABLE_REGISTRY = {
         description="Bed pressure by cell center.",
         variable_name="pres_bed",
     ),
+    "velocity": ReportDefinition(
+        id="velocity",
+        description="Face superficial velocity by cell face.",
+        variable_name="u_s",
+    ),
     "gas_concentration": ReportDefinition(
         id="gas_concentration",
         description="Gas concentration by species and cell center.",

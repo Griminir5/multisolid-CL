@@ -44,6 +44,11 @@ VARIABLE_REPORT_SPECS = {
         axes=(ReportAxisSpec("x_cell", "x_cell_m"),),
         value_column_name="pressure_pa",
     ),
+    "velocity": VariableReportSpec(
+        variable_name="u_s",
+        axes=(ReportAxisSpec("x_face", "x_face_m"),),
+        value_column_name="velocity_m_per_s",
+    ),
     "gas_concentration": VariableReportSpec(
         variable_name="c_gas",
         axes=(

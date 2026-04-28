@@ -163,7 +163,7 @@ initial_profile:
 `run.yaml` selects geometry, solver settings, numerical schemes, and reports.
 Supported axial schemes are `upwind1`, `central`, `linear_upwind2`, `muscl_minmod`, `weno3`, `weno5`.
 
-Common report IDs include `temperature`, `pressure`, `gas_concentration`,
+Common report IDs include `temperature`, `pressure`, `velocity`, `gas_concentration`,
 `gas_mole_fraction`, `solid_concentration`, `solid_mole_fraction`, `gas_flux`,
 `gas_source`, `solid_source`, `reaction_rate`, `gas_enthalpy_flux`,
 `heat_balance`, and `mass_balance`.
