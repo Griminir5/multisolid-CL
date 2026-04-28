@@ -126,10 +126,21 @@ def _validate_reaction_phase_membership(
 ) -> None:
     gas_species_set = set(gas_species)
     solid_species_set = set(solid_species)
-    involved_species = set(reaction.participating_species)
+    selected_species = gas_species_set | solid_species_set
 
-    gas_members = sorted(involved_species & gas_species_set)
-    solid_members = sorted(involved_species & solid_species_set)
+    missing_species = sorted(
+        species_id
+        for species_id in reaction.all_species
+        if species_id not in selected_species
+    )
+    if missing_species:
+        raise ValueError(
+            f"Reaction '{reaction.id}' requires unselected species: {', '.join(missing_species)}."
+        )
+
+    stoichiometric_species = set(reaction.participating_species)
+    gas_members = sorted(stoichiometric_species & gas_species_set)
+    solid_members = sorted(stoichiometric_species & solid_species_set)
 
     if reaction.phase == "gas_gas":
         if not gas_members:

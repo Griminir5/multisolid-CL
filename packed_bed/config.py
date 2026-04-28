@@ -717,7 +717,9 @@ def validate_run_bundle(
                 reaction_catalog=reaction_catalog,
             )
         except ValueError as exc:
-            errors.append(str(exc))
+            error_message = str(exc)
+            if error_message not in errors:
+                errors.append(error_message)
 
     unknown_reports = sorted(
         report_id

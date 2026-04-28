@@ -921,31 +921,15 @@ class SimulationAssembly:
 def configure_evaluation_mode():
     cfg = daeGetConfig()
     cfg.SetString("daetools.core.equations.evaluationMode", "computeStack_OpenMP")
-    cfg.SetInteger("daetools.core.equations.computeStack_OpenMP.numThreads", 16)
+    cfg.SetInteger("daetools.core.equations.computeStack_OpenMP.numThreads", 0)
 
 
 def _create_sparse_linear_solver():
     
-    try:
-        from daetools.solvers.superlu_mt import pySuperLU_MT
-        
-        return pySuperLU_MT.daeCreateSuperLUSolver()
-    except Exception:
-        pass
+    from daetools.solvers.trilinos import pyTrilinos
+    return pyTrilinos.daeCreateTrilinosSolver("Amesos_Klu", "")
 
-    try:
-        from daetools.solvers.trilinos import pyTrilinos
 
-        return pyTrilinos.daeCreateTrilinosSolver("Amesos_Klu", "")
-    except Exception:
-        pass
-    try:
-        from daetools.solvers.superlu import pySuperLU
-
-        return pySuperLU.daeCreateSuperLUSolver()
-
-    except Exception:
-        return None
 
 
 def build_idas_solver(relative_tolerance=1e-6):
