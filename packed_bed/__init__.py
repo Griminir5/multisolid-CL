@@ -1,4 +1,12 @@
 from .cli import main, run_simulation
+from .batch import (
+    BatchResult,
+    BatchSpec,
+    BatchValidationError,
+    load_batch_spec,
+    materialize_batch_cases,
+    run_batch_file,
+)
 from .config import (
     ChemistryConfig,
     CompositionChannelConfig,
@@ -33,6 +41,9 @@ from .reactions import (
 )
 
 __all__ = [
+    "BatchResult",
+    "BatchSpec",
+    "BatchValidationError",
     "ChemistryConfig",
     "CompositionChannelConfig",
     "CompositionRampStep",
@@ -63,9 +74,12 @@ __all__ = [
     "SpeciesPropertyRecord",
     "VectorProgram",
     "build_reaction_network",
+    "load_batch_spec",
     "load_run_bundle",
     "main",
+    "materialize_batch_cases",
     "resolve_kinetics_hooks",
+    "run_batch_file",
     "run_simulation",
     "validate_run_bundle",
 ]

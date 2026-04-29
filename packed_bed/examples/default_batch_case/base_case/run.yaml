@@ -1,0 +1,32 @@
+references:
+  chemistry_file: chemistry.yaml
+  program_file: program.yaml
+  solids_file: solids.yaml
+simulation:
+  system_name: BatchBaseCase
+  time_horizon_s: 7200.0
+  reporting_interval_s: 1.0
+  repeat_program: true
+  mass_scheme: upwind1
+  heat_scheme: upwind1
+  report_time_derivatives: false
+model:
+  bed_length_m: 6.0
+  bed_radius_m: 0.5
+  axial_cells: 20
+  ambient_temperature_k: 873.15
+  heat_transfer_coefficient_w_per_m2_k: 0.0
+solver:
+  relative_tolerance: 1.0e-5
+outputs:
+  directory: output
+  artifacts_directory: output/artifacts
+  solver_incidence_matrix: false
+  requested_reports:
+    - temperature
+    - pressure
+    - velocity
+    - gas_mole_fraction
+    - solid_mole_fraction
+    - heat_balance
+    - mass_balance

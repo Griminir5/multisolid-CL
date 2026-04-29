@@ -10,6 +10,10 @@ packed_bed/examples/*
 !packed_bed/examples/default_case/
 packed_bed/examples/default_case/*
 !packed_bed/examples/default_case/*.yaml
+!packed_bed/examples/default_batch_case/
+!packed_bed/examples/default_batch_case/**/
+!packed_bed/examples/default_batch_case/**/*.yaml
+packed_bed/examples/default_batch_case/output/
 
 OpenCL/
 OpenCS-2.6.0/

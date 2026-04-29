@@ -1,0 +1,16 @@
+solid_species:
+  - Ni
+  - NiO
+  - CaAl2O4
+initial_profile:
+  basis: bed
+  zones:
+    - x_start_m: 0.0
+      x_end_m: 0.8
+      e_b: 0.5
+      e_p: 0.5
+      d_p: 0.0012
+      values:
+        Ni: 1613.73
+        NiO: 0.0
+        CaAl2O4: 4321.90

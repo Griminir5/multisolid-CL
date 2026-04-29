@@ -5,6 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 import datetime
 
+from .batch import run_batch_file
 from .config import RunBundle, RunResult, load_run_bundle
 from .incidence_matrix import write_solver_incidence_artifacts
 from .properties import PROPERTY_REGISTRY
@@ -167,7 +168,53 @@ def build_parser():
     return parser
 
 
+def build_batch_parser():
+    parser = argparse.ArgumentParser(
+        prog="python -m packed_bed batch",
+        description="Run a batch of packed-bed simulations from a batch YAML file.",
+    )
+    parser.add_argument(
+        "batch_yaml",
+        help="Path to the batch.yaml file.",
+    )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Expand and validate the batch cases without running simulations.",
+    )
+    return parser
+
+
 def main(argv=None):
+    if argv is None:
+        import sys
+
+        argv = sys.argv[1:]
+    else:
+        argv = list(argv)
+
+    if argv and argv[0] == "batch":
+        parser = build_batch_parser()
+        args = parser.parse_args(argv[1:])
+        batch_result = run_batch_file(
+            args.batch_yaml,
+            validate_only=args.validate_only,
+        )
+        if args.validate_only:
+            passed = batch_result.total_count - batch_result.failed_count
+            print(
+                f"Batch validation complete: {passed}/{batch_result.total_count} cases passed. "
+                f"Manifest: {batch_result.manifest_path}"
+            )
+            return 1 if batch_result.failed_count else 0
+
+        succeeded = sum(1 for record in batch_result.records if record.status == "success")
+        print(
+            f"Batch complete: {succeeded}/{batch_result.total_count} cases succeeded. "
+            f"Summary: {batch_result.summary_path}"
+        )
+        return 1 if batch_result.failed_count else 0
+
     parser = build_parser()
     args = parser.parse_args(argv)
 

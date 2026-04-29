@@ -65,6 +65,29 @@ Open the DAETools plotter after a successful run:
 python -m packed_bed packed_bed\examples\medrano_case\run.yaml --dae-plotter
 ```
 
+## Running a batch
+
+Batch runs expand a cartesian product of named options into ordinary case
+directories. Each generated case contains materialized `run.yaml`,
+`chemistry.yaml`, `program.yaml`, and `solids.yaml` files, then uses the normal
+single-case validation and execution path.
+
+```powershell
+python -m packed_bed batch packed_bed\examples\default_batch_case\batch.yaml
+```
+
+Validate and materialize the generated cases without integrating them:
+
+```powershell
+python -m packed_bed batch packed_bed\examples\default_batch_case\batch.yaml --validate-only
+```
+
+The batch specification lives beside its own base case. Program presets can use
+the normal mol/s inlet-flow form, or can set `inlet_flow.basis: ghsv_per_h`.
+GHSV values are converted during batch materialization using the final case
+geometry, 273.15 K, and 1 bar; the generated `program.yaml` always contains
+mol/s.
+
 The top-level `run.yaml` points to three sibling input files:
 
 - `chemistry.yaml`: selected gas species and reaction IDs.

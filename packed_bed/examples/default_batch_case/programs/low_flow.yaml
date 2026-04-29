@@ -1,0 +1,168 @@
+inlet_flow:
+  basis: ghsv_per_h
+  initial: 5
+  steps:
+    - kind: hold
+      duration_s: 10.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 450
+    - kind: hold
+      duration_s: 500.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 25
+    - kind: hold
+      duration_s: 180.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 200
+    - kind: hold
+      duration_s: 1000.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 400
+    - kind: hold
+      duration_s: 500.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 25
+    - kind: hold
+      duration_s: 180.0
+
+inlet_temperature:
+  initial: 700.0
+  steps:
+    - kind: hold
+      duration_s: 10.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 823.15
+    - kind: hold
+      duration_s: 500.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 673.15
+    - kind: hold
+      duration_s: 180.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 873.15
+    - kind: hold
+      duration_s: 1505.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 673.15
+    - kind: hold
+      duration_s: 180.0
+
+outlet_pressure:
+  initial: 3100000.0
+  steps:
+    - kind: hold
+      duration_s: 10.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 3080000.0
+    - kind: hold
+      duration_s: 500.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 3100000.0
+    - kind: hold
+      duration_s: 180.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 3090000.0
+    - kind: hold
+      duration_s: 1505.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 3100000.0
+    - kind: hold
+      duration_s: 180.0
+
+inlet_composition:
+  initial:
+    Ar:   0.0000
+    CH4:  0.0000
+    CO:   0.0000
+    CO2:  0.0000
+    H2:   0.0000
+    H2O:  0.0000
+    He:   0.0000
+    N2:   1.0000
+    O2:   0.0000
+  steps:
+    - kind: hold
+      duration_s: 10.0
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        Ar:   0.0093
+        CH4:  0.0000
+        CO:   0.0000
+        CO2:  0.0004
+        H2:   0.0000
+        H2O:  0.0000
+        He:   0.0000
+        N2:   0.7808
+        O2:   0.2095
+    - kind: hold
+      duration_s: 500.0
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        Ar:   0.0000
+        CH4:  0.0000
+        CO:   0.0000
+        CO2:  0.0000
+        H2:   0.0000
+        H2O:  1.0000
+        He:   0.0000
+        N2:   0.0000
+        O2:   0.0000
+    - kind: hold
+      duration_s: 180.0
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        Ar:   0.0000
+        CH4:  0.1855
+        CO:   0.0048
+        CO2:  0.1624
+        H2:   0.1469
+        H2O:  0.4881
+        He:   0.0000
+        N2:   0.0112
+        O2:   0.0011
+    - kind: hold
+      duration_s: 1000.0
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        Ar:   0.0000
+        CH4:  0.2152
+        CO:   0.0000
+        CO2:  0.1524
+        H2:   0.0005
+        H2O:  0.6270
+        He:   0.0000
+        N2:   0.0035
+        O2:   0.0014
+    - kind: hold
+      duration_s: 500.0
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        Ar:   0.0000
+        CH4:  0.0000
+        CO:   0.0000
+        CO2:  0.0000
+        H2:   0.0000
+        H2O:  1.0000
+        He:   0.0000
+        N2:   0.0000
+        O2:   0.0000
+    - kind: hold
+      duration_s: 180.0

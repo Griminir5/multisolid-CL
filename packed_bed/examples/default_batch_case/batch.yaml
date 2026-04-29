@@ -1,0 +1,34 @@
+base_case: base_case/run.yaml
+output_directory: output
+
+programs:
+  high_flow_cycle: programs/high_flow.yaml
+  low_flow_cycle: programs/low_flow.yaml
+
+geometries:
+  short_bed:
+    model:
+      bed_length_m: 0.4
+      bed_radius_m: 0.0175
+    solids_file: geometries/short_bed_solids.yaml
+  long_bed:
+    model:
+      bed_length_m: 0.8
+      bed_radius_m: 0.035
+    solids_file: geometries/long_bed_solids.yaml
+
+axes:
+  - id: program
+    values:
+      - id: high_flow
+        program: high_flow_cycle
+      - id: low_flow
+        program: low_flow_cycle
+
+  - id: geometry
+    values:
+      - id: short_bed
+        geometry: short_bed
+      - id: long_bed
+        geometry: long_bed
+
