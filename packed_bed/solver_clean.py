@@ -68,7 +68,7 @@ velocity_type =         daeVariableType(name="velocity_type", units=m / s,
 fraction_type =         daeVariableType(name="fraction_type", units=dimless,
                                         lowerBound=-0.1, upperBound=1.1, initialGuess=0, absTolerance=1e-5,)
 
-SMOOTH_RAMP_WIDTH_S = 1.0
+SMOOTH_RAMP_WIDTH_S = 0.1
 
 
 class CLBed_mass(daeModel):
