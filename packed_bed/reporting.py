@@ -5,9 +5,9 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ReportDefinition:
-    id: str 
+    id: str
     description: str
-    variable_name: str | None = None # actual name inside the DAETools model definition
+    variable_name: str | None = None  # Actual name inside the DAETools model definition.
 
 
 REPORT_VARIABLE_REGISTRY = {
@@ -104,6 +104,7 @@ PLOT_REPORT_IDS = (
 )
 
 PLOT_EXTRA_VARIABLE_NAMES = (
+    "P_in",
     "P_out",
 )
 
