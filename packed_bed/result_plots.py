@@ -11,7 +11,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .config import RunResult
+from .config import DEFAULT_SMOOTH_RAMP_WIDTH_S, RunResult
 from .reporting import REPORT_VARIABLE_REGISTRY
 
 
@@ -188,40 +188,26 @@ def _active_species_indices(*composition_series: np.ndarray) -> list[int]:
     return indices or list(range(species_count))
 
 
+def _smooth_ramp_width_s_for_result(run_result: RunResult) -> float:
+    simulation = getattr(run_result, "simulation", None)
+    return float(getattr(simulation, "smooth_ramp_width_s", DEFAULT_SMOOTH_RAMP_WIDTH_S))
+
+
 def _sample_inlet_composition(run_result: RunResult, time_s: np.ndarray, gas_species: tuple[str, ...]) -> np.ndarray:
     program = run_result.run_bundle.program.inlet_composition.compile_program(
         gas_species,
         repeat=run_result.run_bundle.run.repeat_program,
         time_horizon=run_result.run_bundle.run.time_horizon_s,
     )
-    segments = program.build_segments()
     initial_value = np.asarray(program.initial_value, dtype=float)
     sampled = np.empty((time_s.size, initial_value.size), dtype=float)
+    smooth_ramp_width_s = _smooth_ramp_width_s_for_result(run_result)
 
-    if not segments:
-        sampled[:, :] = initial_value
-        return sampled
-
-    segment_index = 0
     for time_index, time_value in enumerate(time_s):
-        while segment_index < len(segments) and time_value > segments[segment_index].end_time + _TIME_ATOL:
-            segment_index += 1
-
-        if segment_index >= len(segments):
-            sampled[time_index, :] = np.asarray(segments[-1].end_value, dtype=float)
-            continue
-
-        segment = segments[segment_index]
-        start_value = np.asarray(segment.start_value, dtype=float)
-        end_value = np.asarray(segment.end_value, dtype=float)
-        duration = segment.end_time - segment.start_time
-        if duration <= _TIME_ATOL:
-            sampled[time_index, :] = end_value
-            continue
-
-        fraction = (time_value - segment.start_time) / duration
-        fraction = min(max(fraction, 0.0), 1.0)
-        sampled[time_index, :] = start_value + (end_value - start_value) * fraction
+        sampled[time_index, :] = np.asarray(
+            program.smoothed_value_at(float(time_value), smooth_ramp_width_s=smooth_ramp_width_s),
+            dtype=float,
+        )
 
     return sampled
 

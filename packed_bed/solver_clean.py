@@ -10,7 +10,15 @@ import numpy as np
 from daetools.pyDAE import *
 
 from .axial_schemes import reconstruct_face_states
-from .config import ModelConfig, ProgramSegment, RunBundle, ScalarProgram, SolidConfig, VectorProgram
+from .config import (
+    DEFAULT_SMOOTH_RAMP_WIDTH_S,
+    ModelConfig,
+    ProgramSegment,
+    RunBundle,
+    ScalarProgram,
+    SolidConfig,
+    VectorProgram,
+)
 from .kinetics import KineticsContext, resolve_kinetics_hooks
 from .reactions import ReactionNetwork, build_reaction_network
 from .reporting import reporting_targets
@@ -68,7 +76,7 @@ velocity_type =         daeVariableType(name="velocity_type", units=m / s,
 fraction_type =         daeVariableType(name="fraction_type", units=dimless,
                                         lowerBound=-0.1, upperBound=1.1, initialGuess=0, absTolerance=1e-5,)
 
-SMOOTH_RAMP_WIDTH_S = 0.1
+SMOOTH_RAMP_WIDTH_S = DEFAULT_SMOOTH_RAMP_WIDTH_S
 
 
 class CLBed_mass(daeModel):
@@ -721,15 +729,30 @@ class simBed(daeSimulation):
         nc = self.model.x_centers.NumberOfPoints
         nf = self.model.x_faces.NumberOfPoints
 
-        inlet_y = np.asarray(self.model.y_in_const.npyValues, dtype=float)
         area = self.model.pi.GetValue() * self.model.R_bed.GetValue() ** 2
-        fin = self.model.F_in_const.GetValue()
+        fin = self.inlet_flow_program.smoothed_value_at(
+            0.0,
+            smooth_ramp_width_s=self.smooth_ramp_width_s,
+        )
+        inlet_y = np.asarray(
+            self.inlet_composition_program.smoothed_value_at(
+                0.0,
+                smooth_ramp_width_s=self.smooth_ramp_width_s,
+            ),
+            dtype=float,
+        )
         if fin <= 0.0:
             raise ValueError("Initialization currently assumes a positive inlet molar flow.")
 
         r_gas = self.model.R_gas.GetValue()
-        outlet_pressure = self.model.P_out_const.GetValue()
-        inlet_temperature = self.model.T_in_const.GetValue()
+        outlet_pressure = self.outlet_pressure_program.smoothed_value_at(
+            0.0,
+            smooth_ramp_width_s=self.smooth_ramp_width_s,
+        )
+        inlet_temperature = self.inlet_temperature_program.smoothed_value_at(
+            0.0,
+            smooth_ramp_width_s=self.smooth_ramp_width_s,
+        )
 
         center_coords = np.asarray(self.model.xval_cells.npyValues, dtype=float)
         face_coords = np.asarray(self.model.xval_faces.npyValues, dtype=float)

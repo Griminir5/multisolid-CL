@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib.util import find_spec
+import math
 from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+import numpy as np
 
-from .config import RunBundle
+from .config import DEFAULT_SMOOTH_RAMP_WIDTH_S, RunBundle
 from .solid_profiles import (
     build_cell_scalar_profile,
     build_face_scalar_profile,
@@ -134,53 +136,66 @@ def build_system_graph(
     return SystemGraph(nodes=tuple(nodes), edges=tuple(edges))
 
 
-def _series_from_segments(segments, initial_value, *, final_time: float | None = None):
-    if not segments:
-        if final_time is not None and final_time > 0.0:
-            return [0.0, float(final_time)], [initial_value, initial_value]
-        return [0.0], [initial_value]
-
-    times = [0.0]
-    values = [initial_value]
-    for segment in segments:
-        if times[-1] != segment.start_time or values[-1] != segment.start_value:
-            times.append(float(segment.start_time))
-            values.append(float(segment.start_value))
-        times.append(float(segment.end_time))
-        values.append(float(segment.end_value))
-    if final_time is not None and final_time > times[-1]:
-        times.append(float(final_time))
-        values.append(values[-1])
-    return times, values
+def _segment_changes_value(segment) -> bool:
+    start_value = np.asarray(segment.start_value, dtype=float)
+    end_value = np.asarray(segment.end_value, dtype=float)
+    return not np.allclose(start_value, end_value, rtol=0.0, atol=1e-12)
 
 
-def _vector_series_from_segments(segments, initial_value, *, final_time: float | None = None):
-    initial_components = tuple(float(value) for value in initial_value)
-    if not segments:
-        if final_time is not None and final_time > 0.0:
-            return [0.0, float(final_time)], [[value, value] for value in initial_components]
-        return [0.0], [[value] for value in initial_components]
+def _smoothed_program_sample_times(programs, *, final_time: float, smooth_ramp_width_s: float) -> np.ndarray:
+    final_time = float(final_time)
+    if final_time <= 0.0:
+        return np.array([0.0], dtype=float)
 
-    times = [0.0]
-    values_by_component = [[value] for value in initial_components]
-    for segment in segments:
-        start_values = tuple(float(value) for value in segment.start_value)
-        end_values = tuple(float(value) for value in segment.end_value)
-        if times[-1] != segment.start_time or any(
-            component_values[-1] != start_value
-            for component_values, start_value in zip(values_by_component, start_values)
-        ):
-            times.append(float(segment.start_time))
-            for component_values, start_value in zip(values_by_component, start_values):
-                component_values.append(start_value)
-        times.append(float(segment.end_time))
-        for component_values, end_value in zip(values_by_component, end_values):
-            component_values.append(end_value)
-    if final_time is not None and final_time > times[-1]:
-        times.append(float(final_time))
-        for component_values in values_by_component:
-            component_values.append(component_values[-1])
-    return times, values_by_component
+    times = {0.0, final_time}
+    total_segments = sum(len(program.build_segments()) for program in programs)
+    baseline_count = max(400, min(2500, 20 * total_segments + 400))
+    times.update(float(value) for value in np.linspace(0.0, final_time, baseline_count))
+
+    width = float(smooth_ramp_width_s)
+    if width <= 0.0:
+        raise ValueError("smooth_ramp_width_s must be positive.")
+    edge_offsets = width * np.array(
+        [-8.0, -4.0, -2.0, -1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
+    )
+    for program in programs:
+        for segment in program.build_segments():
+            start_time = float(segment.start_time)
+            end_time = float(segment.end_time)
+            for edge_time in (start_time, end_time):
+                for sample_time in edge_time + edge_offsets:
+                    if 0.0 <= sample_time <= final_time:
+                        times.add(float(sample_time))
+
+            if _segment_changes_value(segment):
+                duration_s = max(end_time - start_time, 0.0)
+                interior_count = max(
+                    8,
+                    min(80, int(math.ceil(duration_s / width)) * 4),
+                )
+                times.update(float(value) for value in np.linspace(start_time, end_time, interior_count))
+
+    return np.asarray(sorted(times), dtype=float)
+
+
+def _scalar_series_from_smoothed_program(program, times: np.ndarray, *, smooth_ramp_width_s: float) -> np.ndarray:
+    return np.asarray(
+        [
+            program.smoothed_value_at(float(time_s), smooth_ramp_width_s=smooth_ramp_width_s)
+            for time_s in times
+        ],
+        dtype=float,
+    )
+
+
+def _vector_series_from_smoothed_program(program, times: np.ndarray, *, smooth_ramp_width_s: float) -> np.ndarray:
+    return np.asarray(
+        [
+            program.smoothed_value_at(float(time_s), smooth_ramp_width_s=smooth_ramp_width_s)
+            for time_s in times
+        ],
+        dtype=float,
+    )
 
 
 def _format_edge_label(edge: GraphEdge) -> str:
@@ -308,7 +323,12 @@ def render_system_graph(system_graph: SystemGraph, output_dir) -> dict[str, Path
     return {"system_graph_svg": svg_path}
 
 
-def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Path]:
+def render_operating_program(
+    run_bundle: RunBundle,
+    output_dir,
+    *,
+    smooth_ramp_width_s: float = DEFAULT_SMOOTH_RAMP_WIDTH_S,
+) -> dict[str, Path]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -332,43 +352,53 @@ def render_operating_program(run_bundle: RunBundle, output_dir) -> dict[str, Pat
         repeat=run_bundle.run.repeat_program,
         time_horizon=time_horizon,
     )
+    sample_times = _smoothed_program_sample_times(
+        (
+            inlet_flow_program,
+            inlet_temperature_program,
+            outlet_pressure_program,
+            inlet_composition_program,
+        ),
+        final_time=time_horizon,
+        smooth_ramp_width_s=smooth_ramp_width_s,
+    )
 
     figure, axes = plt.subplots(4, 1, figsize=(12, 12), sharex=True)
 
-    flow_times, flow_values = _series_from_segments(
-        inlet_flow_program.build_segments(),
-        inlet_flow_program.initial_value,
-        final_time=time_horizon,
+    flow_values = _scalar_series_from_smoothed_program(
+        inlet_flow_program,
+        sample_times,
+        smooth_ramp_width_s=smooth_ramp_width_s,
     )
-    axes[0].plot(flow_times, flow_values, color="#1d3557", linewidth=2)
+    axes[0].plot(sample_times, flow_values, color="#1d3557", linewidth=2)
     axes[0].set_ylabel("mol/s")
     axes[0].set_title("Inlet Flow")
 
-    temp_times, temp_values = _series_from_segments(
-        inlet_temperature_program.build_segments(),
-        inlet_temperature_program.initial_value,
-        final_time=time_horizon,
+    temp_values = _scalar_series_from_smoothed_program(
+        inlet_temperature_program,
+        sample_times,
+        smooth_ramp_width_s=smooth_ramp_width_s,
     )
-    axes[1].plot(temp_times, temp_values, color="#e76f51", linewidth=2)
+    axes[1].plot(sample_times, temp_values, color="#e76f51", linewidth=2)
     axes[1].set_ylabel("K")
     axes[1].set_title("Inlet Temperature")
 
-    pressure_times, pressure_values = _series_from_segments(
-        outlet_pressure_program.build_segments(),
-        outlet_pressure_program.initial_value,
-        final_time=time_horizon,
+    pressure_values = _scalar_series_from_smoothed_program(
+        outlet_pressure_program,
+        sample_times,
+        smooth_ramp_width_s=smooth_ramp_width_s,
     )
-    axes[2].plot(pressure_times, pressure_values, color="#264653", linewidth=2)
+    axes[2].plot(sample_times, pressure_values, color="#264653", linewidth=2)
     axes[2].set_ylabel("Pa")
     axes[2].set_title("Outlet Pressure")
 
-    composition_times, series_by_species = _vector_series_from_segments(
-        inlet_composition_program.build_segments(),
-        inlet_composition_program.initial_value,
-        final_time=time_horizon,
+    composition_values = _vector_series_from_smoothed_program(
+        inlet_composition_program,
+        sample_times,
+        smooth_ramp_width_s=smooth_ramp_width_s,
     )
-    for species_id, series in zip(gas_species, series_by_species):
-        axes[3].plot(composition_times, series, linewidth=2, label=species_id)
+    for species_idx, species_id in enumerate(gas_species):
+        axes[3].plot(sample_times, composition_values[:, species_idx], linewidth=2, label=species_id)
     axes[3].set_ylabel("Mole fraction")
     axes[3].set_title("Inlet Composition")
     axes[3].set_xlabel("Time [s]")

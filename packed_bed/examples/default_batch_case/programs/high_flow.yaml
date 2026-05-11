@@ -1,9 +1,9 @@
 inlet_flow:
   basis: ghsv_per_h
-  initial: 10
+  initial: 20
   steps:
     - kind: hold
-      duration_s: 10.0
+      duration_s: 100.0
     - kind: ramp
       duration_s: 5.0
       target: 900
@@ -34,7 +34,7 @@ inlet_temperature:
   initial: 700.0
   steps:
     - kind: hold
-      duration_s: 10.0
+      duration_s: 100.0
     - kind: ramp
       duration_s: 5.0
       target: 823.15
@@ -60,7 +60,7 @@ outlet_pressure:
   initial: 3100000.0
   steps:
     - kind: hold
-      duration_s: 10.0
+      duration_s: 100.0
     - kind: ramp
       duration_s: 5.0
       target: 3080000.0
@@ -95,7 +95,7 @@ inlet_composition:
     O2:   0.0000
   steps:
     - kind: hold
-      duration_s: 10.0
+      duration_s: 100.0
     - kind: ramp
       duration_s: 5.0
       target:
