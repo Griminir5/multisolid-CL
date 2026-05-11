@@ -21,10 +21,11 @@ root.
   - `pydantic`
   - `PyYAML`
   - `matplotlib`
+  - `PyQt6`
+  - `PyQt6-WebEngine`
 - Optional dependencies:
   - Graphviz plus `pygraphviz`, used to render the species/reaction system graph.
   - `vtk`, for DAETools or visualization workflows that need VTK support.
-  - `PyQt6`, if you want to open the DAETools plotter with `--dae-plotter`.
 
 Example environment setup:
 

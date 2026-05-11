@@ -2,6 +2,7 @@ daetools-2.6.0-win64/
 **/*pyc*
 typings/
 pyrightconfig.json
+.venv/
 
 Barin_Extraction/Thermochemical Data of Pure Substances - 1995 - Barin.pdf
 
@@ -19,3 +20,4 @@ OpenCL/
 OpenCS-2.6.0/
 
 transitive_validation/**
+
