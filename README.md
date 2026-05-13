@@ -83,6 +83,16 @@ Validate and materialize the generated cases without integrating them:
 python -m packed_bed batch packed_bed\examples\default_batch_case\batch.yaml --validate-only
 ```
 
+Kill and mark a single generated case as failed if it exceeds a per-case wall
+clock timeout, while continuing with the rest of the batch:
+
+```powershell
+python -m packed_bed batch packed_bed\examples\default_batch_case\batch.yaml --case-timeout-s 600
+```
+
+The same default can be set in `batch.yaml` with `case_timeout_s: 600.0`; the
+CLI option overrides the file setting.
+
 The batch specification lives beside its own base case. Program presets can use
 the normal mol/s inlet-flow form, or can set `inlet_flow.basis: ghsv_per_h`.
 GHSV values are converted during batch materialization using the final case

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from dataclasses import replace
 from pathlib import Path
 import datetime
@@ -20,6 +21,17 @@ from .visualization import (
     render_operating_program,
     render_system_graph,
 )
+
+
+def _positive_float(raw_value: str) -> float:
+    try:
+        value = float(raw_value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number.") from exc
+    if not math.isfinite(value) or value <= 0.0:
+        raise argparse.ArgumentTypeError("must be a finite number greater than zero.")
+    return value
+
 
 def generate_artifacts(run_bundle: RunBundle) -> dict[str, Path]:
     output_directory = run_bundle.output_directory
@@ -182,6 +194,12 @@ def build_batch_parser():
         action="store_true",
         help="Expand and validate the batch cases without running simulations.",
     )
+    parser.add_argument(
+        "--case-timeout-s",
+        type=_positive_float,
+        default=None,
+        help="Kill an individual batch case if it runs longer than this many seconds.",
+    )
     return parser
 
 
@@ -199,6 +217,7 @@ def main(argv=None):
         batch_result = run_batch_file(
             args.batch_yaml,
             validate_only=args.validate_only,
+            case_timeout_s=args.case_timeout_s,
         )
         if args.validate_only:
             passed = batch_result.total_count - batch_result.failed_count

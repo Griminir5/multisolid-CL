@@ -3,10 +3,12 @@ from __future__ import annotations
 import csv
 import itertools
 import math
+import multiprocessing as mp
 import re
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
+from queue import Empty
 from time import perf_counter
 from typing import Any, Callable
 
@@ -24,9 +26,18 @@ NORMAL_MOLAR_DENSITY_MOL_PER_M3 = NORMAL_PRESSURE_PA / (GAS_CONSTANT_J_PER_MOL_K
 _PATH_PART_RE = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<indexes>(?:\[\d+\])*)$")
 _INDEX_RE = re.compile(r"\[(\d+)\]")
 _CONFIG_ROOTS = frozenset({"run", "program", "solids", "chemistry"})
+_PROCESS_TERMINATE_GRACE_S = 5.0
 
 
 class BatchValidationError(PackedBedValidationError):
+    pass
+
+
+class BatchCaseTimeoutError(TimeoutError):
+    pass
+
+
+class BatchCaseWorkerError(RuntimeError):
     pass
 
 
@@ -125,6 +136,17 @@ def _require_number(value: Any, label: str) -> float:
     return float(value)
 
 
+def _coerce_case_timeout_s(value: Any, label: str = "case_timeout_s") -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (float, int)):
+        raise ValueError(f"{label} must be numeric seconds.")
+    timeout_s = float(value)
+    if not math.isfinite(timeout_s) or timeout_s <= 0.0:
+        raise ValueError(f"{label} must be a finite positive number of seconds.")
+    return timeout_s
+
+
 def _empty_bed_volume_m3(model_mapping: dict[str, Any]) -> float:
     bed_length = _require_number(model_mapping.get("bed_length_m"), "run.model.bed_length_m")
     bed_radius = _require_number(model_mapping.get("bed_radius_m"), "run.model.bed_radius_m")
@@ -219,9 +241,15 @@ class GeometryPreset(BatchConfigModel):
 class BatchSpec(BatchConfigModel):
     base_case: ConfigString
     output_directory: ConfigString
+    case_timeout_s: float | None = None
     programs: dict[ConfigString, ConfigString] = Field(default_factory=dict)
     geometries: dict[ConfigString, GeometryPreset] = Field(default_factory=dict)
     axes: tuple[BatchAxis, ...]
+
+    @field_validator("case_timeout_s", mode="before")
+    @classmethod
+    def validate_case_timeout_s(cls, value: Any) -> float | None:
+        return _coerce_case_timeout_s(value)
 
     @field_validator("axes", mode="before")
     @classmethod
@@ -533,14 +561,106 @@ def _default_batch_functions():
     return generate_artifacts, run_simulation
 
 
+def _run_case_direct(
+    run_bundle: RunBundle,
+    generate_artifacts_fn: Callable[[RunBundle], dict[str, Path]] | None,
+    run_simulation_fn: Callable[..., RunResult],
+) -> tuple[Path, dict[str, Any]]:
+    artifact_paths = generate_artifacts_fn(run_bundle) if generate_artifacts_fn is not None else {}
+    run_result = run_simulation_fn(run_bundle, artifact_paths=artifact_paths)
+    return run_result.output_directory, dict(run_result.balance_errors)
+
+
+def _run_case_worker(
+    run_bundle: RunBundle,
+    generate_artifacts_fn: Callable[[RunBundle], dict[str, Path]] | None,
+    run_simulation_fn: Callable[..., RunResult],
+    result_queue,
+) -> None:
+    try:
+        output_directory, balance_errors = _run_case_direct(
+            run_bundle,
+            generate_artifacts_fn,
+            run_simulation_fn,
+        )
+    except Exception as exc:
+        result_queue.put({"ok": False, "error": str(exc)})
+        return
+
+    result_queue.put(
+        {
+            "ok": True,
+            "output_directory": output_directory,
+            "balance_errors": balance_errors,
+        }
+    )
+
+
+def _run_case_with_timeout(
+    run_bundle: RunBundle,
+    generate_artifacts_fn: Callable[[RunBundle], dict[str, Path]] | None,
+    run_simulation_fn: Callable[..., RunResult],
+    timeout_s: float,
+) -> tuple[Path, dict[str, Any]]:
+    coerced_timeout_s = _coerce_case_timeout_s(timeout_s)
+    if coerced_timeout_s is None:
+        raise ValueError("timeout_s must be provided.")
+    timeout_s = coerced_timeout_s
+    context = mp.get_context()
+    result_queue = context.Queue(maxsize=1)
+    process = context.Process(
+        target=_run_case_worker,
+        args=(run_bundle, generate_artifacts_fn, run_simulation_fn, result_queue),
+    )
+
+    try:
+        process.start()
+        process.join(timeout_s)
+        if process.is_alive():
+            process.terminate()
+            process.join(_PROCESS_TERMINATE_GRACE_S)
+            if process.is_alive():
+                kill = getattr(process, "kill", None)
+                if kill is not None:
+                    kill()
+                    process.join()
+            raise BatchCaseTimeoutError(f"Timed out after {timeout_s:g} seconds.")
+
+        try:
+            payload = result_queue.get(timeout=1.0)
+        except Empty as exc:
+            if process.exitcode == 0:
+                message = "Batch case worker finished without returning a result."
+            else:
+                message = f"Batch case worker exited with code {process.exitcode}."
+            raise BatchCaseWorkerError(message) from exc
+    except Exception as exc:
+        if isinstance(exc, (BatchCaseTimeoutError, BatchCaseWorkerError)):
+            raise
+        raise BatchCaseWorkerError(
+            "Could not start the batch case worker process. "
+            "When a timeout is set, custom batch functions must be picklable."
+        ) from exc
+    finally:
+        result_queue.close()
+
+    if payload.get("ok"):
+        return Path(payload["output_directory"]), dict(payload["balance_errors"])
+    raise BatchCaseWorkerError(str(payload.get("error", "Batch case worker failed.")))
+
+
 def run_batch_file(
     batch_yaml_path: str | Path,
     *,
     validate_only: bool = False,
+    case_timeout_s: float | None = None,
     generate_artifacts_fn: Callable[[RunBundle], dict[str, Path]] | None = None,
     run_simulation_fn: Callable[..., RunResult] | None = None,
 ) -> BatchResult:
     document = load_batch_spec(batch_yaml_path)
+    effective_case_timeout_s = (
+        _coerce_case_timeout_s(case_timeout_s) if case_timeout_s is not None else document.spec.case_timeout_s
+    )
     cases = materialize_batch_cases(document)
     records = tuple(
         BatchCaseRecord(
@@ -563,6 +683,8 @@ def run_batch_file(
         generate_artifacts_fn = default_generate_artifacts
     if run_simulation_fn is None:
         run_simulation_fn = default_run_simulation
+    if not validate_only and run_simulation_fn is None:
+        raise RuntimeError("No batch simulation function is configured.")
 
     for record in records:
         try:
@@ -579,13 +701,29 @@ def run_batch_file(
 
         try:
             start = perf_counter()
-            artifact_paths = generate_artifacts_fn(run_bundle) if generate_artifacts_fn is not None else {}
-            run_result = run_simulation_fn(run_bundle, artifact_paths=artifact_paths)
+            if effective_case_timeout_s is None:
+                output_directory, balance_errors = _run_case_direct(
+                    run_bundle,
+                    generate_artifacts_fn,
+                    run_simulation_fn,
+                )
+            else:
+                output_directory, balance_errors = _run_case_with_timeout(
+                    run_bundle,
+                    generate_artifacts_fn,
+                    run_simulation_fn,
+                    effective_case_timeout_s,
+                )
             record.runtime_s = perf_counter() - start
-            record.output_directory = run_result.output_directory
-            record.balance_errors = dict(run_result.balance_errors)
+            record.output_directory = output_directory
+            record.balance_errors = balance_errors
             record.status = "success"
+        except BatchCaseTimeoutError as exc:
+            record.runtime_s = perf_counter() - start
+            record.status = "timeout_failed"
+            record.error = str(exc)
         except Exception as exc:
+            record.runtime_s = perf_counter() - start
             record.status = "simulation_failed"
             record.error = str(exc)
 
@@ -612,6 +750,7 @@ def run_batch_file(
 __all__ = [
     "BatchAxis",
     "BatchAxisValue",
+    "BatchCaseTimeoutError",
     "BatchDocument",
     "BatchResult",
     "BatchSpec",

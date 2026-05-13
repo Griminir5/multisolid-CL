@@ -1,5 +1,6 @@
 from .cli import main, run_simulation
 from .batch import (
+    BatchCaseTimeoutError,
     BatchResult,
     BatchSpec,
     BatchValidationError,
@@ -42,6 +43,7 @@ from .reactions import (
 
 __all__ = [
     "BatchResult",
+    "BatchCaseTimeoutError",
     "BatchSpec",
     "BatchValidationError",
     "ChemistryConfig",
