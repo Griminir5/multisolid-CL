@@ -6,7 +6,7 @@ import argparse
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 import numpy as np
 import yaml
@@ -19,10 +19,12 @@ SCALAR_RAMP_PROBABILITIES = {
     "outlet_pressure": 0.20,
 }
 
+# Integer bin boundaries are lower-inclusive. If one bin's upper boundary is
+# the next bin's lower boundary, that shared boundary belongs to the next bin.
 N_STEP_BINS = ((4, 10), (10, 20), (20, 100))
 N_STEP_BIN_WEIGHTS = np.array((0.6, 0.3, 0.1), dtype=float)
 
-HOLD_DURATION_BINS_S = ((20.0, 100.0), (100.0, 750.0), (750.0, 1500.0))
+HOLD_DURATION_BINS_S = ((20.0, 100.0), (100.0, 500.0), (500.0, 1500.0))
 HOLD_DURATION_BIN_WEIGHTS = np.array((0.6, 0.3, 0.1), dtype=float)
 
 RAMP_DURATION_BINS_S = ((5.0, 20.0), (20.0, 100.0), (100.0, 1000.0))
@@ -33,7 +35,7 @@ TEMPERATURE_RANGE_K = (500.0, 900.0)
 PRESSURE_RANGE_PA = (1.0e5, 35.0e5)
 O2_RANGE = (0.10, 0.21)
 SYNC_PROBABILITY = 0.5
-PURGE_DURATION_S = 20.0
+PURGE_DURATION_S = 5.0
 PURGE_RAMP_DURATION_S = 5.0
 DIRICHLET_ALPHA = 0.5
 
@@ -85,14 +87,53 @@ def ramp(duration_s: float, target: Any) -> dict[str, Any]:
     return {"kind": "ramp", "duration_s": round_float(duration_s, 6), "target": target}
 
 
+def normalized_weights(weights: Sequence[float], count: int) -> np.ndarray:
+    probabilities = np.asarray(weights, dtype=float)
+    if probabilities.shape != (count,):
+        raise ValueError(f"expected {count} bin weights, got {probabilities.size}")
+    if np.any(probabilities < 0.0):
+        raise ValueError("bin weights must be non-negative")
+    total = float(probabilities.sum())
+    if not math.isfinite(total) or total <= 0.0:
+        raise ValueError("bin weights must have a positive finite sum")
+    return probabilities / total
+
+
 def sample_int_from_bins(rng: np.random.Generator, bins: Sequence[tuple[int, int]], weights) -> int:
-    lo, hi = bins[int(rng.choice(len(bins), p=weights))]
+    bin_index = int(rng.choice(len(bins), p=normalized_weights(weights, len(bins))))
+    lo, hi = bins[bin_index]
+    if bin_index < len(bins) - 1 and bins[bin_index + 1][0] == hi:
+        hi -= 1
+    if hi < lo:
+        raise ValueError(f"empty integer bin: {(lo, bins[bin_index][1])}")
     return int(rng.integers(lo, hi + 1))
 
 
 def sample_float_from_bins(rng: np.random.Generator, bins: Sequence[tuple[float, float]], weights) -> float:
-    lo, hi = bins[int(rng.choice(len(bins), p=weights))]
+    lo, hi = bins[int(rng.choice(len(bins), p=normalized_weights(weights, len(bins))))]
     return float(rng.uniform(lo, hi))
+
+
+def probability_arg(value: str) -> float:
+    try:
+        probability = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a probability") from exc
+    if not 0.0 <= probability <= 1.0:
+        raise argparse.ArgumentTypeError("probability must be between 0 and 1")
+    return probability
+
+
+def validate_scalar_ramp_probabilities(probabilities: Mapping[str, float]) -> dict[str, float]:
+    validated: dict[str, float] = {}
+    for channel in SCALAR_CHANNELS:
+        if channel not in probabilities:
+            raise ValueError(f"missing scalar ramp probability for {channel}")
+        probability = float(probabilities[channel])
+        if not 0.0 <= probability <= 1.0:
+            raise ValueError(f"scalar ramp probability for {channel} must be between 0 and 1")
+        validated[channel] = probability
+    return validated
 
 
 def sample_scalar_sampler(
@@ -251,12 +292,19 @@ def build_composition_steps(
     return steps
 
 
-def sample_program(rng: np.random.Generator) -> dict[str, Any]:
+def sample_program(
+    rng: np.random.Generator,
+    *,
+    scalar_ramp_probabilities: Optional[Mapping[str, float]] = None,
+) -> dict[str, Any]:
+    scalar_ramp_probabilities = validate_scalar_ramp_probabilities(
+        SCALAR_RAMP_PROBABILITIES if scalar_ramp_probabilities is None else scalar_ramp_probabilities
+    )
     n_steps = sample_int_from_bins(rng, N_STEP_BINS, N_STEP_BIN_WEIGHTS)
     categories = stratified_categories(n_steps, rng)
     synchronized = bool(rng.random() < SYNC_PROBABILITY)
     active_scalar_channels = {
-        channel for channel in SCALAR_CHANNELS if rng.random() < SCALAR_RAMP_PROBABILITIES[channel]
+        channel for channel in SCALAR_CHANNELS if rng.random() < scalar_ramp_probabilities[channel]
     }
 
     samplers = {
@@ -292,6 +340,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--n-programs", type=int, default=19)
     parser.add_argument("--seed", type=int, default=20260508)
     parser.add_argument("--out-dir", type=Path, default=Path("generated_programs"))
+    parser.add_argument(
+        "--flow-change-probability",
+        type=probability_arg,
+        default=SCALAR_RAMP_PROBABILITIES["inlet_flow"],
+        help="Program-level probability that inlet_flow is allowed to ramp.",
+    )
+    parser.add_argument(
+        "--temperature-change-probability",
+        type=probability_arg,
+        default=SCALAR_RAMP_PROBABILITIES["inlet_temperature"],
+        help="Program-level probability that inlet_temperature is allowed to ramp.",
+    )
+    parser.add_argument(
+        "--pressure-change-probability",
+        type=probability_arg,
+        default=SCALAR_RAMP_PROBABILITIES["outlet_pressure"],
+        help="Program-level probability that outlet_pressure is allowed to ramp.",
+    )
     args = parser.parse_args(argv)
     if args.n_programs <= 0:
         parser.error("--n-programs must be positive")
@@ -302,9 +368,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     rng = np.random.default_rng(args.seed)
     seeds = rng.integers(1, np.iinfo(np.int32).max, size=args.n_programs)
+    scalar_ramp_probabilities = {
+        "inlet_flow": args.flow_change_probability,
+        "inlet_temperature": args.temperature_change_probability,
+        "outlet_pressure": args.pressure_change_probability,
+    }
 
     for index, seed in enumerate(seeds):
-        program = sample_program(np.random.default_rng(int(seed)))
+        program = sample_program(
+            np.random.default_rng(int(seed)),
+            scalar_ramp_probabilities=scalar_ramp_probabilities,
+        )
         write_yaml(program, args.out_dir / f"program_{index:04d}.yaml")
 
     print(f"Wrote {args.n_programs} stratified GHSV program YAML files to {args.out_dir}")
