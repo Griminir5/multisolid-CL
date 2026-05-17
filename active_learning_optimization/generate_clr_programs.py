@@ -13,10 +13,21 @@ import yaml
 
 SPECIES = ("Ar", "CH4", "CO", "CO2", "H2", "H2O", "He", "N2", "O2")
 SCALAR_CHANNELS = ("inlet_flow", "inlet_temperature", "outlet_pressure")
+SCALAR_RAMP_PROBABILITIES = {
+    "inlet_flow": 0.50,
+    "inlet_temperature": 1.0 / 3.0,
+    "outlet_pressure": 0.20,
+}
 
 N_STEP_BINS = ((4, 10), (10, 20), (20, 100))
+N_STEP_BIN_WEIGHTS = np.array((0.6, 0.3, 0.1), dtype=float)
+
 HOLD_DURATION_BINS_S = ((20.0, 100.0), (100.0, 750.0), (750.0, 1500.0))
+HOLD_DURATION_BIN_WEIGHTS = np.array((0.6, 0.3, 0.1), dtype=float)
+
 RAMP_DURATION_BINS_S = ((5.0, 20.0), (20.0, 100.0), (100.0, 1000.0))
+RAMP_DURATION_BIN_WEIGHTS = np.array((0.7, 0.25, 0.05), dtype=float)
+
 GHSV_RANGE_H_1 = (300.0, 1500.0)
 TEMPERATURE_RANGE_K = (500.0, 900.0)
 PRESSURE_RANGE_PA = (1.0e5, 35.0e5)
@@ -28,6 +39,7 @@ DIRICHLET_ALPHA = 0.5
 
 COMPOSITION_CATEGORIES = ("oxidizing", "reducing", "inert")
 COMPOSITION_WEIGHTS = np.array((0.30, 0.60, 0.10), dtype=float)
+
 OXIDIZING_BALANCE_SPECIES = ("Ar", "CO2", "H2O", "He", "N2")
 REDUCING_SPECIES = ("Ar", "CH4", "CO", "CO2", "H2", "H2O", "He", "N2")
 INERT_SPECIES = ("Ar", "CO2", "H2O", "He", "N2")
@@ -73,13 +85,13 @@ def ramp(duration_s: float, target: Any) -> dict[str, Any]:
     return {"kind": "ramp", "duration_s": round_float(duration_s, 6), "target": target}
 
 
-def sample_int_from_bins(rng: np.random.Generator, bins: Sequence[tuple[int, int]]) -> int:
-    lo, hi = bins[int(rng.integers(len(bins)))]
+def sample_int_from_bins(rng: np.random.Generator, bins: Sequence[tuple[int, int]], weights) -> int:
+    lo, hi = bins[int(rng.choice(len(bins), p=weights))]
     return int(rng.integers(lo, hi + 1))
 
 
-def sample_float_from_bins(rng: np.random.Generator, bins: Sequence[tuple[float, float]]) -> float:
-    lo, hi = bins[int(rng.integers(len(bins)))]
+def sample_float_from_bins(rng: np.random.Generator, bins: Sequence[tuple[float, float]], weights) -> float:
+    lo, hi = bins[int(rng.choice(len(bins), p=weights))]
     return float(rng.uniform(lo, hi))
 
 
@@ -163,10 +175,10 @@ def append_hold_to_channels(program: dict[str, Any], channels: Sequence[str], du
         program[channel]["steps"].append(hold(duration_s))
 
 
-def append_synchronized_purge(program: dict[str, Any]) -> None:
-    append_hold_to_channels(program, SCALAR_CHANNELS, PURGE_RAMP_DURATION_S)
+def append_synchronized_purge(program: dict[str, Any], scalar_channels: Sequence[str]) -> None:
+    append_hold_to_channels(program, scalar_channels, PURGE_RAMP_DURATION_S)
     program["inlet_composition"]["steps"].append(ramp(PURGE_RAMP_DURATION_S, pure_n2()))
-    append_hold_to_channels(program, (*SCALAR_CHANNELS, "inlet_composition"), PURGE_DURATION_S)
+    append_hold_to_channels(program, (*scalar_channels, "inlet_composition"), PURGE_DURATION_S)
 
 
 def append_composition_purge(steps: list[dict[str, Any]]) -> None:
@@ -176,8 +188,8 @@ def append_composition_purge(steps: list[dict[str, Any]]) -> None:
 
 def sampled_durations(rng: np.random.Generator) -> tuple[float, float]:
     return (
-        sample_float_from_bins(rng, RAMP_DURATION_BINS_S),
-        sample_float_from_bins(rng, HOLD_DURATION_BINS_S),
+        sample_float_from_bins(rng, RAMP_DURATION_BINS_S, RAMP_DURATION_BIN_WEIGHTS),
+        sample_float_from_bins(rng, HOLD_DURATION_BINS_S, HOLD_DURATION_BIN_WEIGHTS),
     )
 
 
@@ -185,25 +197,27 @@ def build_synchronized_steps(
     program: dict[str, Any],
     categories: Sequence[str],
     samplers: dict[str, ScalarSampler],
+    active_scalar_channels: set[str],
     rng: np.random.Generator,
 ) -> None:
+    active_scalar_channel_order = tuple(channel for channel in SCALAR_CHANNELS if channel in active_scalar_channels)
+
     for category in categories:
         if category == "oxidizing":
-            append_synchronized_purge(program)
+            append_synchronized_purge(program, active_scalar_channel_order)
 
         ramp_s, hold_s = sampled_durations(rng)
         targets = {
-            "inlet_flow": samplers["inlet_flow"].sample(rng),
-            "inlet_temperature": samplers["inlet_temperature"].sample(rng),
-            "outlet_pressure": samplers["outlet_pressure"].sample(rng),
+            channel: samplers[channel].sample(rng) for channel in active_scalar_channel_order
+        } | {
             "inlet_composition": sample_composition(category, rng),
         }
         for channel, target in targets.items():
             program[channel]["steps"].append(ramp(ramp_s, target))
-        append_hold_to_channels(program, (*SCALAR_CHANNELS, "inlet_composition"), hold_s)
+        append_hold_to_channels(program, (*active_scalar_channel_order, "inlet_composition"), hold_s)
 
         if category == "oxidizing":
-            append_synchronized_purge(program)
+            append_synchronized_purge(program, active_scalar_channel_order)
 
 
 def build_scalar_steps(
@@ -238,9 +252,12 @@ def build_composition_steps(
 
 
 def sample_program(rng: np.random.Generator) -> dict[str, Any]:
-    n_steps = sample_int_from_bins(rng, N_STEP_BINS)
+    n_steps = sample_int_from_bins(rng, N_STEP_BINS, N_STEP_BIN_WEIGHTS)
     categories = stratified_categories(n_steps, rng)
     synchronized = bool(rng.random() < SYNC_PROBABILITY)
+    active_scalar_channels = {
+        channel for channel in SCALAR_CHANNELS if rng.random() < SCALAR_RAMP_PROBABILITIES[channel]
+    }
 
     samplers = {
         "inlet_flow": sample_scalar_sampler(rng, GHSV_RANGE_H_1, log_scale=True),
@@ -254,10 +271,11 @@ def sample_program(rng: np.random.Generator) -> dict[str, Any]:
     )
 
     if synchronized:
-        build_synchronized_steps(program, categories, samplers, rng)
+        build_synchronized_steps(program, categories, samplers, active_scalar_channels, rng)
     else:
         for channel in SCALAR_CHANNELS:
-            program[channel]["steps"] = build_scalar_steps(samplers[channel], n_steps, rng)
+            if channel in active_scalar_channels:
+                program[channel]["steps"] = build_scalar_steps(samplers[channel], n_steps, rng)
         program["inlet_composition"]["steps"] = build_composition_steps(categories, rng)
 
     return program
@@ -271,7 +289,7 @@ def write_yaml(program: dict[str, Any], path: Path) -> None:
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate stratified GHSV-basis program YAML files.")
-    parser.add_argument("--n-programs", type=int, default=66)
+    parser.add_argument("--n-programs", type=int, default=19)
     parser.add_argument("--seed", type=int, default=20260508)
     parser.add_argument("--out-dir", type=Path, default=Path("generated_programs"))
     args = parser.parse_args(argv)
