@@ -111,12 +111,16 @@ Artifacts are written under `outputs.artifacts_directory`.
 
 Requested report data are written as pickled pandas dataframes:
 
-- `reports.pkl` contains spatial-only reports such as temperature and pressure
-  with multi-indexed columns `(feature, x_cell_m)`.
+- `reports.pkl` contains spatial reports such as temperature and pressure
+  with multi-indexed columns `(feature, x_cell_m)`, plus explicit boundary
+  columns for inlet temperature, inlet/outlet flowrate, outlet pressure, and
+  inlet pressure when it was reported by the solver.
 - `balances.pkl` contains requested mass and heat balance totals and errors.
 - species/spatial reports are written one feature per file, for example
   `gas_mole_fraction.pkl`, with multi-indexed columns such as
-  `(gas_species, x_cell_m)`.
+  `(gas_species, x_cell_m)`. Gas mole fractions include the inlet boundary at
+  `x_cell_m = 0.0`, cell centers, and the outlet boundary at
+  `x_cell_m = bed_length_m`.
 
 Each report can be loaded in one line:
 

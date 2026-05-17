@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,7 +10,7 @@ import numpy as np
 import pandas as pd
 from daetools.pyDAE import daeDataReporterLocal
 
-from .config import RunResult
+from .config import DEFAULT_SMOOTH_RAMP_WIDTH_S, RunResult
 from .reporting import DERIVED_REPORT_VARIABLE_NAMES, REPORT_VARIABLE_REGISTRY
 
 
@@ -153,6 +154,7 @@ BALANCE_REPORT_SPECS = {
 SPATIAL_AXIS_KINDS = {"x_cell", "x_face"}
 REPORTS_FILENAME = "reports.pkl"
 BALANCES_FILENAME = "balances.pkl"
+FLOW_ATOL = 1e-12
 
 
 def _require_process(run_result: RunResult):
@@ -166,13 +168,15 @@ def _require_process(run_result: RunResult):
     return process
 
 
-def _find_variable(process: Any, variable_name: str):
+def _find_variable(process: Any, variable_name: str, *, required: bool = True):
     matches = sorted(
         key
         for key in process.dictVariables
         if key == variable_name or key.endswith(f".{variable_name}")
     )
     if not matches:
+        if not required:
+            return None
         raise ValueError(f"Reporter does not contain a variable named '{variable_name}'.")
     if len(matches) > 1:
         joined = ", ".join(matches)
@@ -267,6 +271,190 @@ def _with_feature_level(dataframe: pd.DataFrame, feature_name: str) -> pd.DataFr
     )
 
 
+def _smooth_ramp_width_s_for_result(run_result: RunResult) -> float:
+    simulation = getattr(run_result, "simulation", None)
+    return float(getattr(simulation, "smooth_ramp_width_s", DEFAULT_SMOOTH_RAMP_WIDTH_S))
+
+
+def _sample_scalar_program(run_result: RunResult, channel_config: Any, time_s: np.ndarray) -> np.ndarray:
+    program = channel_config.compile_program(
+        repeat=run_result.run_bundle.run.repeat_program,
+        time_horizon=run_result.run_bundle.run.time_horizon_s,
+    )
+    smooth_ramp_width_s = _smooth_ramp_width_s_for_result(run_result)
+    return np.asarray(
+        [
+            program.smoothed_value_at(float(time_value), smooth_ramp_width_s=smooth_ramp_width_s)
+            for time_value in time_s
+        ],
+        dtype=float,
+    )
+
+
+def _sample_inlet_composition(run_result: RunResult, time_s: np.ndarray) -> np.ndarray:
+    gas_species = tuple(run_result.run_bundle.chemistry.gas_species)
+    program = run_result.run_bundle.program.inlet_composition.compile_program(
+        gas_species,
+        repeat=run_result.run_bundle.run.repeat_program,
+        time_horizon=run_result.run_bundle.run.time_horizon_s,
+    )
+    smooth_ramp_width_s = _smooth_ramp_width_s_for_result(run_result)
+    sampled = np.empty((time_s.size, len(gas_species)), dtype=float)
+    for time_index, time_value in enumerate(time_s):
+        sampled[time_index, :] = np.asarray(
+            program.smoothed_value_at(float(time_value), smooth_ramp_width_s=smooth_ramp_width_s),
+            dtype=float,
+        )
+    return sampled
+
+
+def _optional_values(
+    process: Any,
+    variable_name: str,
+    *,
+    label: str,
+    reference_time_s: np.ndarray,
+    expected_ndim: int,
+) -> np.ndarray | None:
+    variable = _find_variable(process, variable_name, required=False)
+    if variable is None:
+        return None
+
+    time_s, values = _time_and_values(variable, label=label)
+    _require_same_time_axis(reference_time_s, time_s, label=label)
+    if values.ndim != expected_ndim:
+        raise ValueError(f"{label} expected {expected_ndim} dimensions including time; got shape {values.shape}.")
+    return values
+
+
+def _optional_scalar_values(
+    process: Any,
+    variable_name: str,
+    *,
+    label: str,
+    reference_time_s: np.ndarray,
+) -> np.ndarray | None:
+    variable = _find_variable(process, variable_name, required=False)
+    if variable is None:
+        return None
+
+    time_s, values = _scalar_series(variable, label=label)
+    _require_same_time_axis(reference_time_s, time_s, label=label)
+    return values
+
+
+def _outlet_species_flow_mol_s(
+    run_result: RunResult,
+    process: Any,
+    reference_time_s: np.ndarray,
+) -> np.ndarray | None:
+    gas_flux = _optional_values(
+        process,
+        "N_gas_face",
+        label="gas flux report",
+        reference_time_s=reference_time_s,
+        expected_ndim=3,
+    )
+    if gas_flux is None:
+        return None
+
+    cross_section_area_m2 = math.pi * run_result.run_bundle.run.model.bed_radius_m**2
+    return cross_section_area_m2 * gas_flux[:, :, -1]
+
+
+def _outlet_composition(
+    run_result: RunResult,
+    process: Any,
+    reference_time_s: np.ndarray,
+    gas_mole_fraction: np.ndarray,
+) -> np.ndarray:
+    outlet_composition = gas_mole_fraction[:, :, -1].copy()
+    outlet_species_flow = _outlet_species_flow_mol_s(run_result, process, reference_time_s)
+    if outlet_species_flow is None:
+        return outlet_composition
+
+    total_outlet_flow = outlet_species_flow.sum(axis=1, keepdims=True)
+    has_outlet_flow = np.abs(total_outlet_flow[:, 0]) > FLOW_ATOL
+    outlet_composition[has_outlet_flow] = np.divide(
+        outlet_species_flow[has_outlet_flow],
+        total_outlet_flow[has_outlet_flow],
+    )
+    return outlet_composition
+
+
+def _build_gas_mole_fraction_dataframe(
+    run_result: RunResult,
+    process: Any,
+    variable: Any,
+    time_s: np.ndarray,
+    values: np.ndarray,
+) -> pd.DataFrame:
+    if values.ndim != 3:
+        raise ValueError(f"gas_mole_fraction report expected 3 dimensions including time; got shape {values.shape}.")
+
+    gas_species = tuple(run_result.run_bundle.chemistry.gas_species)
+    if values.shape[1] != len(gas_species):
+        raise ValueError(
+            f"gas_mole_fraction report has {values.shape[1]} gas species, but the run configuration provides {len(gas_species)} labels."
+        )
+
+    cell_positions_m = _domain_points(variable, 1, values.shape[2])
+    bed_length_m = float(run_result.run_bundle.run.model.bed_length_m)
+    x_positions_m = (0.0, *cell_positions_m, bed_length_m)
+
+    augmented_values = np.empty((time_s.size, len(gas_species), len(x_positions_m)), dtype=float)
+    augmented_values[:, :, 0] = _sample_inlet_composition(run_result, time_s)
+    augmented_values[:, :, 1:-1] = values
+    augmented_values[:, :, -1] = _outlet_composition(run_result, process, time_s, values)
+
+    return pd.DataFrame(
+        augmented_values.reshape(time_s.size, -1),
+        index=pd.Index(time_s, name="time_s"),
+        columns=pd.MultiIndex.from_product(
+            (gas_species, x_positions_m),
+            names=("gas_species", "x_cell_m"),
+        ),
+    )
+
+
+def _build_boundary_report_dataframe(run_result: RunResult, reference_time_s: np.ndarray) -> pd.DataFrame:
+    process = _require_process(run_result)
+    bed_length_m = float(run_result.run_bundle.run.model.bed_length_m)
+
+    series: list[np.ndarray] = [
+        _sample_scalar_program(run_result, run_result.run_bundle.program.inlet_temperature, reference_time_s),
+        _sample_scalar_program(run_result, run_result.run_bundle.program.inlet_flow, reference_time_s),
+    ]
+    columns: list[tuple[str, float]] = [
+        ("inlet_temperature_k", 0.0),
+        ("inlet_flowrate_mol_s", 0.0),
+    ]
+
+    outlet_species_flow = _outlet_species_flow_mol_s(run_result, process, reference_time_s)
+    if outlet_species_flow is not None:
+        series.append(outlet_species_flow.sum(axis=1))
+        columns.append(("outlet_flowrate_mol_s", bed_length_m))
+
+    series.append(_sample_scalar_program(run_result, run_result.run_bundle.program.outlet_pressure, reference_time_s))
+    columns.append(("outlet_pressure_pa", bed_length_m))
+
+    inlet_pressure = _optional_scalar_values(
+        process,
+        "P_in",
+        label="inlet pressure variable",
+        reference_time_s=reference_time_s,
+    )
+    if inlet_pressure is not None:
+        series.append(inlet_pressure)
+        columns.append(("inlet_pressure_pa", 0.0))
+
+    return pd.DataFrame(
+        np.column_stack(series),
+        index=pd.Index(reference_time_s, name="time_s"),
+        columns=pd.MultiIndex.from_tuples(columns, names=("feature", "x_cell_m")),
+    )
+
+
 def _is_spatial_only_report(report_id: str) -> bool:
     spec = VARIABLE_REPORT_SPECS[report_id]
     return len(spec.axes) == 1 and spec.axes[0].kind in SPATIAL_AXIS_KINDS
@@ -274,13 +462,16 @@ def _is_spatial_only_report(report_id: str) -> bool:
 
 def _build_variable_report_dataframe(run_result: RunResult, report_id: str) -> pd.DataFrame:
     spec = VARIABLE_REPORT_SPECS[report_id]
-    variable = _find_variable(_require_process(run_result), spec.variable_name)
+    process = _require_process(run_result)
+    variable = _find_variable(process, spec.variable_name)
     times, values = _time_and_values(variable, label=f"{report_id} report")
     expected_ndim = 1 + len(spec.axes)
     if values.ndim != expected_ndim:
         raise ValueError(
             f"{report_id} report expected {expected_ndim} dimensions including time; got shape {values.shape}."
         )
+    if report_id == "gas_mole_fraction":
+        return _build_gas_mole_fraction_dataframe(run_result, process, variable, times, values)
 
     axis_values = tuple(
         _axis_values(run_result, variable, axis_spec, axis_index, axis_size)
@@ -375,6 +566,7 @@ def build_requested_report_dataframes(run_result: RunResult) -> dict[str, pd.Dat
 
     spatial_frames: list[pd.DataFrame] = []
     balance_frames: list[pd.DataFrame] = []
+    variable_report_time_s: np.ndarray | None = None
 
     for report_id in requested_report_ids:
         if report_id in BALANCE_REPORT_SPECS:
@@ -385,11 +577,16 @@ def build_requested_report_dataframes(run_result: RunResult) -> dict[str, pd.Dat
             raise ValueError(f"Report '{report_id}' does not have a dataframe exporter.")
 
         dataframe = _build_variable_report_dataframe(run_result, report_id)
+        if variable_report_time_s is None:
+            variable_report_time_s = dataframe.index.to_numpy(dtype=float)
         if _is_spatial_only_report(report_id):
             spatial_frames.append(_with_feature_level(dataframe, VARIABLE_REPORT_SPECS[report_id].value_column_name))
             continue
 
         dataframes[report_id] = dataframe
+
+    if variable_report_time_s is not None:
+        spatial_frames.append(_build_boundary_report_dataframe(run_result, variable_report_time_s))
 
     if spatial_frames:
         dataframes["reports"] = _concat_same_time_axis(spatial_frames, label="reports")
