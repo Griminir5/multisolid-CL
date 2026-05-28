@@ -65,6 +65,7 @@ NonNegativeFloat = Annotated[float, BeforeValidator(_require_float), AfterValida
 UnitFraction = Annotated[float, BeforeValidator(_require_float), AfterValidator(_require_unit_fraction)]
 
 DEFAULT_SMOOTH_RAMP_WIDTH_S = 1.0
+PROGRAM_DURATION_SUM_ABS_TOLERANCE_S = 1.0e-9
 
 
 def _require_nonempty_unique_strings(values: tuple[str, ...]) -> tuple[str, ...]:
@@ -113,7 +114,7 @@ def _require_exact_keys(actual: set[str], expected: tuple[str, ...], label: str)
 
 
 def _sum_step_durations(steps: tuple["HoldStep | ScalarRampStep | CompositionRampStep", ...]) -> float:
-    return sum(step.duration_s for step in steps)
+    return math.fsum(step.duration_s for step in steps)
 
 
 def _interpolate_program_value(
@@ -710,10 +711,20 @@ class RunBundle(FrozenConfigModel):
         )
         if not self.run.repeat_program:
             for label, duration in cycle_durations:
-                if math.isclose(duration, 0.0, rel_tol=0.0, abs_tol=1e-12):
+                if duration == 0.0:
                     continue
-                if not math.isclose(duration, horizon, rel_tol=0.0, abs_tol=1e-12):
-                    raise ValueError(f"{label} must sum exactly to time_horizon_s ({horizon:.16g}), got {duration:.16g}.")
+                if not math.isclose(
+                    duration,
+                    horizon,
+                    rel_tol=0.0,
+                    abs_tol=PROGRAM_DURATION_SUM_ABS_TOLERANCE_S,
+                ):
+                    difference = duration - horizon
+                    raise ValueError(
+                        f"{label} must sum to time_horizon_s ({horizon:.16g}) within "
+                        f"{PROGRAM_DURATION_SUM_ABS_TOLERANCE_S:.1e} s, got {duration:.17g} "
+                        f"(difference {difference:+.3e} s)."
+                    )
 
         return self
 

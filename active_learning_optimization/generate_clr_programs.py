@@ -33,17 +33,19 @@ RAMP_DURATION_BIN_WEIGHTS = np.array((0.7, 0.25, 0.05), dtype=float)
 GHSV_RANGE_H_1 = (300.0, 1500.0)
 TEMPERATURE_RANGE_K = (500.0, 900.0)
 PRESSURE_RANGE_PA = (1.0e5, 35.0e5)
-O2_RANGE = (0.10, 0.21)
+O2_RANGE = (0.05, 0.31)
 SYNC_PROBABILITY = 0.5
 PURGE_DURATION_S = 5.0
 PURGE_RAMP_DURATION_S = 5.0
+OXIDIZING_PURGE_BRACKET_PROBABILITY = 0.5
 DIRICHLET_ALPHA = 0.5
 
 COMPOSITION_CATEGORIES = ("oxidizing", "reducing", "inert")
 COMPOSITION_WEIGHTS = np.array((0.30, 0.60, 0.10), dtype=float)
 
 OXIDIZING_BALANCE_SPECIES = ("Ar", "CO2", "H2O", "He", "N2")
-REDUCING_SPECIES = ("Ar", "CH4", "CO", "CO2", "H2", "H2O", "He", "N2")
+#REDUCING_SPECIES = ("Ar", "CH4", "CO", "CO2", "H2", "H2O", "He", "N2")
+REDUCING_SPECIES = ("CH4", "CO2", "H2O")
 INERT_SPECIES = ("Ar", "CO2", "H2O", "He", "N2")
 
 
@@ -202,6 +204,10 @@ def sample_composition(category: str, rng: np.random.Generator) -> dict[str, flo
     raise ValueError(f"unknown composition category: {category}")
 
 
+def sample_purge_composition(rng: np.random.Generator) -> dict[str, float]:
+    return sample_subset_composition(rng, INERT_SPECIES)
+
+
 def new_program(flow_initial: float, temperature_initial: float, pressure_initial: float) -> dict[str, Any]:
     return {
         "inlet_flow": {"basis": "ghsv_per_h", "initial": flow_initial, "steps": []},
@@ -216,14 +222,18 @@ def append_hold_to_channels(program: dict[str, Any], channels: Sequence[str], du
         program[channel]["steps"].append(hold(duration_s))
 
 
-def append_synchronized_purge(program: dict[str, Any], scalar_channels: Sequence[str]) -> None:
+def append_synchronized_purge(
+    program: dict[str, Any],
+    scalar_channels: Sequence[str],
+    rng: np.random.Generator,
+) -> None:
     append_hold_to_channels(program, scalar_channels, PURGE_RAMP_DURATION_S)
-    program["inlet_composition"]["steps"].append(ramp(PURGE_RAMP_DURATION_S, pure_n2()))
+    program["inlet_composition"]["steps"].append(ramp(PURGE_RAMP_DURATION_S, sample_purge_composition(rng)))
     append_hold_to_channels(program, (*scalar_channels, "inlet_composition"), PURGE_DURATION_S)
 
 
-def append_composition_purge(steps: list[dict[str, Any]]) -> None:
-    steps.append(ramp(PURGE_RAMP_DURATION_S, pure_n2()))
+def append_composition_purge(steps: list[dict[str, Any]], rng: np.random.Generator) -> None:
+    steps.append(ramp(PURGE_RAMP_DURATION_S, sample_purge_composition(rng)))
     steps.append(hold(PURGE_DURATION_S))
 
 
@@ -244,8 +254,9 @@ def build_synchronized_steps(
     active_scalar_channel_order = tuple(channel for channel in SCALAR_CHANNELS if channel in active_scalar_channels)
 
     for category in categories:
-        if category == "oxidizing":
-            append_synchronized_purge(program, active_scalar_channel_order)
+        bracket_with_purge = category == "oxidizing" and rng.random() < OXIDIZING_PURGE_BRACKET_PROBABILITY
+        if bracket_with_purge:
+            append_synchronized_purge(program, active_scalar_channel_order, rng)
 
         ramp_s, hold_s = sampled_durations(rng)
         targets = {
@@ -257,8 +268,8 @@ def build_synchronized_steps(
             program[channel]["steps"].append(ramp(ramp_s, target))
         append_hold_to_channels(program, (*active_scalar_channel_order, "inlet_composition"), hold_s)
 
-        if category == "oxidizing":
-            append_synchronized_purge(program, active_scalar_channel_order)
+        if bracket_with_purge:
+            append_synchronized_purge(program, active_scalar_channel_order, rng)
 
 
 def build_scalar_steps(
@@ -280,15 +291,16 @@ def build_composition_steps(
 ) -> list[dict[str, Any]]:
     steps: list[dict[str, Any]] = []
     for category in categories:
-        if category == "oxidizing":
-            append_composition_purge(steps)
+        bracket_with_purge = category == "oxidizing" and rng.random() < OXIDIZING_PURGE_BRACKET_PROBABILITY
+        if bracket_with_purge:
+            append_composition_purge(steps, rng)
 
         ramp_s, hold_s = sampled_durations(rng)
         steps.append(ramp(ramp_s, sample_composition(category, rng)))
         steps.append(hold(hold_s))
 
-        if category == "oxidizing":
-            append_composition_purge(steps)
+        if bracket_with_purge:
+            append_composition_purge(steps, rng)
     return steps
 
 
@@ -337,7 +349,7 @@ def write_yaml(program: dict[str, Any], path: Path) -> None:
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate stratified GHSV-basis program YAML files.")
-    parser.add_argument("--n-programs", type=int, default=19)
+    parser.add_argument("--n-programs", type=int, default=600)
     parser.add_argument("--seed", type=int, default=20260508)
     parser.add_argument("--out-dir", type=Path, default=Path("generated_programs"))
     parser.add_argument(
