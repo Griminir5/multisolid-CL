@@ -47,17 +47,16 @@ SAMPLE_X = BED_LENGTH * FRACTIONS
 
 print(SAMPLE_X)
 
-ALL_CASES = r"C:\MyRepos\multisolid-CL\packed_bed\examples\small_batch_case\output\cases"
-OUTPUT_DIR = r"C:\MyRepos\multisolid-CL\active_learning_optimization\extracted"
+ALL_CASES = r"C:\MyRepos\multisolid-CL\packed_bed\examples\opt5_batch_case\output\cases"
+OUTPUT_DIR = r"C:\MyRepos\multisolid-CL\active_learning_optimization\extracted_opt5"
 
 for folder in os.listdir(ALL_CASES):
 
     reports = pd.read_pickle(os.path.join(ALL_CASES, folder, "output", "reports.pkl")).iloc[1:]
     gas = pd.read_pickle(os.path.join(ALL_CASES, folder, "output", "gas_mole_fraction.pkl")).iloc[1:]
 
-    assert len(reports) == 12000
-    assert len(gas) == 12000
-        
+    assert len(reports) == 12000, f"{folder}: has {len(reports)} reports, expected 12000"
+    assert len(gas) == 12000, f"{folder}: has {len(gas)} gas mole fraction entries, expected 12000"
 
     out = np.empty((12000, 42), dtype=np.float64)
 
@@ -95,10 +94,10 @@ for folder in os.listdir(ALL_CASES):
         raise ValueError(f"{folder}: invalid extracted array {out.shape}")
 
     np.save(os.path.join(OUTPUT_DIR, f"{folder}.npy"), out)
-    # fig, ax = plt.subplots(1, 1, figsize=(12, 6))
-    # ax.imshow(rescale_matrix(out), interpolation="none")
-    # ax.set_aspect(0.005)
-    # fig.suptitle(folder)
-    # plt.show()
+    fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+    ax.imshow(rescale_matrix(out), interpolation="none")
+    ax.set_aspect(0.005)
+    fig.suptitle(folder)
+    plt.show()
 
 
