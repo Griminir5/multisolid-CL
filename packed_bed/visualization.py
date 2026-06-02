@@ -431,7 +431,6 @@ def render_initial_solid_profile(run_bundle: RunBundle, output_dir) -> dict[str,
     cell_centers, face_positions = build_axial_grid(
         run_bundle.run.model.bed_length_m,
         run_bundle.run.model.axial_cells,
-        run_bundle.run.model.axial_face_positions_m,
     )
     authored_edges = zone_edges(run_bundle.solids)
     e_b = build_cell_scalar_profile(run_bundle.solids, cell_centers, "e_b")

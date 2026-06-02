@@ -480,26 +480,6 @@ def xu_froment_dmr_surrogate(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("xu_froment_dmr_surrogate")
-def xu_froment_dmr_surrogate(context: KineticsContext):
-    terms = _xu_froment_terms(context)
-    pressure_scale = Constant(1.0e5)
-    driving_force = (
-        (terms.p_ch4_pa / pressure_scale) * (terms.p_co2_pa / pressure_scale)
-        - ((terms.p_co_pa / pressure_scale) ** 2 * (terms.p_h2_pa / pressure_scale) ** 2)
-        / _equilibrium_constant_dmr_expression(terms.temperature_k)
-    )
-    rate_expression = (
-        _rate_constant_expression(
-            "dmr",
-            terms.temperature_k,
-            terms.catalyst_mass_density_kg_per_m3,
-        )
-        * driving_force
-        / terms.denominator**2
-    )
-    return Constant(1.0 * mol / (m**3 * s)) * rate_expression
-
 
 @register_kinetics_hook("xu_froment_wgs")
 def xu_froment_wgs(context: KineticsContext):

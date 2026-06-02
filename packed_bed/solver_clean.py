@@ -709,10 +709,7 @@ class simBed(daeSimulation):
         self.model.T_in_const.SetValue(inlet_temperature * K)
         self.model.P_out_const.SetValue(outlet_pressure * Pa)
         self.model.F_in_const.SetValue(inlet_flow * mol / s)
-        if self.model_config.axial_face_positions_m is None:
-            self.model.SetUniformAxialGrid(self.model_config.axial_cells)
-        else:
-            self.model.SetAxialGridFromFaces(self.model_config.axial_face_positions_m)
+        self.model.SetUniformAxialGrid(self.model_config.axial_cells)
         self.model.y_in_const.SetValues(inlet_y)
 
         center_coords = np.asarray(self.model.xval_cells.npyValues, dtype=float)

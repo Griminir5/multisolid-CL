@@ -427,15 +427,12 @@ def extract_run_result_plot_data(run_result: RunResult) -> RunResultPlotData:
         inlet_composition=inlet_composition,
         outlet_composition=outlet_composition,
         inlet_pressure_pa=inlet_pressure_pa,
-        inlet_pressure_pa=inlet_pressure_pa,
         outlet_temperature_k=temperature_profile_k[:, -1],
-        pressure_profile_pa=pressure_profile_pa,
         pressure_profile_pa=pressure_profile_pa,
         outlet_pressure_pa=outlet_pressure_pa,
         pressure_drop_pa=pressure_drop_pa,
         outlet_flowrate_mol_s=outlet_flowrate_mol_s,
         temperature_profile_k=temperature_profile_k,
-        pressure_profile_pa=pressure_profile_pa,
     )
 
 
