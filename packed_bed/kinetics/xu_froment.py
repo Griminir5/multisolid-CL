@@ -22,11 +22,13 @@ if NI_MW_KG_PER_MOL is None:
 
 XU_FROMENT_RATE_COEFFICIENTS = {
     "dmr": 5.00e11,
+    "dmr": 5.00e11,
     "smr": 1.17e15,
     "wgs": 5.43e5,
     "overall": 2.81e14,
 }
 XU_FROMENT_ACTIVATION_ENERGIES_J_PER_MOL = {
+    "dmr": 180000.0,
     "dmr": 180000.0,
     "smr": 240100.0,
     "wgs": 67130.0,
@@ -115,6 +117,10 @@ def equilibrium_constant_dmr_value(temperature_k: float) -> float:
     return equilibrium_constant_smr_value(temperature_k) / equilibrium_constant_wgs_value(temperature_k)
 
 
+def equilibrium_constant_dmr_value(temperature_k: float) -> float:
+    return equilibrium_constant_smr_value(temperature_k) / equilibrium_constant_wgs_value(temperature_k)
+
+
 def equilibrium_constant_wgs_value(temperature_k: float) -> float:
     f_wgs = _temperature_polynomial_value(
         temperature_k,
@@ -175,6 +181,42 @@ def smr_rate_value(
             temperature_k=temperature_k,
         )
         * (p_inv_h2_pa_inv**2.5 / (10.0**-2.5))
+        * driving_force
+        / denominator**2
+    )
+
+
+def dmr_rate_value(
+    *,
+    temperature_k: float,
+    p_ch4_pa: float,
+    p_co2_pa: float,
+    p_co_pa: float,
+    p_h2_pa: float,
+    p_h2o_pa: float,
+    p_inv_h2_pa_inv: float,
+    catalyst_mass_density_kg_per_m3: float,
+) -> float:
+    denominator = xu_froment_denominator_value(
+        p_co_pa=p_co_pa,
+        p_h2_pa=p_h2_pa,
+        p_ch4_pa=p_ch4_pa,
+        p_h2o_pa=p_h2o_pa,
+        p_inv_h2_pa_inv=p_inv_h2_pa_inv,
+        temperature_k=temperature_k,
+    )
+    pressure_scale_pa = 1.0e5
+    driving_force = (
+        (p_ch4_pa / pressure_scale_pa) * (p_co2_pa / pressure_scale_pa)
+        - ((p_co_pa / pressure_scale_pa) ** 2 * (p_h2_pa / pressure_scale_pa) ** 2)
+        / equilibrium_constant_dmr_value(temperature_k)
+    )
+    return (
+        rate_constant_value(
+            "dmr",
+            catalyst_mass_density_kg_per_m3=catalyst_mass_density_kg_per_m3,
+            temperature_k=temperature_k,
+        )
         * driving_force
         / denominator**2
     )
@@ -331,6 +373,10 @@ def _equilibrium_constant_dmr_expression(temperature_k) -> Any:
     return _equilibrium_constant_smr_expression(temperature_k) / _equilibrium_constant_wgs_expression(temperature_k)
 
 
+def _equilibrium_constant_dmr_expression(temperature_k) -> Any:
+    return _equilibrium_constant_smr_expression(temperature_k) / _equilibrium_constant_wgs_expression(temperature_k)
+
+
 def _equilibrium_constant_wgs_expression(temperature_k) -> Any:
     return Exp(
         _temperature_polynomial_expression(
@@ -410,6 +456,27 @@ def xu_froment_smr(context: KineticsContext):
         terms.temperature_k,
         terms.catalyst_mass_density_kg_per_m3,
     ) * (terms.p_inv_h2_pa_inv**2.5 / Constant(10.0**-2.5)) * driving_force / terms.denominator**2
+    return Constant(1.0 * mol / (m**3 * s)) * rate_expression
+
+
+@register_kinetics_hook("xu_froment_dmr_surrogate")
+def xu_froment_dmr_surrogate(context: KineticsContext):
+    terms = _xu_froment_terms(context)
+    pressure_scale = Constant(1.0e5)
+    driving_force = (
+        (terms.p_ch4_pa / pressure_scale) * (terms.p_co2_pa / pressure_scale)
+        - ((terms.p_co_pa / pressure_scale) ** 2 * (terms.p_h2_pa / pressure_scale) ** 2)
+        / _equilibrium_constant_dmr_expression(terms.temperature_k)
+    )
+    rate_expression = (
+        _rate_constant_expression(
+            "dmr",
+            terms.temperature_k,
+            terms.catalyst_mass_density_kg_per_m3,
+        )
+        * driving_force
+        / terms.denominator**2
+    )
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 

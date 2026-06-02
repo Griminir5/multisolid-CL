@@ -144,6 +144,9 @@ def run_simulation(
         reporter=reporter,
         simulation=assembly.simulation,
     )
+    if not render_plots:
+        return run_result
+
     plot_paths = render_run_result_plots(run_result)
     return replace(
         run_result,

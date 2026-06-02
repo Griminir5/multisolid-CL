@@ -580,11 +580,12 @@ class CLBed_mass(daeModel):
         heat_loss_rate_total = Constant(0.0 * J / s)
         for idx_cell in range(Nc):
             dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
+            wall_heat_source = Constant(2.0) * self.h_wall() * (self.T_wall() - self.T(idx_cell)) / self.R_bed()
 
             eq = self.CreateEquation(f"energy_balance_cell_{idx_cell}")
             eq.Residual = dt(self.h_cell(idx_cell)) + (
                 Sum(self.J_gas_face.array("*", idx_cell + 1)) - Sum(self.J_gas_face.array("*", idx_cell))
-            ) / dx
+            ) / dx - wall_heat_source
 
             heat_bed_total = heat_bed_total + cross_section_area * self.h_cell(idx_cell) * dx
             heat_loss_rate_total = heat_loss_rate_total + cross_section_area * heat_loss_density * dx
@@ -692,6 +693,8 @@ class simBed(daeSimulation):
         self.model.pi.SetValue(3.14159)
         self.model.L_bed.SetValue(self.model_config.bed_length_m * m)
         self.model.R_bed.SetValue(self.model_config.bed_radius_m * m)
+        self.model.h_wall.SetValue(self.model_config.wall_heat_transfer_coefficient_w_m2_k * J / (s * m**2 * K))
+        self.model.T_wall.SetValue(self.model_config.wall_temperature_k * K)
 
         self.model.T_env.SetValue(self.model_config.ambient_temperature_k * K)
         self.model.U_eff.SetValue(
@@ -1072,6 +1075,7 @@ def run_assembled_simulation(
     report_ids=None,
     include_plot_variables=False,
     include_benchmark_snapshot=False,
+    quiet_solver_output=True,
 ):
     configure_evaluation_mode()
     simulation = assembly.simulation
@@ -1097,9 +1101,19 @@ def run_assembled_simulation(
     log = daePythonStdOutLog()
     log.PrintProgress = False
 
-    simulation.Initialize(solver, reporter, log)
-    simulation.SolveInitial()
-    simulation.Run()
+    redirect_context = (
+        contextlib.redirect_stdout(io.StringIO()),
+        contextlib.redirect_stderr(io.StringIO()),
+    )
+    if quiet_solver_output:
+        with redirect_context[0], redirect_context[1]:
+            simulation.Initialize(solver, reporter, log)
+            simulation.SolveInitial()
+            simulation.Run()
+    else:
+        simulation.Initialize(solver, reporter, log)
+        simulation.SolveInitial()
+        simulation.Run()
     return reporter
 
 
