@@ -177,6 +177,12 @@ class CLBed_mass(daeModel):
         self.h_sol = daeVariable("h_sol", molar_enthalpy_type, self, "Molar enthalpy of solid i in a cell", [self.N_sol, self.x_centers])
         self.J_gas_face = daeVariable("J_gas_face", heat_flux_type, self, "Enthalpy flow at cell faces attributable to component i", [self.N_gas, self.x_faces])
         
+        self.Dax = daeVariable("Dax", dispersion_type, self, "Face axial dispersion coefficient", [self.x_faces])
+        self.u_s = daeVariable("u_s", velocity_type, self, "Face superficial velocity", [self.x_faces])
+        self.P = daeVariable("pres_bed", pres_type, self, "Pressure inside a cell", [self.x_centers])
+        self.mu_g = daeVariable("mu_g", viscosity_type, self, "Mole-averaged gas viscosity in a cell", [self.x_centers])
+        self.rho_g = daeVariable("rho_g", density_type, self, "Gas density in a cell", [self.x_centers])
+        
         self.mass_in_total = daeVariable("mass_in_total", mass_inventory_type, self, "Cumulative gas-phase mass that has entered the bed")
         self.mass_out_total = daeVariable("mass_out_total", mass_inventory_type, self, "Cumulative gas-phase mass that has left the bed")
         self.mass_bed_total = daeVariable("mass_bed_total", mass_inventory_type, self, "Gas plus solid mass currently residing in the bed")
@@ -185,12 +191,6 @@ class CLBed_mass(daeModel):
         self.heat_out_total = daeVariable("heat_out_total", energy_inventory_type, self, "Cumulative gas-phase enthalpy that has left the bed")
         self.heat_loss_total = daeVariable("heat_loss_total", energy_inventory_type, self, "Cumulative heat transferred from the bed to the environment")
         self.heat_bed_total = daeVariable("heat_bed_total", energy_inventory_type, self, "Gas plus solid enthalpy currently residing in the bed")
-        
-        self.Dax = daeVariable("Dax", dispersion_type, self, "Face axial dispersion coefficient", [self.x_faces])
-        self.u_s = daeVariable("u_s", velocity_type, self, "Face superficial velocity", [self.x_faces])
-        self.P = daeVariable("pres_bed", pres_type, self, "Pressure inside a cell", [self.x_centers])
-        self.mu_g = daeVariable("mu_g", viscosity_type, self, "Mole-averaged gas viscosity in a cell", [self.x_centers])
-        self.rho_g = daeVariable("rho_g", density_type, self, "Gas density in a cell", [self.x_centers])
         
         self.F_in_const = daeParameter("F_in_const", molar_flow_type.Units, self, "Default fixed total molar flow at the inlet")
         self.y_in_const = daeParameter("y_in_const", molar_frac_type.Units, self, "Default fixed molar fraction of component i at the inlet", [self.N_gas])
@@ -364,30 +364,283 @@ class CLBed_mass(daeModel):
 
 
 
-        self._declare_program_equations(self.F_in, self.F_in_const(), self.inlet_flow_segments, molar_flow_type.Units, "Active_inlet_flow")
+        def heat_loss_density(idx_cell):
+            return (self.T(idx_cell) - self.T_env()) * (2.0 * self.U_eff()) / self.R_bed()
 
-        self._declare_indexed_program_equations(self.y_in, self.y_in_const, self.inlet_composition_segments, molar_frac_type.Units, "Active_inlet_composition")
+        def gas_face_flux_residual(gas_idx, face_index):
+            if face_index == 0:
+                return self.y_in(gas_idx) * self.F_in() / cross_section_area - self.N_gas_face(gas_idx, 0)
+            if face_index == Nf - 1:
+                return (
+                    self.N_gas_face(gas_idx, face_index)
+                    - self.u_s(face_index) * self.c_gas(gas_idx, Nc - 1) / self.gasfrac(Nc - 1)
+                )
 
-        self._declare_program_equations(self.T_in, self.T_in_const(), self.inlet_temperature_segments, K, "Active_inlet_temperature")
+            idx_cell_L = face_index - 1
+            idx_cell_R = face_index
+            dx = center_coords[idx_cell_R] - center_coords[idx_cell_L]
+            ct_L = self.ct_gas(idx_cell_L)
+            ct_R = self.ct_gas(idx_cell_R)
+            ct_face = Constant(0.5) * (
+                ct_L / self.gasfrac(idx_cell_L)
+                + ct_R / self.gasfrac(idx_cell_R)
+            )
+            c_face_L, _c_face_R = reconstruct_face_states(
+                lambda idx_cell: self.c_gas(gas_idx, idx_cell) / self.gasfrac(idx_cell),
+                face_index,
+                Nc,
+                self.mass_scheme,
+                conc_eps,
+            )
+            return (
+                self.N_gas_face(gas_idx, face_index)
+                - self.u_s(face_index) * c_face_L
+                + self.Dax(face_index)
+                * ct_face
+                * (self.y_gas(gas_idx, idx_cell_R) - self.y_gas(gas_idx, idx_cell_L))
+                / dx
+            )
 
-        self._declare_program_equations(self.P_out, self.P_out_const(), self.outlet_pressure_segments, Pa, "Active_outlet_pressure")
+        def gas_face_enthalpy_residual(gas_idx, face_index):
+            species_name = self.gas_species[gas_idx]
+            if face_index == 0:
+                return (
+                    self.J_gas_face(gas_idx, 0)
+                    - self.N_gas_face(gas_idx, 0)
+                    * self.property_registry.enthalpy_expression(species_name, self.T_in())
+                )
+            if face_index == Nf - 1:
+                return (
+                    self.J_gas_face(gas_idx, face_index)
+                    - self.N_gas_face(gas_idx, face_index) * self.h_gas(gas_idx, Nc - 1)
+                )
 
+            h_face_L, _h_face_R = reconstruct_face_states(
+                lambda idx_cell: self.h_gas(gas_idx, idx_cell),
+                face_index,
+                Nc,
+                self.heat_scheme,
+                enthalpy_eps,
+            )
+            return self.J_gas_face(gas_idx, face_index) - self.N_gas_face(gas_idx, face_index) * h_face_L
 
+        def ergun_residual(face_index):
+            if face_index == 0:
+                dx = center_coords[0] - face_coords[0]
+                e_b_face = self.e_b(0)
+                ergun_drag = (
+                    150
+                    * self.mu_g(0)
+                    * (1 - e_b_face) ** 2
+                    / (e_b_face ** 3 * self.d_p(0) ** 2)
+                    * self.u_s(0)
+                    + 1.75
+                    * self.rho_g(0)
+                    * (1 - e_b_face)
+                    / (e_b_face ** 3 * self.d_p(0))
+                    * Abs(self.u_s(0))
+                    * self.u_s(0)
+                )
+                return (self.P_in() - self.P(0)) / dx - ergun_drag
+
+            if face_index == Nf - 1:
+                dx = face_coords[Nf - 1] - center_coords[Nc - 1]
+                e_b_face = self.e_b(Nc - 1)
+                ergun_drag = (
+                    150
+                    * self.mu_g(Nc - 1)
+                    * (1 - e_b_face) ** 2
+                    / (e_b_face ** 3 * self.d_p(face_index) ** 2)
+                    * self.u_s(face_index)
+                    + 1.75
+                    * self.rho_g(Nc - 1)
+                    * (1 - e_b_face)
+                    / (e_b_face ** 3 * self.d_p(face_index))
+                    * Abs(self.u_s(face_index))
+                    * self.u_s(face_index)
+                )
+                return (self.P(Nc - 1) - self.P_out()) / dx - ergun_drag
+
+            idx_cell_L = face_index - 1
+            idx_cell_R = face_index
+            dx = center_coords[idx_cell_R] - center_coords[idx_cell_L]
+            mu_face = 0.5 * (self.mu_g(idx_cell_L) + self.mu_g(idx_cell_R))
+            rho_face = 0.5 * (self.rho_g(idx_cell_L) + self.rho_g(idx_cell_R))
+            e_b_face = 0.5 * (self.e_b(idx_cell_L) + self.e_b(idx_cell_R))
+            ergun_drag = (
+                150
+                * mu_face
+                * (1 - e_b_face) ** 2
+                / (e_b_face ** 3 * self.d_p(face_index) ** 2)
+                * self.u_s(face_index)
+                + 1.75
+                * rho_face
+                * (1 - e_b_face)
+                / (e_b_face ** 3 * self.d_p(face_index))
+                * Abs(self.u_s(face_index))
+                * self.u_s(face_index)
+            )
+            return (self.P(idx_cell_L) - self.P(idx_cell_R)) / dx - ergun_drag
+
+        def inventory_expressions():
+            mass_bed_total = Constant(0.0 * kg)
+            heat_bed_total = Constant(0.0 * J)
+            heat_loss_rate_total = Constant(0.0 * J / s)
+            for idx_cell in range(Nc):
+                dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
+                gas_mass_density = Constant(0.0 * kg / m**3)
+                for gas_idx in range(Ng):
+                    gas_mass_density = gas_mass_density + self.c_gas(gas_idx, idx_cell) * gas_molecular_weights[gas_idx]
+
+                solid_mass_density = Constant(0.0 * kg / m**3)
+                for sol_idx in range(Ns):
+                    solid_mass_density = solid_mass_density + self.c_sol(sol_idx, idx_cell) * solid_molecular_weights[sol_idx]
+
+                cell_heat_loss_density = heat_loss_density(idx_cell)
+                mass_bed_total = mass_bed_total + cross_section_area * (gas_mass_density + solid_mass_density) * dx
+                heat_bed_total = heat_bed_total + cross_section_area * self.h_cell(idx_cell) * dx
+                heat_loss_rate_total = heat_loss_rate_total + cross_section_area * cell_heat_loss_density * dx
+            return mass_bed_total, heat_bed_total, heat_loss_rate_total
+
+        def mass_flux_expressions():
+            mass_flux_in = Constant(0.0 * kg / (s * m**2))
+            mass_flux_out = Constant(0.0 * kg / (s * m**2))
+            for gas_idx in range(Ng):
+                mass_flux_in = mass_flux_in + self.N_gas_face(gas_idx, 0) * gas_molecular_weights[gas_idx]
+                mass_flux_out = mass_flux_out + self.N_gas_face(gas_idx, Nf - 1) * gas_molecular_weights[gas_idx]
+            return mass_flux_in, mass_flux_out
+
+        def initial_inlet_fraction(gas_idx):
+            segments = self.inlet_composition_segments[gas_idx]
+            if segments:
+                return float(segments[0].start_value)
+            try:
+                return float(self.y_in_const.npyValues[gas_idx])
+            except Exception:
+                return 0.0
+
+        def gas_component_enthalpy_residual(gas_idx, idx_cell):
+            species_name = self.gas_species[gas_idx]
+            return self.h_gas(gas_idx, idx_cell) - self.property_registry.enthalpy_expression(
+                species_name,
+                self.T(idx_cell),
+            )
+
+        temperature_anchor_gas_idx = max(range(Ng), key=initial_inlet_fraction)
+
+        # Declare equations in DAETools' flattened variable order so ILU-based solvers see a populated diagonal.
+        for gas_idx in range(Ng):
+            for idx_cell in range(Nc):
+                eq = self.CreateEquation(f"species_balance_cell_{idx_cell}_{self.gas_species[gas_idx]}")
+                source = self._source_expression(
+                    self.reaction_network.gas_source_matrix[gas_idx],
+                    idx_cell,
+                )
+                dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
+                eq.Residual = dt(self.c_gas(gas_idx, idx_cell)) + (
+                    self.N_gas_face(gas_idx, idx_cell + 1) - self.N_gas_face(gas_idx, idx_cell)
+                ) / dx - source
+
+        for sol_idx in range(Ns):
+            for idx_cell in range(Nc):
+                eq = self.CreateEquation(f"solid_species_balance_cell_{idx_cell}_{self.solid_species[sol_idx]}")
+                source = self._source_expression(
+                    self.reaction_network.solid_source_matrix[sol_idx],
+                    idx_cell,
+                )
+                eq.Residual = dt(self.c_sol(sol_idx, idx_cell)) - source
 
         eq = self.CreateEquation("total_concentration_closure")
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
         eq.Residual = self.ct_gas(idx_cell) - Sum(self.c_gas.array("*", idx_cell))
+
+        eq = self.CreateEquation("solid_total_concentration_closure")
+        idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+        eq.Residual = self.ct_sol(idx_cell) - Sum(self.c_sol.array("*", idx_cell))
 
         eq = self.CreateEquation("molar_fraction_calc")
         idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
         eq.Residual = self.y_gas(idx_gas, idx_cell) * self.ct_gas(idx_cell) - self.c_gas(idx_gas, idx_cell)
 
+        if self.y_sol is not None:
+            eq = self.CreateEquation("solid_molar_fraction_calc")
+            idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, "j")
+            idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+            eq.Residual = self.y_sol(idx_sol, idx_cell) * self.ct_sol(idx_cell) - self.c_sol(idx_sol, idx_cell)
+
+        for gas_idx, species_name in enumerate(self.gas_species):
+            for face_index in range(Nf):
+                if face_index == 0:
+                    equation_name = f"lhs_boundary_flux_{species_name}"
+                elif face_index == Nf - 1:
+                    equation_name = f"rhs_boundary_flux_{species_name}"
+                else:
+                    equation_name = f"face_flux_{face_index}_{species_name}"
+                eq = self.CreateEquation(equation_name)
+                eq.Residual = gas_face_flux_residual(gas_idx, face_index)
+
+        if self.reaction_network.has_reactions:
+            for reaction_idx, reaction in enumerate(self.reaction_network.reactions):
+                eq = self.CreateEquation(f"reaction_rate_{reaction.id}")
+                idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+                kinetics_context = self.build_kinetics_context(idx_cell)
+                eq.Residual = self.R_rxn(reaction_idx, idx_cell) - self.reaction_rate_hooks[reaction_idx](
+                    kinetics_context
+                )
+
+        temperature_anchor_species = self.gas_species[temperature_anchor_gas_idx]
+        eq = self.CreateEquation(f"gas_component_enthalpy_{temperature_anchor_species}")
+        idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+        eq.Residual = gas_component_enthalpy_residual(temperature_anchor_gas_idx, idx_cell)
+
+        for idx_cell in range(Nc):
+            dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
+            eq = self.CreateEquation(f"energy_balance_cell_{idx_cell}")
+            eq.Residual = dt(self.h_cell(idx_cell)) + (
+                Sum(self.J_gas_face.array("*", idx_cell + 1)) - Sum(self.J_gas_face.array("*", idx_cell))
+            ) / dx + heat_loss_density(idx_cell)
+
+        for gas_idx, species_name in enumerate(self.gas_species):
+            if gas_idx == temperature_anchor_gas_idx:
+                eq = self.CreateEquation("total_cell_enthalpy")
+                idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+                eq.Residual = self.h_cell(idx_cell) - Sum(self.c_gas.array("*", idx_cell)*self.h_gas.array("*", idx_cell)) - Sum(self.c_sol.array("*", idx_cell)*self.h_sol.array("*", idx_cell))
+            else:
+                eq = self.CreateEquation(f"gas_component_enthalpy_{species_name}")
+                idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+                eq.Residual = gas_component_enthalpy_residual(gas_idx, idx_cell)
+
+        for sol_idx, species_name in enumerate(self.solid_species):
+            eq = self.CreateEquation(f"solid_component_enthalpy_{species_name}")
+            idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
+            eq.Residual = self.h_sol(sol_idx, idx_cell) - self.property_registry.enthalpy_expression(
+                species_name,
+                self.T(idx_cell),
+            )
+
+        for gas_idx, species_name in enumerate(self.gas_species):
+            for face_index in range(Nf):
+                if face_index == 0:
+                    equation_name = f"lhs_boundary_enthalpy_flux_{species_name}"
+                elif face_index == Nf - 1:
+                    equation_name = f"rhs_boundary_enthalpy_flux_{species_name}"
+                else:
+                    equation_name = f"face_enthalpy_flux_{face_index}_{species_name}"
+                eq = self.CreateEquation(equation_name)
+                eq.Residual = gas_face_enthalpy_residual(gas_idx, face_index)
+
+        eq = self.CreateEquation("axial_dispersion_face")
+        idx_face = eq.DistributeOnDomain(self.x_faces, eClosedClosed, "x_f")
+        eq.Residual = self.Dax(idx_face) - Abs(self.u_s(idx_face)) * 0.5 * self.d_p(idx_face)
+
+        for face_index in range(Nf):
+            eq = self.CreateEquation(f"ergun_face_{face_index}")
+            eq.Residual = ergun_residual(face_index)
+
         eq = self.CreateEquation("gas_equation_of_state")
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
         eq.Residual = self.P(idx_cell) * self.gasfrac(idx_cell) - self.ct_gas(idx_cell) * self.R_gas() * self.T(idx_cell)
-
-
 
         eq = self.CreateEquation("gas_mixture_viscosity")
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
@@ -400,205 +653,8 @@ class CLBed_mass(daeModel):
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
         eq.Residual = self.rho_g(idx_cell) - self.P(idx_cell) * self._gas_mixture_molecular_weight_expression(idx_cell) / (self.R_gas() * self.T(idx_cell))
 
-
-
-        eq = self.CreateEquation("solid_total_concentration_closure")
-        idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-        eq.Residual = self.ct_sol(idx_cell) - Sum(self.c_sol.array("*", idx_cell))
-
-        if self.y_sol is not None:
-            eq = self.CreateEquation("solid_molar_fraction_calc")
-            idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, "j")
-            idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-            eq.Residual = self.y_sol(idx_sol, idx_cell) * self.ct_sol(idx_cell) - self.c_sol(idx_sol, idx_cell)
-
-
-
-        eq = self.CreateEquation("axial_dispersion_face")
-        idx_face = eq.DistributeOnDomain(self.x_faces, eClosedClosed, "x_f")
-        eq.Residual = self.Dax(idx_face) - Abs(self.u_s(idx_face)) * 0.5 * self.d_p(idx_face)
-
-
-        for face_index in range(1, Nf - 1): # face enthalpy and material flux equations
-            idx_cell_L = face_index - 1
-            idx_cell_R = face_index
-            dx = center_coords[idx_cell_R] - center_coords[idx_cell_L]
-            ct_L = self.ct_gas(idx_cell_L)
-            ct_R = self.ct_gas(idx_cell_R)
-            ct_face = Constant(0.5) * (
-                ct_L / self.gasfrac(idx_cell_L)
-                + ct_R / self.gasfrac(idx_cell_R)
-            )
-
-            eq = self.CreateEquation(f"face_flux_{face_index}")
-            idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
-
-            c_face_L, c_face_R = reconstruct_face_states(
-                lambda idx_cell: self.c_gas(idx_gas, idx_cell) / self.gasfrac(idx_cell),
-                face_index,
-                Nc,
-                self.mass_scheme,
-                conc_eps,
-            )
-            eq.Residual = (
-                self.N_gas_face(idx_gas, face_index)
-                - self.u_s(face_index) * c_face_L
-                + self.Dax(face_index)
-                * ct_face
-                * (self.y_gas(idx_gas, idx_cell_R) - self.y_gas(idx_gas, idx_cell_L))
-                / dx
-            )
-
-            eq = self.CreateEquation(f"face_enthalpy_flux_{face_index}")
-            idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
-
-            h_face_L, h_face_R = reconstruct_face_states(
-                lambda idx_cell: self.h_gas(idx_gas, idx_cell),
-                face_index,
-                Nc,
-                self.heat_scheme,
-                enthalpy_eps,
-            )
-            eq.Residual = (
-                self.J_gas_face(idx_gas, face_index)
-                - self.N_gas_face(idx_gas, face_index) * h_face_L
-            )
-
-        for idx_cell in range(Nc): # cell enthalpy and material balances
-            dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
-
-            for gas_idx in range(Ng):
-                eq = self.CreateEquation(f"species_balance_cell_{idx_cell}_{self.gas_species[gas_idx]}")
-                source = self._source_expression(
-                    self.reaction_network.gas_source_matrix[gas_idx],
-                    idx_cell,
-                )
-                eq.Residual = dt(self.c_gas(gas_idx, idx_cell)) + (
-                    self.N_gas_face(gas_idx, idx_cell + 1) - self.N_gas_face(gas_idx, idx_cell)
-                ) / dx - source
-
-            for sol_idx in range(Ns):
-                eq = self.CreateEquation(f"solid_species_balance_cell_{idx_cell}_{self.solid_species[sol_idx]}")
-                source = self._source_expression(
-                    self.reaction_network.solid_source_matrix[sol_idx],
-                    idx_cell,
-                )
-                eq.Residual = dt(self.c_sol(sol_idx, idx_cell)) - source
-
-
-        eq = self.CreateEquation("rhs_boundary_flux")
-        idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
-        idx_face = eq.DistributeOnDomain(self.x_faces, eUpperBound, "x_L")
-        eq.Residual = self.N_gas_face(idx_gas, idx_face) - self.u_s(idx_face) * self.c_gas(idx_gas, Nc - 1) / self.gasfrac(Nc - 1)
-
-        eq = self.CreateEquation("lhs_boundary_flux")
-        idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
-        eq.Residual = self.y_in(idx_gas) * self.F_in() / cross_section_area - self.N_gas_face(idx_gas, 0)
-
-        eq = self.CreateEquation("inlet_pressure_from_flow")
-        eq.Residual = self.F_in() / cross_section_area - self.u_s(0) * self.P_in() / (self.R_gas() * self.T_in())
-
-        dx = center_coords[0] - face_coords[0]
-        e_b_face = self.e_b(0)
-        ergun_drag = (
-            150 * self.mu_g(0) * (1 - e_b_face) ** 2 / (e_b_face ** 3 * self.d_p(0) ** 2) * self.u_s(0)
-            + 1.75 * self.rho_g(0) * (1 - e_b_face) / (e_b_face ** 3 * self.d_p(0)) * Abs(self.u_s(0)) * self.u_s(0)
-        )
-        eq = self.CreateEquation("ergun_face_0")
-        eq.Residual = (self.P_in() - self.P(0)) / dx - ergun_drag
-
-        for face_index in range(1, Nf - 1):
-            idx_cell_L = face_index - 1
-            idx_cell_R = face_index
-            dx = center_coords[idx_cell_R] - center_coords[idx_cell_L]
-            mu_face = 0.5 * (self.mu_g(idx_cell_L) + self.mu_g(idx_cell_R))
-            rho_face = 0.5 * (self.rho_g(idx_cell_L) + self.rho_g(idx_cell_R))
-            e_b_face = 0.5 * (self.e_b(idx_cell_L) + self.e_b(idx_cell_R))
-            ergun_drag = (
-                150 * mu_face * (1 - e_b_face) ** 2 / (e_b_face ** 3 * self.d_p(face_index) ** 2) * self.u_s(face_index)
-                + 1.75 * rho_face * (1 - e_b_face) / (e_b_face ** 3 * self.d_p(face_index)) * Abs(self.u_s(face_index)) * self.u_s(face_index)
-            )
-
-            eq = self.CreateEquation(f"ergun_face_{face_index}")
-            eq.Residual = (self.P(idx_cell_L) - self.P(idx_cell_R)) / dx - ergun_drag
-
-        dx = face_coords[Nf - 1] - center_coords[Nc - 1]
-        e_b_face = self.e_b(Nc - 1)
-        ergun_drag = (
-            150 * self.mu_g(Nc - 1) * (1 - e_b_face) ** 2 / (e_b_face ** 3 * self.d_p(Nf - 1) ** 2) * self.u_s(Nf - 1)
-            + 1.75 * self.rho_g(Nc - 1) * (1 - e_b_face) / (e_b_face ** 3 * self.d_p(Nf - 1)) * Abs(self.u_s(Nf - 1)) * self.u_s(Nf - 1)
-        )
-        eq = self.CreateEquation(f"ergun_face_{Nf - 1}")
-        eq.Residual = (self.P(Nc - 1) - self.P_out()) / dx - ergun_drag
-
-        for gas_idx, species_name in enumerate(self.gas_species):
-            eq = self.CreateEquation(f"gas_component_enthalpy_{species_name}")
-            idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-            eq.Residual = self.h_gas(gas_idx, idx_cell) - self.property_registry.enthalpy_expression(
-                species_name,
-                self.T(idx_cell),
-            )
-
-        for sol_idx, species_name in enumerate(self.solid_species):
-            eq = self.CreateEquation(f"solid_component_enthalpy_{species_name}")
-            idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-            eq.Residual = self.h_sol(sol_idx, idx_cell) - self.property_registry.enthalpy_expression(
-                species_name,
-                self.T(idx_cell),
-            )
-
-        for gas_idx, species_name in enumerate(self.gas_species):
-            eq = self.CreateEquation(f"lhs_boundary_enthalpy_flux_{species_name}")
-            eq.Residual = (
-                self.J_gas_face(gas_idx, 0)
-                - self.N_gas_face(gas_idx, 0)
-                * self.property_registry.enthalpy_expression(species_name, self.T_in())
-            )
-
-            eq = self.CreateEquation(f"rhs_boundary_enthalpy_flux_{species_name}")
-            eq.Residual = (
-                self.J_gas_face(gas_idx, Nf - 1)
-                - self.N_gas_face(gas_idx, Nf - 1) * self.h_gas(gas_idx, Nc - 1)
-            )
-
-
-
-        eq = self.CreateEquation("total_cell_enthalpy")
-        idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-        eq.Residual = self.h_cell(idx_cell) - Sum(self.c_gas.array("*", idx_cell)*self.h_gas.array("*", idx_cell)) - Sum(self.c_sol.array("*", idx_cell)*self.h_sol.array("*", idx_cell))
-
-
-        mass_bed_total = Constant(0.0 * kg)
-        heat_bed_total = Constant(0.0 * J)
-        heat_loss_rate_total = Constant(0.0 * J / s)
-        for idx_cell in range(Nc):
-            dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
-            heat_loss_density = (
-                (self.T(idx_cell) - self.T_env()) * (2.0 * self.U_eff()) / self.R_bed()
-            )
-
-            eq = self.CreateEquation(f"energy_balance_cell_{idx_cell}")
-            eq.Residual = dt(self.h_cell(idx_cell)) + (
-                Sum(self.J_gas_face.array("*", idx_cell + 1)) - Sum(self.J_gas_face.array("*", idx_cell))
-            ) / dx + heat_loss_density
-
-            gas_mass_density = Constant(0.0 * kg / m**3)
-            for gas_idx in range(Ng):
-                gas_mass_density = gas_mass_density + self.c_gas(gas_idx, idx_cell) * gas_molecular_weights[gas_idx]
-
-            solid_mass_density = Constant(0.0 * kg / m**3)
-            for sol_idx in range(Ns):
-                solid_mass_density = solid_mass_density + self.c_sol(sol_idx, idx_cell) * solid_molecular_weights[sol_idx]
-
-            mass_bed_total = mass_bed_total + cross_section_area * (gas_mass_density + solid_mass_density) * dx
-            heat_bed_total = heat_bed_total + cross_section_area * self.h_cell(idx_cell) * dx
-            heat_loss_rate_total = heat_loss_rate_total + cross_section_area * heat_loss_density * dx
-
-        mass_flux_in = Constant(0.0 * kg / (s * m**2))
-        mass_flux_out = Constant(0.0 * kg / (s * m**2))
-        for gas_idx in range(Ng):
-            mass_flux_in = mass_flux_in + self.N_gas_face(gas_idx, 0) * gas_molecular_weights[gas_idx]
-            mass_flux_out = mass_flux_out + self.N_gas_face(gas_idx, Nf - 1) * gas_molecular_weights[gas_idx]
+        mass_bed_total, heat_bed_total, heat_loss_rate_total = inventory_expressions()
+        mass_flux_in, mass_flux_out = mass_flux_expressions()
 
         eq = self.CreateEquation("mass_in_total_accumulation")
         eq.Residual = dt(self.mass_in_total()) - cross_section_area * mass_flux_in
@@ -621,14 +677,16 @@ class CLBed_mass(daeModel):
         eq = self.CreateEquation("heat_bed_total_definition")
         eq.Residual = self.heat_bed_total() - heat_bed_total
 
-        if self.reaction_network.has_reactions:
-            for reaction_idx, reaction in enumerate(self.reaction_network.reactions):
-                eq = self.CreateEquation(f"reaction_rate_{reaction.id}")
-                idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-                kinetics_context = self.build_kinetics_context(idx_cell)
-                eq.Residual = self.R_rxn(reaction_idx, idx_cell) - self.reaction_rate_hooks[reaction_idx](
-                    kinetics_context
-                )
+        self._declare_program_equations(self.F_in, self.F_in_const(), self.inlet_flow_segments, molar_flow_type.Units, "Active_inlet_flow")
+
+        self._declare_indexed_program_equations(self.y_in, self.y_in_const, self.inlet_composition_segments, molar_frac_type.Units, "Active_inlet_composition")
+
+        self._declare_program_equations(self.T_in, self.T_in_const(), self.inlet_temperature_segments, K, "Active_inlet_temperature")
+
+        eq = self.CreateEquation("inlet_pressure_from_flow")
+        eq.Residual = self.F_in() / cross_section_area - self.u_s(0) * self.P_in() / (self.R_gas() * self.T_in())
+
+        self._declare_program_equations(self.P_out, self.P_out_const(), self.outlet_pressure_segments, Pa, "Active_outlet_pressure")
 
 
 class simBed(daeSimulation):
@@ -959,6 +1017,27 @@ def configure_evaluation_mode(threads: int):
     cfg.SetInteger("daetools.core.equations.computeStack_OpenMP.numThreads", threads)
 
 
+def _configure_aztecoo_ifpack_solver(linear_solver):
+    from daetools.solvers.aztecoo_options import daeAztecOptions
+
+    linear_solver.NumIters = 1000
+    linear_solver.Tolerance = 1e-8
+
+    parameter_list = linear_solver.ParameterList
+    parameter_list.set_int("AZ_solver", daeAztecOptions.AZ_gmres)
+    parameter_list.set_int("AZ_kspace", 100)
+    parameter_list.set_int("AZ_scaling", daeAztecOptions.AZ_none)
+    parameter_list.set_int("AZ_reorder", 0)
+    parameter_list.set_int("AZ_conv", daeAztecOptions.AZ_r0)
+    parameter_list.set_int("AZ_keep_info", 1)
+    parameter_list.set_int("AZ_output", daeAztecOptions.AZ_none)
+    parameter_list.set_int("AZ_diagnostics", daeAztecOptions.AZ_none)
+    parameter_list.set_int("fact: level-of-fill", 3)
+    parameter_list.set_float("fact: absolute threshold", 1e-5)
+    parameter_list.set_float("fact: relative threshold", 1.0)
+    return linear_solver
+
+
 def _create_linear_solver(name: str):
     if name == "trilinos_klu":
         from daetools.solvers.trilinos import pyTrilinos
@@ -978,7 +1057,9 @@ def _create_linear_solver(name: str):
 
     if name == "trilinos_aztecoo_ifpack":
         from daetools.solvers.trilinos import pyTrilinos
-        return pyTrilinos.daeCreateTrilinosSolver("AztecOO_Ifpack", "ILU")
+        return _configure_aztecoo_ifpack_solver(
+            pyTrilinos.daeCreateTrilinosSolver("AztecOO_Ifpack", "ILU")
+        )
 
     if name == "trilinos_aztecoo_ml":
         from daetools.solvers.trilinos import pyTrilinos
