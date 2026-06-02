@@ -1,40 +1,11 @@
 inlet_flow:
   initial: 1.0
-  # steps:
-  #   - kind: ramp
-  #     duration_s: 400.0
-  #     target: 2.0
-  #   - kind: ramp
-  #     duration_s: 400.0
-  #     target: 0.1
 
 inlet_temperature:
-  initial: 600.0
-  # steps:
-  #   - kind: ramp
-  #     duration_s: 5.0
-  #     target: 600.0
-  #   - kind: hold
-  #     duration_s: 1000.0
-  #   - kind: ramp
-  #     duration_s: 5.0
-  #     target: 1200.0
-  #   - kind: hold
-  #     duration_s: 1000.0
+  initial: 1000.0
 
 outlet_pressure:
-  initial: 5000000.0
-  # steps:
-  #   - kind: ramp
-  #     duration_s: 1300.0
-  #     target: 100000.0
-  #   - kind: hold
-  #     duration_s: 1000.0
-  #   - kind: ramp
-  #     duration_s: 1300.0
-  #     target: 5000000.0
-  #   - kind: hold
-  #     duration_s: 1000.0
+  initial: 500000.0
 
 inlet_composition:
   initial:
@@ -48,45 +19,93 @@ inlet_composition:
     N2: 1.0
     O2: 0.0
   steps:
+    # Oxidation: air over the initially reduced Ni bed.
     - kind: ramp
       duration_s: 5.0
       target:
-        Ar: 0.00
-        CH4: 0.20
+        Ar: 0.0
+        CH4: 0.0
         CO: 0.0
         CO2: 0.0
         H2: 0.0
-        H2O: 0.80
-        He: 0.0
-        N2: 0.0
-        O2: 0.0
-    - kind: hold
-      duration_s: 100.0
-    - kind: ramp
-      duration_s: 5.0
-      target:
-        Ar: 0.30
-        CH4: 0.20
-        CO: 0.05
-        CO2: 0.40
-        H2: 0.0
-        H2O: 0.05
-        He: 0.0
-        N2: 0.0
-        O2: 0.0
-    - kind: hold
-      duration_s: 100.0
-    - kind: ramp
-      duration_s: 5.0
-      target:
-        Ar: 0.00
-        CH4: 0.00
-        CO: 0.00
-        CO2: 0.00
-        H2: 0.0
-        H2O: 0.00
+        H2O: 0.0
         He: 0.0
         N2: 0.80
         O2: 0.20
     - kind: hold
-      duration_s: 800.0
+      duration_s: 150.0
+    # Purge before reduction.
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        Ar: 0.0
+        CH4: 0.0
+        CO: 0.0
+        CO2: 0.0
+        H2: 0.0
+        H2O: 0.0
+        He: 0.0
+        N2: 1.0
+        O2: 0.0
+    - kind: hold
+      duration_s: 40.0
+    # Reduction: H2/CO reduces NiO back to active Ni.
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        Ar: 0.0
+        CH4: 0.0
+        CO: 0.10
+        CO2: 0.10
+        H2: 0.20
+        H2O: 0.0
+        He: 0.0
+        N2: 0.60
+        O2: 0.0
+    - kind: hold
+      duration_s: 200.0
+    # Purge before reforming.
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        Ar: 0.0
+        CH4: 0.0
+        CO: 0.0
+        CO2: 0.0
+        H2: 0.0
+        H2O: 0.0
+        He: 0.0
+        N2: 1.0
+        O2: 0.0
+    - kind: hold
+      duration_s: 40.0
+    # Reforming: steam methane reforming/water-gas shift on Ni.
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        Ar: 0.0
+        CH4: 0.20
+        CO: 0.0
+        CO2: 0.0
+        H2: 0.0
+        H2O: 0.60
+        He: 0.0
+        N2: 0.20
+        O2: 0.0
+    - kind: hold
+      duration_s: 250.0
+    # Final purge.
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        Ar: 0.0
+        CH4: 0.0
+        CO: 0.0
+        CO2: 0.0
+        H2: 0.0
+        H2O: 0.0
+        He: 0.0
+        N2: 1.0
+        O2: 0.0
+    - kind: hold
+      duration_s: 45.0

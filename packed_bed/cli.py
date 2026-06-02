@@ -36,6 +36,8 @@ def run_simulation(
     property_registry=PROPERTY_REGISTRY,
     reaction_catalog=REACTION_CATALOG,
     artifact_paths: dict[str, Path] | None = None,
+    *,
+    render_plots: bool = True,
 ) -> RunResult:
     output_directory = run_bundle.output_directory
     output_directory.mkdir(parents=True, exist_ok=True)
@@ -55,6 +57,9 @@ def run_simulation(
         reporter=reporter,
         simulation=assembly.simulation,
     )
+    if not render_plots:
+        return run_result
+
     plot_paths = render_run_result_plots(run_result)
     return replace(
         run_result,

@@ -330,6 +330,27 @@ REACTION_CATALOG = {
         reversible=False,
         notes="Excerpt-based Medrano shrinking-core redox kinetics using rational fractional-power approximations.",
     ),
+    "ni_reduction_ch4_ni_redox": ReactionDefinition(
+        id="ni_reduction_ch4_ni_redox",
+        name="NiO reduction by CH4",
+        phase="gas_solid",
+        stoichiometry={
+            "CH4": -1.0,
+            "NiO": -4.0,
+            "Ni": 4.0,
+            "CO2": 1.0,
+            "H2O": 2.0,
+        },
+        required_species=("CH4", "CO2", "H2O", "Ni", "NiO"),
+        source_reference="Surrogate CLR validation reaction based on the methane-rich reduction behaviour reported by Argyris et al. (2022)",
+        kinetics_hook="ni_redox_reduction_ch4",
+        reversible=False,
+        notes=(
+            "Methane reduction surrogate for the Ni CLR validation. "
+            "It captures the paper's CH4-rich reduction stage and the fuel conversion "
+            "to CO2 and H2O before catalytic dry reforming takes over."
+        ),
+    ),
     "smr_reaction_numaguchi": ReactionDefinition(
         id="smr_reaction_numaguchi",
         name="Steam methane reforming on Ni",
@@ -389,6 +410,22 @@ REACTION_CATALOG = {
         kinetics_hook="xu_froment_overall",
         source_reference="Xu and Froment, AIChE Journal 1989, https://doi.org/10.1002/aic.690350109",
         notes="One-reaction-one-hook Xu-Froment overall reforming rate expression.",
+    ),
+    "dmr_reaction_ni_surrogate": ReactionDefinition(
+        id="dmr_reaction_ni_surrogate",
+        name="Dry methane reforming on Ni",
+        phase="gas_gas",
+        stoichiometry={"CH4": -1.0, "CO2": -1.0, "CO": 2.0, "H2": 2.0},
+        required_species=("CH4", "CO2", "CO", "H2", "Ni"),
+        catalyst_species=("Ni",),
+        reversible=True,
+        kinetics_hook="xu_froment_dmr_surrogate",
+        source_reference="Surrogate CLR validation reaction combining DMR stoichiometry with Xu-Froment adsorption scaffolding",
+        notes=(
+            "Reversible dry methane reforming surrogate for the Ni CLR validation. "
+            "The equilibrium relation follows DMR = SMR + RWGS, while the rate uses a "
+            "simple Ni-catalysed Arrhenius law with Xu-Froment-style adsorption moderation."
+        ),
     ),
     "smr_reaction_numaguchi_an": ReactionDefinition(
         id="smr_reaction_numaguchi_an",
@@ -682,6 +719,178 @@ REACTION_CATALOG = {
         kinetics_hook="he_fe_o2_oxidation",
         reversible=False,
         notes="Empirical oxidation law from the paper. The paper models oxidation as a single fast Fe+O2 step and handles Fe2O3/Fe3O4/FeO redistribution separately by solid-state transformation logic.",
+    ),
+    "ilmenite_fe2tio5_h2_reduction_ortiz_2016": ReactionDefinition(
+        id="ilmenite_fe2tio5_h2_reduction_ortiz_2016",
+        name="Fe2TiO5 reduction to Fe2TiO4 by H2 on ilmenite",
+        phase="gas_solid",
+        stoichiometry={
+            "Fe2TiO5": -1.0,
+            "H2": -1.0,
+            "Fe2TiO4": 1.0,
+            "H2O": 1.0,
+        },
+        required_species=("Fe2TiO5", "Fe2TiO4", "H2", "H2O"),
+        source_reference="Ortiz et al., Energy Technology 2016, https://doi.org/10.1002/ente.201500511",
+        kinetics_hook="ilmenite_fe2tio5_h2_reduction",
+        reversible=False,
+        notes="Paper reaction R5. The fitted shrinking-core law is an integrated whole-particle IRoR rate; this hook applies the Fe2TiO5 share of that total H2 reduction rate.",
+    ),
+    "ilmenite_fe2o3_h2_reduction_ortiz_2016": ReactionDefinition(
+        id="ilmenite_fe2o3_h2_reduction_ortiz_2016",
+        name="Fe2O3 reduction to FeO by H2 on ilmenite",
+        phase="gas_solid",
+        stoichiometry={
+            "Fe2O3": -1.0,
+            "H2": -1.0,
+            "FeO": 2.0,
+            "H2O": 1.0,
+        },
+        required_species=("Fe2O3", "FeO", "H2", "H2O"),
+        source_reference="Ortiz et al., Energy Technology 2016, https://doi.org/10.1002/ente.201500511",
+        kinetics_hook="ilmenite_fe2o3_h2_reduction",
+        reversible=False,
+        notes="Paper reaction R7 under the IRoR simplification. Ortiz et al. collapse ferric materials to Fe2O3-equivalent and ferrous materials to FeO-equivalent for the fitted packed-bed ilmenite kinetics.",
+    ),
+    "ilmenite_fe2tio5_co_reduction_ortiz_2016": ReactionDefinition(
+        id="ilmenite_fe2tio5_co_reduction_ortiz_2016",
+        name="Fe2TiO5 reduction to Fe2TiO4 by CO on ilmenite",
+        phase="gas_solid",
+        stoichiometry={
+            "Fe2TiO5": -1.0,
+            "CO": -1.0,
+            "Fe2TiO4": 1.0,
+            "CO2": 1.0,
+        },
+        required_species=("Fe2TiO5", "Fe2TiO4", "CO", "CO2"),
+        source_reference="Ortiz et al., Energy Technology 2016, https://doi.org/10.1002/ente.201500511",
+        kinetics_hook="ilmenite_fe2tio5_co_reduction",
+        reversible=False,
+        notes="Paper reaction R9. The fitted shrinking-core law is an integrated whole-particle IRoR rate; this hook applies the Fe2TiO5 share of that total CO reduction rate.",
+    ),
+    "ilmenite_fe2o3_co_reduction_ortiz_2016": ReactionDefinition(
+        id="ilmenite_fe2o3_co_reduction_ortiz_2016",
+        name="Fe2O3 reduction to FeO by CO on ilmenite",
+        phase="gas_solid",
+        stoichiometry={
+            "Fe2O3": -1.0,
+            "CO": -1.0,
+            "FeO": 2.0,
+            "CO2": 1.0,
+        },
+        required_species=("Fe2O3", "FeO", "CO", "CO2"),
+        source_reference="Ortiz et al., Energy Technology 2016, https://doi.org/10.1002/ente.201500511",
+        kinetics_hook="ilmenite_fe2o3_co_reduction",
+        reversible=False,
+        notes="Paper reaction R10 under the IRoR simplification. This is the Fe2O3-equivalent share of the whole-particle CO reduction rate fit reported in Table 3.",
+    ),
+    "ilmenite_fe2tio4_o2_oxidation_ortiz_2016": ReactionDefinition(
+        id="ilmenite_fe2tio4_o2_oxidation_ortiz_2016",
+        name="Fe2TiO4 oxidation to Fe2TiO5 by O2 on ilmenite",
+        phase="gas_solid",
+        stoichiometry={
+            "Fe2TiO4": -1.0,
+            "O2": -0.5,
+            "Fe2TiO5": 1.0,
+        },
+        required_species=("Fe2TiO4", "Fe2TiO5", "O2"),
+        source_reference="Ortiz et al., Energy Technology 2016, https://doi.org/10.1002/ente.201500511",
+        kinetics_hook="ilmenite_fe2tio4_o2_oxidation",
+        reversible=False,
+        notes="Per-site normalization of paper reaction R13. The paper fit a single whole-particle O2 oxidation law; this hook applies the Fe2TiO4 share of that total oxidation rate.",
+    ),
+    "ilmenite_fe2tiox_h2_reduction_proxy": ReactionDefinition(
+        id="ilmenite_fe2tiox_h2_reduction_proxy",
+        name="Fe2TiO5 reduction to Fe2TiO4 by H2 on ilmenite proxy",
+        phase="gas_solid",
+        stoichiometry={
+            "Fe2TiO5": -1.0,
+            "H2": -1.0,
+            "Fe2TiO4": 1.0,
+            "H2O": 1.0,
+        },
+        required_species=("Fe2TiO5", "Fe2TiO4", "H2", "H2O"),
+        source_reference="Ortiz et al., Energy Technology 2016, https://doi.org/10.1002/ente.201500511",
+        kinetics_hook="ilmenite_fe2tiox_h2_reduction_proxy",
+        reversible=False,
+        notes=(
+            "Loading-sweep proxy for the Ortiz Fe2TiO5/Fe2TiO4 H2 reduction branch. "
+            "It preserves the same shrinking-core rate law but removes unreachable "
+            "multi-phase share algebra from the mixed-bed comparison."
+        ),
+    ),
+    "ilmenite_fe2tiox_o2_oxidation_proxy": ReactionDefinition(
+        id="ilmenite_fe2tiox_o2_oxidation_proxy",
+        name="Fe2TiO4 oxidation to Fe2TiO5 by O2 on ilmenite proxy",
+        phase="gas_solid",
+        stoichiometry={
+            "Fe2TiO4": -1.0,
+            "O2": -0.5,
+            "Fe2TiO5": 1.0,
+        },
+        required_species=("Fe2TiO4", "Fe2TiO5", "O2"),
+        source_reference="Ortiz et al., Energy Technology 2016, https://doi.org/10.1002/ente.201500511",
+        kinetics_hook="ilmenite_fe2tiox_o2_oxidation_proxy",
+        reversible=False,
+        notes=(
+            "Loading-sweep proxy for the Ortiz Fe2TiO4/Fe2TiO5 O2 oxidation branch. "
+            "It preserves the same shrinking-core law while restricting the symbolic "
+            "state space to the phases present in the mixed-bed comparison."
+        ),
+    ),
+    "ilmenite_feo_o2_oxidation_ortiz_2016": ReactionDefinition(
+        id="ilmenite_feo_o2_oxidation_ortiz_2016",
+        name="FeO oxidation to Fe2O3 by O2 on ilmenite",
+        phase="gas_solid",
+        stoichiometry={
+            "FeO": -2.0,
+            "O2": -0.5,
+            "Fe2O3": 1.0,
+        },
+        required_species=("FeO", "Fe2O3", "O2"),
+        source_reference="Ortiz et al., Energy Technology 2016, https://doi.org/10.1002/ente.201500511",
+        kinetics_hook="ilmenite_feo_o2_oxidation",
+        reversible=False,
+        notes="Per-site normalization of paper reaction R12. Ortiz et al. fit oxidation on the IRoR basis, so this explicit FeO extent receives the FeO share of the total O2 oxidation rate.",
+    ),
+    "ilmenite_wgs_ortiz_2016": ReactionDefinition(
+        id="ilmenite_wgs_ortiz_2016",
+        name="Water-gas shift on ilmenite",
+        phase="gas_gas",
+        stoichiometry={
+            "CO": -1.0,
+            "H2O": -1.0,
+            "CO2": 1.0,
+            "H2": 1.0,
+        },
+        required_species=("CO", "H2O", "CO2", "H2", "Fe2TiO5", "Fe2TiO4", "Fe2O3", "FeO", "Fe3O4", "TiO2"),
+        catalyst_species=("Fe2TiO5", "Fe2TiO4", "Fe2O3", "FeO", "Fe3O4", "TiO2"),
+        source_reference="Ortiz et al., Energy Technology 2016, https://doi.org/10.1002/ente.201500511",
+        kinetics_hook="ilmenite_wgs",
+        reversible=True,
+        notes="Empirical ilmenite-catalysed WGS power-law from Eq. 8. Rate is evaluated per g of catalyst in the paper and converted here to bed-volume basis using the local ilmenite mass density.",
+    ),
+    "ilmenite_wgs_fe2tiox_ortiz_2016": ReactionDefinition(
+        id="ilmenite_wgs_fe2tiox_ortiz_2016",
+        name="Water-gas shift on Fe2TiOx/TiO2 ilmenite proxy",
+        phase="gas_gas",
+        stoichiometry={
+            "CO": -1.0,
+            "H2O": -1.0,
+            "CO2": 1.0,
+            "H2": 1.0,
+        },
+        required_species=("CO", "H2O", "CO2", "H2", "Fe2TiO5", "Fe2TiO4", "TiO2"),
+        catalyst_species=("Fe2TiO5", "Fe2TiO4", "TiO2"),
+        source_reference="Ortiz et al., Energy Technology 2016, https://doi.org/10.1002/ente.201500511",
+        kinetics_hook="ilmenite_wgs",
+        reversible=True,
+        notes=(
+            "Sweep-specific Ortiz WGS proxy limited to the Fe2TiO4 / Fe2TiO5 / TiO2 "
+            "state space used in the CLR loading comparison. The kinetics hook is "
+            "identical to ilmenite_wgs_ortiz_2016; only unreachable catalyst states "
+            "are omitted from the required species list."
+        ),
     ),
 }
 

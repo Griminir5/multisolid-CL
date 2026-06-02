@@ -6,10 +6,29 @@ import numpy as np
 _POSITION_TOL = 1e-12
 
 
-def build_uniform_axial_grid(bed_length_m, axial_cells):
-    face_positions = np.linspace(0.0, float(bed_length_m), int(axial_cells) + 1, dtype=float)
+def build_axial_grid(bed_length_m, axial_cells, face_positions_m=None):
+    if face_positions_m is None:
+        face_positions = np.linspace(0.0, float(bed_length_m), int(axial_cells) + 1, dtype=float)
+    else:
+        face_positions = np.asarray(face_positions_m, dtype=float)
+        if face_positions.ndim != 1:
+            raise ValueError("Axial face positions must be provided as a 1D sequence.")
+        if face_positions.size < 2:
+            raise ValueError("At least two axial face positions are required.")
+        if not np.isclose(face_positions[0], 0.0, atol=_POSITION_TOL):
+            raise ValueError("The first axial face position must be 0.0 m.")
+        if not np.isclose(face_positions[-1], float(bed_length_m), atol=_POSITION_TOL):
+            raise ValueError("The last axial face position must match the bed length.")
+        if not np.all(np.diff(face_positions) > 0.0):
+            raise ValueError("Axial face positions must be strictly increasing.")
+        if int(axial_cells) != face_positions.size - 1:
+            raise ValueError("axial_cells must equal len(face_positions_m) - 1.")
     cell_centers = 0.5 * (face_positions[:-1] + face_positions[1:])
     return cell_centers, face_positions
+
+
+def build_uniform_axial_grid(bed_length_m, axial_cells):
+    return build_axial_grid(bed_length_m, axial_cells)
 
 
 def zone_edges(solids_config):

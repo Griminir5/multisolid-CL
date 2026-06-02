@@ -22,7 +22,9 @@ class RunResultPlotData:
     gas_species: tuple[str, ...]
     inlet_composition: np.ndarray
     outlet_composition: np.ndarray
+    inlet_pressure_pa: np.ndarray
     outlet_temperature_k: np.ndarray
+    pressure_profile_pa: np.ndarray
     outlet_pressure_pa: np.ndarray
     outlet_flowrate_mol_s: np.ndarray
     temperature_profile_k: np.ndarray
@@ -235,6 +237,15 @@ def extract_run_result_plot_data(run_result: RunResult) -> RunResultPlotData:
     _require_same_time_axis(time_s, composition_time_s, label="gas mole fraction report")
     _require_same_time_axis(time_s, flow_time_s, label="gas flux report")
 
+    inlet_pressure_pa: np.ndarray | None = None
+    p_in_variable = _find_variable(process, "P_in", required=False)
+    if p_in_variable is not None:
+        inlet_pressure_time_s, inlet_pressure_pa = _extract_scalar_series(
+            p_in_variable,
+            label="inlet pressure variable",
+        )
+        _require_same_time_axis(time_s, inlet_pressure_time_s, label="inlet pressure variable")
+
     outlet_pressure_pa: np.ndarray | None = None
     p_out_variable = _find_variable(process, "P_out", required=False)
     if p_out_variable is not None:
@@ -243,26 +254,51 @@ def extract_run_result_plot_data(run_result: RunResult) -> RunResultPlotData:
             label="outlet pressure variable",
         )
         _require_same_time_axis(time_s, outlet_pressure_time_s, label="outlet pressure variable")
-        time_s, temperature_profile_k, pressure_profile_pa, gas_mole_fraction, gas_flux, outlet_pressure_pa = (
-            _collapse_duplicate_times(
-                time_s,
-                temperature_profile_k,
-                pressure_profile_pa,
-                gas_mole_fraction,
-                gas_flux,
-                outlet_pressure_pa,
+        if inlet_pressure_pa is not None:
+            time_s, temperature_profile_k, pressure_profile_pa, gas_mole_fraction, gas_flux, inlet_pressure_pa, outlet_pressure_pa = (
+                _collapse_duplicate_times(
+                    time_s,
+                    temperature_profile_k,
+                    pressure_profile_pa,
+                    gas_mole_fraction,
+                    gas_flux,
+                    inlet_pressure_pa,
+                    outlet_pressure_pa,
+                )
             )
-        )
+        else:
+            time_s, temperature_profile_k, pressure_profile_pa, gas_mole_fraction, gas_flux, outlet_pressure_pa = (
+                _collapse_duplicate_times(
+                    time_s,
+                    temperature_profile_k,
+                    pressure_profile_pa,
+                    gas_mole_fraction,
+                    gas_flux,
+                    outlet_pressure_pa,
+                )
+            )
     else:
-        time_s, temperature_profile_k, pressure_profile_pa, gas_mole_fraction, gas_flux = (
-            _collapse_duplicate_times(
-                time_s,
-                temperature_profile_k,
-                pressure_profile_pa,
-                gas_mole_fraction,
-                gas_flux,
+        if inlet_pressure_pa is not None:
+            time_s, temperature_profile_k, pressure_profile_pa, gas_mole_fraction, gas_flux, inlet_pressure_pa = (
+                _collapse_duplicate_times(
+                    time_s,
+                    temperature_profile_k,
+                    pressure_profile_pa,
+                    gas_mole_fraction,
+                    gas_flux,
+                    inlet_pressure_pa,
+                )
             )
-        )
+        else:
+            time_s, temperature_profile_k, pressure_profile_pa, gas_mole_fraction, gas_flux = (
+                _collapse_duplicate_times(
+                    time_s,
+                    temperature_profile_k,
+                    pressure_profile_pa,
+                    gas_mole_fraction,
+                    gas_flux,
+                )
+            )
 
     axial_positions_m = _extract_static_profile(
         _find_variable(process, "xval_cells"),
@@ -297,6 +333,8 @@ def extract_run_result_plot_data(run_result: RunResult) -> RunResultPlotData:
 
     if outlet_pressure_pa is None:
         outlet_pressure_pa = pressure_profile_pa[:, -1]
+    if inlet_pressure_pa is None:
+        inlet_pressure_pa = pressure_profile_pa[:, 0]
 
     inlet_composition = _sample_inlet_composition(run_result, time_s, gas_species)
 
@@ -306,7 +344,9 @@ def extract_run_result_plot_data(run_result: RunResult) -> RunResultPlotData:
         gas_species=gas_species,
         inlet_composition=inlet_composition,
         outlet_composition=outlet_composition,
+        inlet_pressure_pa=inlet_pressure_pa,
         outlet_temperature_k=temperature_profile_k[:, -1],
+        pressure_profile_pa=pressure_profile_pa,
         outlet_pressure_pa=outlet_pressure_pa,
         outlet_flowrate_mol_s=outlet_flowrate_mol_s,
         temperature_profile_k=temperature_profile_k,
@@ -367,20 +407,30 @@ def render_outlet_conditions_plot(
     image_format: str = "svg",
 ) -> Path:
     output_path = Path(output_dir) / f"outlet_conditions_vs_time.{image_format}"
-    figure, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+    figure, axes = plt.subplots(4, 1, figsize=(12, 12), sharex=True)
+
+    inlet_pressure_pa = np.asarray(plot_data.inlet_pressure_pa, dtype=float)
+    outlet_pressure_pa = np.asarray(plot_data.outlet_pressure_pa, dtype=float)
+    pressure_drop_pa = inlet_pressure_pa - outlet_pressure_pa
 
     axes[0].plot(plot_data.time_s, plot_data.outlet_temperature_k, linewidth=2, color="#d94841")
     axes[0].set_ylabel("Temperature [K]")
     axes[0].set_title("Outlet Temperature")
 
-    axes[1].plot(plot_data.time_s, plot_data.outlet_pressure_pa, linewidth=2, color="#1d3557")
+    axes[1].plot(plot_data.time_s, inlet_pressure_pa, linewidth=2, color="#1d3557", label="Inlet pressure")
+    axes[1].plot(plot_data.time_s, outlet_pressure_pa, linewidth=1.8, color="#6b7280", linestyle="--", label="Outlet pressure")
     axes[1].set_ylabel("Pressure [Pa]")
-    axes[1].set_title("Outlet Pressure")
+    axes[1].set_title("Bed-End Pressures")
+    axes[1].legend(frameon=False, ncol=2)
 
-    axes[2].plot(plot_data.time_s, plot_data.outlet_flowrate_mol_s, linewidth=2, color="#2a9d8f")
-    axes[2].set_ylabel("Flowrate [mol/s]")
-    axes[2].set_title("Overall Outlet Flowrate")
-    axes[2].set_xlabel("Time [s]")
+    axes[2].plot(plot_data.time_s, pressure_drop_pa, linewidth=2, color="#7c3aed")
+    axes[2].set_ylabel("dP [Pa]")
+    axes[2].set_title("Bed Pressure Drop (Pin - Pout)")
+
+    axes[3].plot(plot_data.time_s, plot_data.outlet_flowrate_mol_s, linewidth=2, color="#2a9d8f")
+    axes[3].set_ylabel("Flowrate [mol/s]")
+    axes[3].set_title("Overall Outlet Flowrate")
+    axes[3].set_xlabel("Time [s]")
 
     for axis in axes:
         axis.grid(True, alpha=0.3)

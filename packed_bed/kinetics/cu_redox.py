@@ -15,9 +15,11 @@ GAS_CONSTANT_J_PER_MOL_K = 8.31446261815324
 PRESSURE_PA_PER_BAR = 1.0e5
 MIN_PARTIAL_PRESSURE_BAR = 1.0e-12
 GAS_AVAILABILITY_PRESSURE_BAR = 1.0e-6
+MIN_SOLID_CONCENTRATION_MOL_PER_M3 = 1.0e-16
 
 
-# CuO/Cu2O reduction kinetics, Table 4, pseudo-homogeneous zero-order H2 model.
+# Table 4 pseudo-homogeneous CuO/Cu2O reduction constants.
+# Use the zero-order-in-H2 rows (s^-1); gas availability only gates absent H2.
 CU_REDUCTION_COEFFICIENTS = {
     "red1": 1.54e-1,  # s^-1
     "red2": 1.53e-2,  # s^-1
@@ -39,7 +41,7 @@ CU_AL2O3_SPINEL_REDUCTION_EA_J_PER_MOL = {
     "sp3": 8.85e3,
 }
 
-# Oxidation kinetics, Table 9
+# Oxidation kinetics, Table 9. Pressure factors use P_O2 in bar.
 CU_AL2O3_OXIDATION_COEFFICIENTS = {
     "ox1": 8.54e-1,   # s^-1 bar^-1/2
     "ox2": 1.27e-6,   # m^3 mol^-1 s^-1
@@ -117,6 +119,7 @@ def gas_availability_value(partial_pressure_bar: float) -> float:
     return pressure / (pressure + GAS_AVAILABILITY_PRESSURE_BAR)
 
 
+
 def cuo_h2_reduction_rate_value(
     *,
     temperature_k: float,
@@ -125,7 +128,7 @@ def cuo_h2_reduction_rate_value(
 ) -> float:
     return (
         cu_reduction_rate_constant_value("red1", temperature_k=temperature_k)
-        * c_cuo_mol_per_m3
+        * max(c_cuo_mol_per_m3, 0.0)
         * gas_availability_value(pressure_bar_value(p_h2_pa))
     )
 
@@ -138,7 +141,7 @@ def cu2o_h2_reduction_rate_value(
 ) -> float:
     return (
         cu_reduction_rate_constant_value("red2", temperature_k=temperature_k)
-        * c_cu2o_mol_per_m3
+        * max(c_cu2o_mol_per_m3, 0.0)
         * gas_availability_value(pressure_bar_value(p_h2_pa))
     )
 
@@ -151,7 +154,7 @@ def cu_al2o3_sp1_rate_value(
 ) -> float:
     return (
         cu_al2o3_spinel_reduction_rate_constant_value("sp1", temperature_k=temperature_k)
-        * c_cual2o4_mol_per_m3
+        * max(c_cual2o4_mol_per_m3, 0.0)
         * gas_availability_value(pressure_bar_value(p_h2_pa))
     )
 
@@ -164,7 +167,7 @@ def cu_al2o3_sp2_rate_value(
 ) -> float:
     return (
         cu_al2o3_spinel_reduction_rate_constant_value("sp2", temperature_k=temperature_k)
-        * c_cual2o4_mol_per_m3
+        * max(c_cual2o4_mol_per_m3, 0.0)
         * gas_availability_value(pressure_bar_value(p_h2_pa))
     )
 
@@ -177,7 +180,7 @@ def cu_al2o3_sp3_rate_value(
 ) -> float:
     return (
         cu_al2o3_spinel_reduction_rate_constant_value("sp3", temperature_k=temperature_k)
-        * c_cualo2_mol_per_m3
+        * max(c_cualo2_mol_per_m3, 0.0)
         * gas_availability_value(pressure_bar_value(p_h2_pa))
     )
 
@@ -191,7 +194,7 @@ def cu_al2o3_ox1_rate_value(
     p_o2_bar = pressure_bar_value(p_o2_pa)
     return (
         cu_al2o3_oxidation_rate_constant_value("ox1", temperature_k=temperature_k)
-        * c_cu_mol_per_m3
+        * max(c_cu_mol_per_m3, 0.0)
         * math.sqrt(max(p_o2_bar, 0.0))
     )
 
@@ -201,11 +204,13 @@ def cu_al2o3_ox2_rate_value(
     temperature_k: float,
     c_cuo_mol_per_m3: float,
     c_al2o3_mol_per_m3: float,
+    solid_fraction: float = 1.0,
 ) -> float:
     return (
         cu_al2o3_oxidation_rate_constant_value("ox2", temperature_k=temperature_k)
-        * c_cuo_mol_per_m3
-        * c_al2o3_mol_per_m3
+        * max(c_cuo_mol_per_m3, 0.0)
+        * max(c_al2o3_mol_per_m3, 0.0)
+        / max(solid_fraction, 1.0e-12)
     )
 
 
@@ -215,13 +220,15 @@ def cu_al2o3_ox3_rate_value(
     c_cualo2_mol_per_m3: float,
     c_al2o3_mol_per_m3: float,
     p_o2_pa: float,
+    solid_fraction: float = 1.0,
 ) -> float:
     p_o2_bar = pressure_bar_value(p_o2_pa)
     return (
         cu_al2o3_oxidation_rate_constant_value("ox3", temperature_k=temperature_k)
-        * c_cualo2_mol_per_m3
-        * c_al2o3_mol_per_m3
+        * max(c_cualo2_mol_per_m3, 0.0)
+        * max(c_al2o3_mol_per_m3, 0.0)
         * math.sqrt(max(p_o2_bar, 0.0))
+        / max(solid_fraction, 1.0e-12)
     )
 
 
@@ -233,9 +240,24 @@ def _pressure_bar_expression(pressure) -> Any:
     return pressure / Constant(PRESSURE_PA_PER_BAR * Pa)
 
 
+def _positive_concentration_expression(concentration):
+    return Constant(0.5) * (
+        concentration
+        + Sqrt(concentration**2 + Constant(MIN_SOLID_CONCENTRATION_MOL_PER_M3**2))
+    )
+
+
 def _solid_concentration_expression(context: KineticsContext, species_id: str):
     species_idx = context.solid_index(species_id)
-    return context.model.c_sol(species_idx, context.idx_cell) / Constant(1.0 * mol / m**3)
+    concentration = context.model.c_sol(species_idx, context.idx_cell) / Constant(1.0 * mol / m**3)
+    return _positive_concentration_expression(concentration)
+
+
+def _optional_solid_concentration_expression(context: KineticsContext, species_id: str):
+    try:
+        return _solid_concentration_expression(context, species_id)
+    except KeyError:
+        return Constant(0.0)
 
 
 def _partial_pressure_bar_expression(context: KineticsContext, species_id: str):
@@ -243,6 +265,18 @@ def _partial_pressure_bar_expression(context: KineticsContext, species_id: str):
     return _pressure_bar_expression(context.model.P(context.idx_cell)) * context.model.y_gas(
         species_idx, context.idx_cell
     )
+
+
+def _optional_partial_pressure_bar_expression(context: KineticsContext, species_id: str):
+    try:
+        return _partial_pressure_bar_expression(context, species_id)
+    except KeyError:
+        return Constant(0.0)
+
+
+def _solid_fraction_inverse_expression(context: KineticsContext):
+    solid_fraction = context.model.solfrac(context.idx_cell)
+    return Constant(1.0) / (solid_fraction + Constant(1.0e-12))
 
 
 def _sqrt_bar_expression(bar_pressure_expression):
@@ -273,14 +307,14 @@ def _rate_constant_expression(
 def _cu_al2o3_terms(context: KineticsContext) -> CuAl2O3Terms:
     return CuAl2O3Terms(
         temperature_k=_temperature_k_expression(context.model.T(context.idx_cell)),
-        p_h2_bar=_partial_pressure_bar_expression(context, "H2"),
-        p_o2_bar=_partial_pressure_bar_expression(context, "O2"),
-        c_cuo_mol_per_m3=_solid_concentration_expression(context, "CuO"),
-        c_cu2o_mol_per_m3=_solid_concentration_expression(context, "Cu2O"),
-        c_cu_mol_per_m3=_solid_concentration_expression(context, "Cu"),
-        c_cual2o4_mol_per_m3=_solid_concentration_expression(context, "CuAl2O4"),
-        c_cualo2_mol_per_m3=_solid_concentration_expression(context, "CuAlO2"),
-        c_al2o3_mol_per_m3=_solid_concentration_expression(context, "Al2O3"),
+        p_h2_bar=_optional_partial_pressure_bar_expression(context, "H2"),
+        p_o2_bar=_optional_partial_pressure_bar_expression(context, "O2"),
+        c_cuo_mol_per_m3=_optional_solid_concentration_expression(context, "CuO"),
+        c_cu2o_mol_per_m3=_optional_solid_concentration_expression(context, "Cu2O"),
+        c_cu_mol_per_m3=_optional_solid_concentration_expression(context, "Cu"),
+        c_cual2o4_mol_per_m3=_optional_solid_concentration_expression(context, "CuAl2O4"),
+        c_cualo2_mol_per_m3=_optional_solid_concentration_expression(context, "CuAlO2"),
+        c_al2o3_mol_per_m3=_optional_solid_concentration_expression(context, "Al2O3"),
     )
 
 
@@ -342,6 +376,7 @@ def san_pio_cu_al2o3_sp2_ph(context: KineticsContext):
         * terms.c_cual2o4_mol_per_m3
         * _gas_availability_expression(terms.p_h2_bar)
     )
+    
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
@@ -357,9 +392,8 @@ def san_pio_cu_al2o3_sp3_ph(context: KineticsContext):
         * terms.c_cualo2_mol_per_m3
         * _gas_availability_expression(terms.p_h2_bar)
     )
+    
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
-
-
 
 @register_kinetics_hook("san_pio_cu_al2o3_ox1_ph")
 def san_pio_cu_al2o3_ox1_ph(context: KineticsContext):
@@ -387,6 +421,7 @@ def san_pio_cu_al2o3_ox2_ph(context: KineticsContext):
         )
         * terms.c_cuo_mol_per_m3
         * terms.c_al2o3_mol_per_m3
+        * _solid_fraction_inverse_expression(context)
     )
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
@@ -403,6 +438,7 @@ def san_pio_cu_al2o3_ox3_ph(context: KineticsContext):
         * terms.c_cualo2_mol_per_m3
         * terms.c_al2o3_mol_per_m3
         * _sqrt_bar_expression(terms.p_o2_bar)
+        * _solid_fraction_inverse_expression(context)
     )
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
