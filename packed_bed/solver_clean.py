@@ -3,6 +3,7 @@ This file is a general working model of a packed-bed chemical looping reactor. T
 and program control profiles. Reactions are added in external submodules and are accessed via registered hooks.
 """
 
+import os
 import math
 from dataclasses import dataclass
 
@@ -18,6 +19,7 @@ from .config import (
     ScalarProgram,
     SolidConfig,
     VectorProgram,
+    SolverConfig,
 )
 from .kinetics import KineticsContext, resolve_kinetics_hooks
 from .reactions import ReactionNetwork, build_reaction_network
@@ -940,27 +942,73 @@ class SimulationAssembly:
     run_bundle: RunBundle
     simulation: simBed
 
+def configure_solver_threads(threads: int):
+    if threads <= 0:
+        return
 
-def configure_evaluation_mode():
+    value = str(threads)
+    os.environ["MKL_NUM_THREADS"] = value
+    os.environ["OMP_NUM_THREADS"] = value
+    os.environ["MKL_DYNAMIC"] = "FALSE"
+    os.environ["OMP_DYNAMIC"] = "FALSE"
+    os.environ.setdefault("MKL_THREADING_LAYER", "GNU")
+
+def configure_evaluation_mode(threads: int):
     cfg = daeGetConfig()
     cfg.SetString("daetools.core.equations.evaluationMode", "computeStack_OpenMP")
-    cfg.SetInteger("daetools.core.equations.computeStack_OpenMP.numThreads", 0)
+    cfg.SetInteger("daetools.core.equations.computeStack_OpenMP.numThreads", threads)
 
 
-def _create_sparse_linear_solver():
-    
-    from daetools.solvers.trilinos import pyTrilinos
-    return pyTrilinos.daeCreateTrilinosSolver("Amesos_Klu", "")
+def _create_linear_solver(name: str):
+    if name == "trilinos_klu":
+        from daetools.solvers.trilinos import pyTrilinos
+        return pyTrilinos.daeCreateTrilinosSolver("Amesos_Klu", "")
+
+    if name == "trilinos_umfpack":
+        from daetools.solvers.trilinos import pyTrilinos
+        return pyTrilinos.daeCreateTrilinosSolver("Amesos_Umfpack", "")
+
+    if name == "trilinos_lapack":
+        from daetools.solvers.trilinos import pyTrilinos
+        return pyTrilinos.daeCreateTrilinosSolver("Amesos_Lapack", "")
+
+    if name == "trilinos_aztecoo":
+        from daetools.solvers.trilinos import pyTrilinos
+        return pyTrilinos.daeCreateTrilinosSolver("AztecOO", "ILUT")
+
+    if name == "trilinos_aztecoo_ifpack":
+        from daetools.solvers.trilinos import pyTrilinos
+        return pyTrilinos.daeCreateTrilinosSolver("AztecOO_Ifpack", "ILU")
+
+    if name == "trilinos_aztecoo_ml":
+        from daetools.solvers.trilinos import pyTrilinos
+        return pyTrilinos.daeCreateTrilinosSolver("AztecOO_ML", "DD-ML")
+
+    if name == "trilinos_superlu":
+        from daetools.solvers.trilinos import pyTrilinos
+        return pyTrilinos.daeCreateTrilinosSolver("Amesos_Superlu", "")
+
+    if name == "superlu":
+        from daetools.solvers.superlu import pySuperLU
+        return pySuperLU.daeCreateSuperLUSolver()
+
+    if name == "superlu_mt":
+        from daetools.solvers.superlu_mt import pySuperLU_MT
+        return pySuperLU_MT.daeCreateSuperLUSolver()
+
+    if name == "intel_pardiso":
+        from daetools.solvers.intel_pardiso import pyIntelPardiso
+        return pyIntelPardiso.daeCreateIntelPardisoSolver()
+
+    raise ValueError(f"Unsupported linear solver: {name}")
 
 
 
 
-def build_idas_solver(relative_tolerance=1e-6):
+def build_idas_solver(config: SolverConfig):
     solver = daeIDAS()
-    solver.RelativeTolerance = relative_tolerance
-    linear_solver = _create_sparse_linear_solver()
-    if linear_solver is not None:
-        solver.SetLASolver(linear_solver)
+    solver.RelativeTolerance = config.relative_tolerance
+    solver.SetLASolver(_create_linear_solver(config.name))
     return solver
 
 
@@ -1075,7 +1123,10 @@ def run_assembled_simulation(
     data_reporter=None,
     after_initialize=None,
 ):
-    configure_evaluation_mode()
+    solver_config = assembly.run_bundle.run.solver
+    configure_solver_threads(solver_config.threads)
+    configure_evaluation_mode(solver_config.threads)
+    
     simulation = assembly.simulation
     if report_ids is None:
         report_ids = _requested_report_ids(assembly)
@@ -1089,7 +1140,7 @@ def run_assembled_simulation(
     simulation.ReportingInterval = assembly.run_bundle.run.reporting_interval_s
     simulation.TimeHorizon = assembly.run_bundle.run.time_horizon_s
 
-    solver = build_idas_solver(relative_tolerance=assembly.run_bundle.run.solver.relative_tolerance)
+    solver = build_idas_solver(solver_config)
     reporter = data_reporter if data_reporter is not None else daeNoOpDataReporter()
     if data_reporter is not None and hasattr(reporter, "IsConnected") and not reporter.IsConnected():
         process_name = assembly.run_bundle.run.system_name

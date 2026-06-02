@@ -585,6 +585,18 @@ class ModelConfig(FrozenConfigModel):
 
 
 class SolverConfig(FrozenConfigModel):
+    name: Literal[
+        "trilinos_klu",
+        "trilinos_umfpack",
+        "trilinos_lapack",
+        "trilinos_aztecoo",
+        "trilinos_aztecoo_ifpack",
+        "trilinos_aztecoo_ml",
+        "superlu",
+        "superlu_mt",
+        "intel_pardiso",
+    ] = "trilinos_klu"
+    threads: int = Field(default=0, ge=0)
     relative_tolerance: PositiveFloat
 
 

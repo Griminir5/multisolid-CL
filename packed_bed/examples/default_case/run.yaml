@@ -3,8 +3,8 @@ references:
   program_file: program.yaml
   solids_file: solids.yaml
 simulation:
-  system_name: FullNickelCase
-  time_horizon_s: 14400.0
+  system_name: DefaultCase
+  time_horizon_s: 1000.0
   reporting_interval_s: 1.0
   repeat_program: true
   mass_scheme: weno3
@@ -17,6 +17,8 @@ model:
   ambient_temperature_k: 873.15
   heat_transfer_coefficient_w_per_m2_k: 0.0
 solver:
+  name: intel_pardiso
+  threads: 0
   relative_tolerance: 1.0e-5
 outputs:
   directory: output
