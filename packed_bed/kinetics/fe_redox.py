@@ -216,12 +216,11 @@ def fe2o3_h2_reduction_rate_value(
     x_fe2o3: float,
 ) -> float:
     x_safe = min(max(x_fe2o3, 0.0), 1.0 - 1.0e-12)
+    one_minus_x = 1.0 - x_safe
     denominator = (
-        1.0 / (
-            h2_reaction_constant_value("Fe2O3", temperature_k=temperature_k) * (1.0 - x_safe) ** (-2.0 / 3.0)
-        )
+        (1.0 / h2_reaction_constant_value("Fe2O3", temperature_k=temperature_k)) * one_minus_x ** (-2.0 / 3.0)
         + AVERAGE_GRAIN_RADIUS_M / h2_diffusivity_value("Fe2O3", temperature_k=temperature_k)
-        * ((1.0 - x_safe) ** (-1.0 / 3.0) - 1.0)
+        * (one_minus_x ** (-1.0 / 3.0) - 1.0)
     )
     driving_force = c_h2_mol_per_m3
     return (
@@ -243,12 +242,11 @@ def fe3o4_h2_reduction_rate_value(
     x_fe3o4: float,
 ) -> float:
     x_safe = min(max(x_fe3o4, 0.0), 1.0 - 1.0e-12)
+    one_minus_x = 1.0 - x_safe
     denominator = (
-        1.0 / (
-            h2_reaction_constant_value("Fe3O4", temperature_k=temperature_k) * (1.0 - x_safe) ** (-2.0 / 3.0)
-        )
+        (1.0 / h2_reaction_constant_value("Fe3O4", temperature_k=temperature_k)) * one_minus_x ** (-2.0 / 3.0)
         + AVERAGE_GRAIN_RADIUS_M / h2_diffusivity_value("Fe3O4", temperature_k=temperature_k)
-        * ((1.0 - x_safe) ** (-1.0 / 3.0) - 1.0)
+        * (one_minus_x ** (-1.0 / 3.0) - 1.0)
     )
     driving_force = c_h2_mol_per_m3 - c_h2o_mol_per_m3 / equilibrium_constant_h2_fe3o4_to_feo_value(temperature_k)
     return (
@@ -270,12 +268,11 @@ def feo_h2_reduction_rate_value(
     x_feo: float,
 ) -> float:
     x_safe = min(max(x_feo, 0.0), 1.0 - 1.0e-12)
+    one_minus_x = 1.0 - x_safe
     denominator = (
-        1.0 / (
-            h2_reaction_constant_value("FeO", temperature_k=temperature_k) * (1.0 - x_safe) ** (-2.0 / 3.0)
-        )
+        (1.0 / h2_reaction_constant_value("FeO", temperature_k=temperature_k)) * one_minus_x ** (-2.0 / 3.0)
         + AVERAGE_GRAIN_RADIUS_M / h2_diffusivity_value("FeO", temperature_k=temperature_k)
-        * ((1.0 - x_safe) ** (-1.0 / 3.0) - 1.0)
+        * (one_minus_x ** (-1.0 / 3.0) - 1.0)
     )
     driving_force = c_h2_mol_per_m3 - c_h2o_mol_per_m3 / equilibrium_constant_h2_feo_to_fe_value(temperature_k)
     return (
@@ -411,12 +408,14 @@ def _optional_solid_concentration_expression(context: KineticsContext, species_i
         species_idx = context.solid_index(species_id)
     except Exception:
         return Constant(0.0)
-    return context.model.c_sol(species_idx, context.idx_cell) / Constant(1.0 * mol / m**3)
+    concentration = context.model.c_sol(species_idx, context.idx_cell) / Constant(1.0 * mol / m**3)
+    return _positive_part_expression(concentration)
 
 
 def _gas_concentration_expression(context: KineticsContext, species_id: str):
     species_idx = context.gas_index(species_id)
-    return context.model.c_gas(species_idx, context.idx_cell) / Constant(1.0 * mol / m**3)
+    concentration = context.model.c_gas(species_idx, context.idx_cell) / Constant(1.0 * mol / m**3)
+    return _positive_part_expression(concentration)
 
 
 def _partial_pressure_bar_expression(context: KineticsContext, species_id: str):
@@ -445,15 +444,12 @@ def _pow_minus_one_third(one_minus_x):
 
 
 def _oc_mass_density_expression(context: KineticsContext):
-    total = (
+    return (
         _optional_solid_concentration_expression(context, "Fe2O3") * Constant(FE2O3_MW_KG_PER_MOL)
         + _optional_solid_concentration_expression(context, "Fe3O4") * Constant(FE3O4_MW_KG_PER_MOL)
         + _optional_solid_concentration_expression(context, "FeO") * Constant(FEO_MW_KG_PER_MOL)
         + _optional_solid_concentration_expression(context, "Fe") * Constant(FE_MW_KG_PER_MOL)
     )
-    if HAS_MGAL2O4:
-        total = total + _optional_solid_concentration_expression(context, "MgAl2O4") * Constant(MGAL2O4_MW_KG_PER_MOL)
-    return total
 
 
 def _fe_conversions(context: KineticsContext):
@@ -503,14 +499,12 @@ def he_fe2o3_h2_reduction(context: KineticsContext):
 
     denominator = (
         Constant(1.0)
-        / (
-            _arrhenius_expression(
-                H2_REDUCTION_PREEXPONENTIALS["Fe2O3"],
-                H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL["Fe2O3"],
-                terms.temperature_k,
-            )
-            * _pow_minus_two_thirds(one_minus_x)
+        / _arrhenius_expression(
+            H2_REDUCTION_PREEXPONENTIALS["Fe2O3"],
+            H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL["Fe2O3"],
+            terms.temperature_k,
         )
+        * _pow_minus_two_thirds(one_minus_x)
         + Constant(AVERAGE_GRAIN_RADIUS_M)
         / _arrhenius_expression(
             H2_DIFFUSIVITY_PREEXPONENTIALS["Fe2O3"],
@@ -539,14 +533,12 @@ def he_fe3o4_h2_reduction(context: KineticsContext):
 
     denominator = (
         Constant(1.0)
-        / (
-            _arrhenius_expression(
-                H2_REDUCTION_PREEXPONENTIALS["Fe3O4"],
-                H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL["Fe3O4"],
-                terms.temperature_k,
-            )
-            * _pow_minus_two_thirds(one_minus_x)
+        / _arrhenius_expression(
+            H2_REDUCTION_PREEXPONENTIALS["Fe3O4"],
+            H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL["Fe3O4"],
+            terms.temperature_k,
         )
+        * _pow_minus_two_thirds(one_minus_x)
         + Constant(AVERAGE_GRAIN_RADIUS_M)
         / _arrhenius_expression(
             H2_DIFFUSIVITY_PREEXPONENTIALS["Fe3O4"],
@@ -575,14 +567,12 @@ def he_feo_h2_reduction(context: KineticsContext):
 
     denominator = (
         Constant(1.0)
-        / (
-            _arrhenius_expression(
-                H2_REDUCTION_PREEXPONENTIALS["FeO"],
-                H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL["FeO"],
-                terms.temperature_k,
-            )
-            * _pow_minus_two_thirds(one_minus_x)
+        / _arrhenius_expression(
+            H2_REDUCTION_PREEXPONENTIALS["FeO"],
+            H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL["FeO"],
+            terms.temperature_k,
         )
+        * _pow_minus_two_thirds(one_minus_x)
         + Constant(AVERAGE_GRAIN_RADIUS_M)
         / _arrhenius_expression(
             H2_DIFFUSIVITY_PREEXPONENTIALS["FeO"],

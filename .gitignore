@@ -7,6 +7,13 @@ Barin_Extraction/Thermochemical Data of Pure Substances - 1995 - Barin.pdf
 
 .vscode/settings.json
 packed_bed/examples/
+.vendor/
+.ilmenite_validation_tmp/
 
 OpenCL/
 OpenCS-2.6.0/
+.gitignore
+tmp_ni_validation_pages/
+untracked/*
+tmp_ni_paper_pages/
+tmp_ni_validation_pngs/

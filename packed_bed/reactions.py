@@ -236,6 +236,53 @@ REACTION_CATALOG = {
         reversible=False,
         notes="Implemented with corrected Medrano shrinking-core redox kinetics.",
     ),
+    "ni_reduction_h2_ni_redox": ReactionDefinition(
+        id="ni_reduction_h2_ni_redox",
+        name="NiO reduction by H2 (Ni redox)",
+        phase="gas_solid",
+        stoichiometry={
+            "H2": -1.0,
+            "NiO": -1.0,
+            "Ni": 1.0,
+            "H2O": 1.0,
+        },
+        required_species=("H2", "H2O", "Ni", "NiO"),
+        source_reference="packed_bed.kinetics.ni_redox",
+        kinetics_hook="ni_redox_reduction_h2",
+        reversible=False,
+        notes="Ni redox case hook implemented in packed_bed.kinetics.ni_redox.",
+    ),
+    "ni_reduction_co_ni_redox": ReactionDefinition(
+        id="ni_reduction_co_ni_redox",
+        name="NiO reduction by CO (Ni redox)",
+        phase="gas_solid",
+        stoichiometry={
+            "CO": -1.0,
+            "NiO": -1.0,
+            "Ni": 1.0,
+            "CO2": 1.0,
+        },
+        required_species=("CO", "CO2", "Ni", "NiO"),
+        source_reference="packed_bed.kinetics.ni_redox",
+        kinetics_hook="ni_redox_reduction_co",
+        reversible=False,
+        notes="Ni redox case hook implemented in packed_bed.kinetics.ni_redox.",
+    ),
+    "ni_oxidation_o2_ni_redox": ReactionDefinition(
+        id="ni_oxidation_o2_ni_redox",
+        name="Ni oxidation by O2 (Ni redox)",
+        phase="gas_solid",
+        stoichiometry={
+            "O2": -0.5,
+            "Ni": -1.0,
+            "NiO": 1.0,
+        },
+        required_species=("O2", "Ni", "NiO"),
+        source_reference="packed_bed.kinetics.ni_redox",
+        kinetics_hook="ni_redox_oxidation_o2",
+        reversible=False,
+        notes="Ni redox case hook implemented in packed_bed.kinetics.ni_redox.",
+    ),
     "ni_reduction_h2_medrano_an": ReactionDefinition(
         id="ni_reduction_h2_medrano_an",
         name="NiO reduction by H2 (Medrano AN)",
@@ -367,7 +414,7 @@ REACTION_CATALOG = {
         source_reference="Andrew Wright, Chemical Looping Reactor Modelling – 2D, Technical Report",
         notes="This appears to be different from the actual paper by Numaguchi and Kikuchi",
     ),
-        "cuo_h2_reduction_san_pio": ReactionDefinition(
+    "cuo_h2_reduction_san_pio": ReactionDefinition(
         id="cuo_h2_reduction_san_pio",
         name="CuO reduction to Cu2O by H2",
         phase="gas_solid",
@@ -501,7 +548,7 @@ REACTION_CATALOG = {
         source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
         notes="Pseudo-homogeneous oxidation reaction rox3 = kox3 * C_CuAlO2 * C_Al2O3 * P_O2^0.5 for CuO/Al2O3.",
     ),
-        "fe2o3_h2_reduction_he_2023": ReactionDefinition(
+    "fe2o3_h2_reduction_he_2023": ReactionDefinition(
         id="fe2o3_h2_reduction_he_2023",
         name="Fe2O3 reduction to Fe3O4 by H2",
         phase="gas_solid",
