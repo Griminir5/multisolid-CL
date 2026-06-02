@@ -3,9 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
-from . import cu_redox
-
-from . import cu_redox
 
 try:
     from ..reactions import ReactionNetwork
@@ -88,7 +85,7 @@ def resolve_kinetics_hooks(
 
 
 if __name__ != "kinetics":
-    from . import coper_redox, fe_redox, medrano, medrano_an, numaguchi_an, xu_froment  # noqa: E402,F401
+    from . import cu_redox, fe_redox, ni_redox, ilmenite_redox, medrano, medrano_an, numaguchi_an, xu_froment  # noqa: E402,F401
 
 
 __all__ = [
