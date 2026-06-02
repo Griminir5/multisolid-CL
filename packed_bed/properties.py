@@ -591,49 +591,6 @@ PROPERTY_REGISTRY = PropertyRegistry(
                 a3=1.24389558e-07,
             ),
         ),
-        "TiO2": SpeciesPropertyRecord(
-            name="Titanium Dioxide",
-            phase="solid",
-            mw=79.866e-3,
-            enthalpy=CpCubicMolar(
-                # Approximate rutile-basis thermochemistry used to keep ilmenite
-                # species energy-compatible with the solver. The ilmenite kinetics
-                # paper does not tabulate standalone TiO2 Cp correlations.
-                h_form_ref=-944000.0,
-                a0=5.5000e01,
-                a1=0.0,
-                a2=0.0,
-                a3=0.0,
-            ),
-        ),
-        "Fe2TiO4": SpeciesPropertyRecord(
-            name="Iron Titanate(II) Equivalent",
-            phase="solid",
-            mw=223.554e-3,
-            enthalpy=CpCubicMolar(
-                # Stored on the same equivalent basis used by the Ortiz et al.
-                # integrated-rate model: Fe2TiO4 ~ 2 FeO + TiO2.
-                h_form_ref=-1488088.0,
-                a0=1.550307002e02,
-                a1=3.660640800e-02,
-                a2=-1.710199240e-05,
-                a3=4.264210500e-09,
-            ),
-        ),
-        "Fe2TiO5": SpeciesPropertyRecord(
-            name="Pseudobrookite Equivalent",
-            phase="solid",
-            mw=239.553e-3,
-            enthalpy=CpCubicMolar(
-                # Stored on the same equivalent basis used by the Ortiz et al.
-                # integrated-rate model: Fe2TiO5 ~ Fe2O3 + TiO2.
-                h_form_ref=-1768248.0,
-                a0=1.517074082e02,
-                a1=2.515219810e-01,
-                a2=-3.287578990e-04,
-                a3=1.243895580e-07,
-            ),
-        ),
     }
 )
 

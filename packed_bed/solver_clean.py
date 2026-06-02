@@ -3,8 +3,6 @@ This file is a general working model of a packed-bed chemical looping reactor. T
 and program control profiles. Reactions are added in external submodules and are accessed via registered hooks.
 """
 
-import contextlib
-import io
 import math
 from dataclasses import dataclass
 
@@ -130,13 +128,6 @@ class CLBed_mass(daeModel):
 
         self.L_bed = daeParameter("Bed_length", m, self, "Length of the reactor bed")
         self.R_bed = daeParameter("Bed_radius", m, self, "Radius of the reactor bed")
-        self.h_wall = daeParameter(
-            "Wall_heat_transfer_coefficient",
-            J / (s * m**2 * K),
-            self,
-            "External wall-to-bed heat transfer coefficient",
-        )
-        self.T_wall = daeParameter("Wall_temperature", K, self, "External wall temperature")
 
         self.x_centers = daeDomain("Cell_centers", self, m, "Axial cell centers domain over the packed bed")
         self.x_faces = daeDomain("Cell_faces", self, m, "Axial cell faces domain over the packed bed")
@@ -580,13 +571,24 @@ class CLBed_mass(daeModel):
         heat_loss_rate_total = Constant(0.0 * J / s)
         for idx_cell in range(Nc):
             dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
-            wall_heat_source = Constant(2.0) * self.h_wall() * (self.T_wall() - self.T(idx_cell)) / self.R_bed()
+            heat_loss_density = (
+                (self.T(idx_cell) - self.T_env()) * (2.0 * self.U_eff()) / self.R_bed()
+            )
 
             eq = self.CreateEquation(f"energy_balance_cell_{idx_cell}")
             eq.Residual = dt(self.h_cell(idx_cell)) + (
                 Sum(self.J_gas_face.array("*", idx_cell + 1)) - Sum(self.J_gas_face.array("*", idx_cell))
-            ) / dx - wall_heat_source
+            ) / dx + heat_loss_density
 
+            gas_mass_density = Constant(0.0 * kg / m**3)
+            for gas_idx in range(Ng):
+                gas_mass_density = gas_mass_density + self.c_gas(gas_idx, idx_cell) * gas_molecular_weights[gas_idx]
+
+            solid_mass_density = Constant(0.0 * kg / m**3)
+            for sol_idx in range(Ns):
+                solid_mass_density = solid_mass_density + self.c_sol(sol_idx, idx_cell) * solid_molecular_weights[sol_idx]
+
+            mass_bed_total = mass_bed_total + cross_section_area * (gas_mass_density + solid_mass_density) * dx
             heat_bed_total = heat_bed_total + cross_section_area * self.h_cell(idx_cell) * dx
             heat_loss_rate_total = heat_loss_rate_total + cross_section_area * heat_loss_density * dx
 
@@ -693,8 +695,6 @@ class simBed(daeSimulation):
         self.model.pi.SetValue(3.14159)
         self.model.L_bed.SetValue(self.model_config.bed_length_m * m)
         self.model.R_bed.SetValue(self.model_config.bed_radius_m * m)
-        self.model.h_wall.SetValue(self.model_config.wall_heat_transfer_coefficient_w_m2_k * J / (s * m**2 * K))
-        self.model.T_wall.SetValue(self.model_config.wall_temperature_k * K)
 
         self.model.T_env.SetValue(self.model_config.ambient_temperature_k * K)
         self.model.U_eff.SetValue(
@@ -1072,7 +1072,8 @@ def run_assembled_simulation(
     report_ids=None,
     include_plot_variables=False,
     include_benchmark_snapshot=False,
-    quiet_solver_output=True,
+    data_reporter=None,
+    after_initialize=None,
 ):
     configure_evaluation_mode()
     simulation = assembly.simulation
@@ -1098,19 +1099,32 @@ def run_assembled_simulation(
     log = daePythonStdOutLog()
     log.PrintProgress = False
 
-    redirect_context = (
-        contextlib.redirect_stdout(io.StringIO()),
-        contextlib.redirect_stderr(io.StringIO()),
-    )
-    if quiet_solver_output:
-        with redirect_context[0], redirect_context[1]:
-            simulation.Initialize(solver, reporter, log)
-            simulation.SolveInitial()
-            simulation.Run()
-    else:
+    initialized = False
+    try:
         simulation.Initialize(solver, reporter, log)
+        initialized = True
+        if after_initialize is not None:
+            after_initialize(simulation, solver)
         simulation.SolveInitial()
         simulation.Run()
+    finally:
+        if initialized:
+            simulation.Finalize()
+
+    if (
+        data_reporter is not None
+        and hasattr(reporter, "write_outputs")
+        and not getattr(reporter, "_written", False)
+        and getattr(reporter, "write_error", None) is None
+    ):
+        try:
+            reporter.write_outputs()
+        except Exception as exc:
+            raise RuntimeError("Data reporter failed while writing simulation reports.") from exc
+
+    write_error = getattr(reporter, "write_error", None)
+    if write_error is not None:
+        raise RuntimeError("Data reporter failed while writing simulation reports.") from write_error
     return reporter
 
 
