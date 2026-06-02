@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
+from . import cu_redox
+
 try:
     from ..reactions import ReactionNetwork
 except ImportError:  # pragma: no cover - supports unittest discovery with -s packed_bed

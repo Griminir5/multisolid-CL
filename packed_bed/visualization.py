@@ -13,9 +13,9 @@ import numpy as np
 
 from .config import DEFAULT_SMOOTH_RAMP_WIDTH_S, RunBundle
 from .solid_profiles import (
+    build_axial_grid,
     build_cell_scalar_profile,
     build_face_scalar_profile,
-    build_uniform_axial_grid,
     convert_solid_profile_to_bed_volume,
     gas_fraction_from_voidages,
     solid_fraction_from_voidages,
@@ -428,9 +428,10 @@ def render_initial_solid_profile(run_bundle: RunBundle, output_dir) -> dict[str,
     output_dir.mkdir(parents=True, exist_ok=True)
 
     zones = run_bundle.solids.initial_profile_zones
-    cell_centers, face_positions = build_uniform_axial_grid(
+    cell_centers, face_positions = build_axial_grid(
         run_bundle.run.model.bed_length_m,
         run_bundle.run.model.axial_cells,
+        run_bundle.run.model.axial_face_positions_m,
     )
     authored_edges = zone_edges(run_bundle.solids)
     e_b = build_cell_scalar_profile(run_bundle.solids, cell_centers, "e_b")

@@ -27,7 +27,9 @@ class RunResultPlotData:
     gas_species: tuple[str, ...]
     inlet_composition: np.ndarray
     outlet_composition: np.ndarray
+    inlet_pressure_pa: np.ndarray
     outlet_temperature_k: np.ndarray
+    pressure_profile_pa: np.ndarray
     outlet_pressure_pa: np.ndarray
     pressure_drop_pa: np.ndarray
     outlet_flowrate_mol_s: np.ndarray
@@ -422,7 +424,9 @@ def extract_run_result_plot_data(run_result: RunResult) -> RunResultPlotData:
         gas_species=gas_species,
         inlet_composition=inlet_composition,
         outlet_composition=outlet_composition,
+        inlet_pressure_pa=inlet_pressure_pa,
         outlet_temperature_k=temperature_profile_k[:, -1],
+        pressure_profile_pa=pressure_profile_pa,
         outlet_pressure_pa=outlet_pressure_pa,
         pressure_drop_pa=pressure_drop_pa,
         outlet_flowrate_mol_s=outlet_flowrate_mol_s,
@@ -504,7 +508,11 @@ def render_outlet_conditions_plot(
     image_format: str = "svg",
 ) -> Path:
     output_path = Path(output_dir) / f"outlet_conditions_vs_time.{image_format}"
-    figure, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+    figure, axes = plt.subplots(4, 1, figsize=(12, 12), sharex=True)
+
+    inlet_pressure_pa = np.asarray(plot_data.inlet_pressure_pa, dtype=float)
+    outlet_pressure_pa = np.asarray(plot_data.outlet_pressure_pa, dtype=float)
+    pressure_drop_pa = inlet_pressure_pa - outlet_pressure_pa
 
     _plot_time_series_axis(
         axes[0],

@@ -224,12 +224,7 @@ def fe2o3_h2_reduction_rate_value(
     )
     driving_force = c_h2_mol_per_m3
     return (
-        3.0
-        / (AVERAGE_GRAIN_RADIUS_M * MOLAR_DENSITY_FE2O3_MOL_PER_M3)
-        * H2_REDUCTION_A_FACTORS["Fe2O3"]
-        * c_fe2o3_mol_per_m3
-        * driving_force
-        / denominator
+        (3.0/(AVERAGE_GRAIN_RADIUS_M * MOLAR_DENSITY_FE2O3_MOL_PER_M3))*(H2_REDUCTION_A_FACTORS["Fe2O3"]*c_fe2o3_mol_per_m3*driving_force / denominator)
     )
 
 
@@ -293,10 +288,11 @@ def fe2o3_co_reduction_rate_value(
     c_co2_mol_per_m3: float,
     x_fe2o3: float,
 ) -> float:
+    driving_force = c_co_mol_per_m3 - c_co2_mol_per_m3 / equilibrium_constant_co_fe3o4_to_feo_value(temperature_k)
     return (
         oc_mass_density_kg_per_m3
         * co_reaction_constant_value("Fe2O3", temperature_k=temperature_k)
-        * max(c_co_mol_per_m3, 0.0)
+        * max(driving_force, 0.0)
         * (1.0 - min(max(x_fe2o3, 0.0), 1.0)) ** 0.4
     )
 
@@ -595,6 +591,8 @@ def he_feo_h2_reduction(context: KineticsContext):
 @register_kinetics_hook("he_fe2o3_co_reduction")
 def he_fe2o3_co_reduction(context: KineticsContext):
     terms = _fe_terms(context)
+    keq = _equilibrium_constant_expression(*CO_EQUILIBRIUM_COEFFICIENTS["Fe3O4_to_FeO"], terms.temperature_k)
+    driving_force = _positive_part_expression(terms.c_co_mol_per_m3 - terms.c_co2_mol_per_m3 / keq)
 
     rate_expression = (
         terms.oc_mass_density_kg_per_m3
@@ -603,7 +601,7 @@ def he_fe2o3_co_reduction(context: KineticsContext):
             CO_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL["Fe2O3"],
             terms.temperature_k,
         )
-        * _positive_part_expression(terms.c_co_mol_per_m3)
+        * driving_force
         * _safe_one_minus_conversion(terms.x_fe2o3) ** Constant(0.4)
     )
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression

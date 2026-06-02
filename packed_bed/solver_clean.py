@@ -3,6 +3,8 @@ This file is a general working model of a packed-bed chemical looping reactor. T
 and program control profiles. Reactions are added in external submodules and are accessed via registered hooks.
 """
 
+import contextlib
+import io
 import math
 from dataclasses import dataclass
 
@@ -128,6 +130,13 @@ class CLBed_mass(daeModel):
 
         self.L_bed = daeParameter("Bed_length", m, self, "Length of the reactor bed")
         self.R_bed = daeParameter("Bed_radius", m, self, "Radius of the reactor bed")
+        self.h_wall = daeParameter(
+            "Wall_heat_transfer_coefficient",
+            J / (s * m**2 * K),
+            self,
+            "External wall-to-bed heat transfer coefficient",
+        )
+        self.T_wall = daeParameter("Wall_temperature", K, self, "External wall temperature")
 
         self.x_centers = daeDomain("Cell_centers", self, m, "Axial cell centers domain over the packed bed")
         self.x_faces = daeDomain("Cell_faces", self, m, "Axial cell faces domain over the packed bed")
@@ -571,24 +580,12 @@ class CLBed_mass(daeModel):
         heat_loss_rate_total = Constant(0.0 * J / s)
         for idx_cell in range(Nc):
             dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
-            heat_loss_density = (
-                (self.T(idx_cell) - self.T_env()) * (2.0 * self.U_eff()) / self.R_bed()
-            )
 
             eq = self.CreateEquation(f"energy_balance_cell_{idx_cell}")
             eq.Residual = dt(self.h_cell(idx_cell)) + (
                 Sum(self.J_gas_face.array("*", idx_cell + 1)) - Sum(self.J_gas_face.array("*", idx_cell))
-            ) / dx + heat_loss_density
+            ) / dx
 
-            gas_mass_density = Constant(0.0 * kg / m**3)
-            for gas_idx in range(Ng):
-                gas_mass_density = gas_mass_density + self.c_gas(gas_idx, idx_cell) * gas_molecular_weights[gas_idx]
-
-            solid_mass_density = Constant(0.0 * kg / m**3)
-            for sol_idx in range(Ns):
-                solid_mass_density = solid_mass_density + self.c_sol(sol_idx, idx_cell) * solid_molecular_weights[sol_idx]
-
-            mass_bed_total = mass_bed_total + cross_section_area * (gas_mass_density + solid_mass_density) * dx
             heat_bed_total = heat_bed_total + cross_section_area * self.h_cell(idx_cell) * dx
             heat_loss_rate_total = heat_loss_rate_total + cross_section_area * heat_loss_density * dx
 
@@ -709,7 +706,10 @@ class simBed(daeSimulation):
         self.model.T_in_const.SetValue(inlet_temperature * K)
         self.model.P_out_const.SetValue(outlet_pressure * Pa)
         self.model.F_in_const.SetValue(inlet_flow * mol / s)
-        self.model.SetUniformAxialGrid(self.model_config.axial_cells)
+        if self.model_config.axial_face_positions_m is None:
+            self.model.SetUniformAxialGrid(self.model_config.axial_cells)
+        else:
+            self.model.SetAxialGridFromFaces(self.model_config.axial_face_positions_m)
         self.model.y_in_const.SetValues(inlet_y)
 
         center_coords = np.asarray(self.model.xval_cells.npyValues, dtype=float)
@@ -1072,8 +1072,6 @@ def run_assembled_simulation(
     report_ids=None,
     include_plot_variables=False,
     include_benchmark_snapshot=False,
-    data_reporter=None,
-    after_initialize=None,
 ):
     configure_evaluation_mode()
     simulation = assembly.simulation
@@ -1099,32 +1097,9 @@ def run_assembled_simulation(
     log = daePythonStdOutLog()
     log.PrintProgress = False
 
-    initialized = False
-    try:
-        simulation.Initialize(solver, reporter, log)
-        initialized = True
-        if after_initialize is not None:
-            after_initialize(simulation, solver)
-        simulation.SolveInitial()
-        simulation.Run()
-    finally:
-        if initialized:
-            simulation.Finalize()
-
-    if (
-        data_reporter is not None
-        and hasattr(reporter, "write_outputs")
-        and not getattr(reporter, "_written", False)
-        and getattr(reporter, "write_error", None) is None
-    ):
-        try:
-            reporter.write_outputs()
-        except Exception as exc:
-            raise RuntimeError("Data reporter failed while writing simulation reports.") from exc
-
-    write_error = getattr(reporter, "write_error", None)
-    if write_error is not None:
-        raise RuntimeError("Data reporter failed while writing simulation reports.") from write_error
+    simulation.Initialize(solver, reporter, log)
+    simulation.SolveInitial()
+    simulation.Run()
     return reporter
 
 
