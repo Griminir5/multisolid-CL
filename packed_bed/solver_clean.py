@@ -156,7 +156,7 @@ class CLBed_mass(daeModel):
         self.gasfrac = daeParameter("gasfrac", dimless, self, "Fraction of total bed volume occupied by gas", [self.x_centers])
         self.solfrac = daeParameter("solfrac", dimless, self, "Fraction of total bed volume occupied by solid", [self.x_centers])
 
-        self.c_gas = daeVariable("c_gas", molar_conc_type, self, "Concentration of gaseous component i per total bed volume", [self.N_gas, self.x_centers])
+        self.N_gas_face = daeVariable("N_gas_face", molar_flux_type, self, "Species i molar flux at cell faces", [self.N_gas, self.x_faces])
         self.c_sol = daeVariable("c_sol", molar_conc_sol_type, self, "Concentration of solid component i per total bed volume", [self.N_sol, self.x_centers])
         self.ct_gas = daeVariable("c_gas_tot", molar_conc_type, self, "Total concentration of gas per total bed volume", [self.x_centers])
         self.ct_sol = daeVariable("c_sol_tot", molar_conc_sol_type, self, "Total concentration of solid per total bed volume", [self.x_centers])
@@ -164,7 +164,7 @@ class CLBed_mass(daeModel):
         self.y_sol = None
         if self.materialize_solid_mole_fractions:
             self.y_sol = daeVariable("y_sol", molar_frac_type, self, "Molar fraction of solid component i", [self.N_sol, self.x_centers])
-        self.N_gas_face = daeVariable("N_gas_face", molar_flux_type, self, "Species i molar flux at cell faces", [self.N_gas, self.x_faces])
+        self.c_gas = daeVariable("c_gas", molar_conc_type, self, "Concentration of gaseous component i per total bed volume", [self.N_gas, self.x_centers])
 
         self.R_rxn = None
         if self.reaction_network.has_reactions:
