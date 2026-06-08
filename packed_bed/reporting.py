@@ -51,16 +51,6 @@ REPORT_VARIABLE_REGISTRY = {
         description="Gas molar flux by species and face.",
         variable_name="N_gas_face",
     ),
-    "gas_source": ReportDefinition(
-        id="gas_source",
-        description="Net gas-phase source term by species and cell center.",
-        variable_name="S_gas",
-    ),
-    "solid_source": ReportDefinition(
-        id="solid_source",
-        description="Net solid-phase source term by species and cell center.",
-        variable_name="S_sol",
-    ),
     "reaction_rate": ReportDefinition(
         id="reaction_rate",
         description="Reaction rate by reaction and cell center.",
@@ -112,22 +102,6 @@ PLOT_EXTRA_PARAMETER_NAMES = (
     "xval_cells",
 )
 
-BENCHMARK_SNAPSHOT_VARIABLE_NAMES = (
-    "temp_bed",
-    "pres_bed",
-    "y_gas",
-    "c_sol",
-    "heat_in_total",
-    "heat_out_total",
-    "heat_loss_total",
-    "heat_bed_total",
-    "mass_in_total",
-    "mass_out_total",
-    "mass_bed_total",
-    "material_in_total",
-    "material_out_total",
-    "material_bed_total",
-)
 
 
 def report_variable_names(report_ids) -> tuple[str, ...]:
@@ -144,7 +118,6 @@ def reporting_targets(
     report_ids,
     *,
     include_plot_variables: bool = False,
-    include_benchmark_snapshot: bool = False,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     expanded_report_ids = list(report_ids)
     variable_names: list[str] = []
@@ -157,9 +130,6 @@ def reporting_targets(
 
     variable_names.extend(report_variable_names(expanded_report_ids))
 
-    if include_benchmark_snapshot:
-        variable_names.extend(BENCHMARK_SNAPSHOT_VARIABLE_NAMES)
-
     return (
         tuple(dict.fromkeys(variable_names)),
         tuple(dict.fromkeys(parameter_names)),
@@ -167,7 +137,6 @@ def reporting_targets(
 
 
 __all__ = [
-    "BENCHMARK_SNAPSHOT_VARIABLE_NAMES",
     "DERIVED_REPORT_VARIABLE_NAMES",
     "PLOT_EXTRA_PARAMETER_NAMES",
     "PLOT_EXTRA_VARIABLE_NAMES",
