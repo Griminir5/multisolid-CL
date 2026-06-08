@@ -14,17 +14,7 @@ def _as_float_array(temperature):
     return np.asarray(temperature, dtype=float)
 
 
-class MolarEnthalpyCorrelation(ABC):
-    @abstractmethod
-    def dae_expression(self, temperature):
-        raise NotImplementedError
-
-    @abstractmethod
-    def value(self, temperature):
-        raise NotImplementedError
-
-
-class GasViscosityCorrelation(ABC):
+class BaseCorrelation(ABC):
     @abstractmethod
     def dae_expression(self, temperature):
         raise NotImplementedError
@@ -35,7 +25,7 @@ class GasViscosityCorrelation(ABC):
 
 
 @dataclass(frozen=True)
-class CpZerothMolar(MolarEnthalpyCorrelation):
+class CpZerothMolar(BaseCorrelation):
     t_ref: float = 298.15
     h_form_ref: float = 0.0
     a0: float = 0.0
@@ -57,7 +47,7 @@ class CpZerothMolar(MolarEnthalpyCorrelation):
 
 
 @dataclass(frozen=True)
-class CpQuadraticMolar(MolarEnthalpyCorrelation):
+class CpQuadraticMolar(BaseCorrelation):
     t_ref: float = 298.15
     h_form_ref: float = 0.0
     a0: float = 0.0
@@ -93,7 +83,7 @@ class CpQuadraticMolar(MolarEnthalpyCorrelation):
 
 
 @dataclass(frozen=True)
-class CpCubicMolar(MolarEnthalpyCorrelation):
+class CpCubicMolar(BaseCorrelation):
     t_ref: float = 298.15
     h_form_ref: float = 0.0
     a0: float = 0.0
@@ -132,7 +122,7 @@ class CpCubicMolar(MolarEnthalpyCorrelation):
 
 
 @dataclass(frozen=True)
-class CpQuarticMolar(MolarEnthalpyCorrelation):
+class CpQuarticMolar(BaseCorrelation):
     t_ref: float = 298.15
     h_form_ref: float = 0.0
     a0: float = 0.0
@@ -177,7 +167,7 @@ class CpQuarticMolar(MolarEnthalpyCorrelation):
 
 
 @dataclass(frozen=True)
-class CpShomateMolar(MolarEnthalpyCorrelation):
+class CpShomateMolar(BaseCorrelation):
     """Shomate Cp(T) basis with enthalpy anchored at h_form_ref when T = t_ref."""
 
     t_ref: float = 298.15
@@ -238,7 +228,7 @@ class CpShomateMolar(MolarEnthalpyCorrelation):
 
 
 @dataclass(frozen=True)
-class ViscosityQuadratic(GasViscosityCorrelation):
+class ViscosityQuadratic(BaseCorrelation):
     t_ref: float = 1000.0
     a0: float = 0.0
     a1: float = 0.0
@@ -264,9 +254,8 @@ class SpeciesPropertyRecord:
     name: str
     phase: str
     mw: float | None = None
-    enthalpy: MolarEnthalpyCorrelation | None = None
-    viscosity: GasViscosityCorrelation | None = None
-    gas_conductivity: object | None = None
+    enthalpy: BaseCorrelation | None = None
+    viscosity: BaseCorrelation | None = None
 
     def __post_init__(self) -> None:
         if self.phase not in {"gas", "solid"}:
@@ -274,8 +263,6 @@ class SpeciesPropertyRecord:
         if self.phase != "gas":
             if self.viscosity is not None:
                 raise ValueError(f"Gas viscosity is only valid for gas species ('{self.name}').")
-            if self.gas_conductivity is not None:
-                raise ValueError(f"Gas conductivity is only valid for gas species ('{self.name}').")
 
 
 @dataclass(frozen=True)
