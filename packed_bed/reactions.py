@@ -648,5 +648,3 @@ REACTION_CATALOG = {
         notes="Empirical oxidation law from the paper. The paper models oxidation as a single fast Fe+O2 step and handles Fe2O3/Fe3O4/FeO redistribution separately by solid-state transformation logic.",
     ),
 }
-
-DEFAULT_REACTION_CATALOG = REACTION_CATALOG
