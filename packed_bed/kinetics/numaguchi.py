@@ -223,7 +223,7 @@ def _numaguchi_terms(context: KineticsContext) -> NumaguchiTerms:
     )
 
 
-@register_kinetics_hook("numaguchi_smr_an")
+@register_kinetics_hook("numaguchi_smr")
 def numaguchi_smr(context: KineticsContext):
     terms = _numaguchi_terms(context)
     driving_force = terms.p_ch4_bar * terms.p_h2o_bar - (
@@ -237,7 +237,7 @@ def numaguchi_smr(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("numaguchi_wgs_an")
+@register_kinetics_hook("numaguchi_wgs")
 def numaguchi_wgs(context: KineticsContext):
     terms = _numaguchi_terms(context)
     driving_force = terms.p_co_bar * terms.p_h2o_bar - (
