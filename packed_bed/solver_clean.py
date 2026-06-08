@@ -1179,7 +1179,6 @@ def _set_reporting_on(
     report_ids=None,
     *,
     include_plot_variables=False,
-    include_benchmark_snapshot=False,
 ):
     if report_ids is None:
         simulation.model.SetReportingOn(True)
@@ -1188,7 +1187,6 @@ def _set_reporting_on(
     variable_names, parameter_names = reporting_targets(
         report_ids,
         include_plot_variables=include_plot_variables,
-        include_benchmark_snapshot=include_benchmark_snapshot,
     )
     simulation.model.SetReportingOn(False)
     _set_named_reporting(simulation.model, variable_names, object_registry_name="dictVariables")
@@ -1200,7 +1198,6 @@ def run_assembled_simulation(
     *,
     report_ids=None,
     include_plot_variables=False,
-    include_benchmark_snapshot=False,
     data_reporter=None,
     after_initialize=None,
 ):
@@ -1215,7 +1212,6 @@ def run_assembled_simulation(
         simulation,
         report_ids,
         include_plot_variables=include_plot_variables,
-        include_benchmark_snapshot=include_benchmark_snapshot,
     )
     simulation.ReportTimeDerivatives = assembly.run_bundle.run.report_time_derivatives
     simulation.ReportingInterval = assembly.run_bundle.run.reporting_interval_s
