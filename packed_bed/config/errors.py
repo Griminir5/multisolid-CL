@@ -1,0 +1,2 @@
+class PackedBedValidationError(ValueError):
+    pass

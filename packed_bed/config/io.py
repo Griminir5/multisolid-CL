@@ -7,8 +7,7 @@ import yaml
 from pydantic import ValidationError
 from yaml.resolver import BaseResolver
 
-from config import PackedBedValidationError
-
+from .errors import PackedBedValidationError
 
 def resolve_path(base_dir: Path, raw_path: str) -> Path:
     path = Path(raw_path)

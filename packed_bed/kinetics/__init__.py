@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
-from . import medrano, numaguchi
-
 try:
     from ..reactions import ReactionNetwork
 except ImportError:  # pragma: no cover - supports unittest discovery with -s packed_bed
@@ -86,7 +84,7 @@ def resolve_kinetics_hooks(
 
 
 if __name__ != "kinetics":
-    from . import coper_redox, fe_redox, medrano, xu_froment  # noqa: E402,F401
+    from . import coper_redox, fe_redox, medrano, numaguchi, xu_froment  # noqa: E402,F401
 
 
 __all__ = [

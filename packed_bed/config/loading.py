@@ -4,7 +4,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from config import PackedBedValidationError
+from .errors import PackedBedValidationError
 from .io import format_validation_error, read_yaml_mapping, validate_model
 from .models import ChemistryConfig, ProgramConfig, RunBundle, RunConfig, SolidConfig
 from .validation import validate_run_bundle
