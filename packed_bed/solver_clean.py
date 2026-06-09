@@ -1065,10 +1065,6 @@ def _create_linear_solver(name: str):
         from daetools.solvers.trilinos import pyTrilinos
         return pyTrilinos.daeCreateTrilinosSolver("AztecOO_ML", "DD-ML")
 
-    if name == "trilinos_superlu":
-        from daetools.solvers.trilinos import pyTrilinos
-        return pyTrilinos.daeCreateTrilinosSolver("Amesos_Superlu", "")
-
     if name == "superlu":
         from daetools.solvers.superlu import pySuperLU
         return pySuperLU.daeCreateSuperLUSolver()
