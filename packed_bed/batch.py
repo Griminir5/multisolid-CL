@@ -15,7 +15,7 @@ from typing import Any, Callable
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from .config import ConfigString, PackedBedValidationError, RunBundle, RunResult, _read_yaml_mapping, load_run_bundle
+from .config import ConfigString, PackedBedValidationError, RunBundle, RunResult, read_yaml_mapping, load_run_bundle
 
 
 NORMAL_TEMPERATURE_K = 273.15
