@@ -5,11 +5,11 @@ from pathlib import Path
 from .errors import PackedBedValidationError
 from .bundle import RunBundle
 from .chemistry import ChemistryConfig
-from .io import read_yaml_mapping, resolve_path, validate_model
+from .io import read_yaml_mapping, resolve_path
 from .program import ProgramConfig
 from .run import RunConfig
 from .solids import SolidConfig
-from .validation import validate_bundle_shape, validate_run_bundle
+from .validation import validate_bundle_shape, validate_config_model, validate_run_bundle
 
 
 def load_run_bundle(run_yaml_path: str | Path) -> RunBundle:
@@ -50,4 +50,4 @@ def load_run_bundle(run_yaml_path: str | Path) -> RunBundle:
 
 
 def _load_config_model(model_type, path: Path, label: str):
-    return validate_model(model_type, read_yaml_mapping(path, label), label, path)
+    return validate_config_model(model_type, read_yaml_mapping(path, label), label, path)

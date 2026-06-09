@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import Any, TYPE_CHECKING
 
+from pydantic import ValidationError
 from packed_bed.programs import sum_step_durations
 
 from .errors import PackedBedValidationError
@@ -27,6 +29,13 @@ REQUIRED_PROPERTIES_BY_PHASE = {
         ("enthalpy", "an enthalpy correlation"),
     ),
 }
+
+
+def validate_config_model(model_type, data: dict[str, Any], label: str, path: Path):
+    try:
+        return model_type.model_validate(data)
+    except ValidationError as exc:
+        raise _format_validation_error(label, path, exc) from exc
 
 
 def validate_bundle_shape(run_bundle: RunBundle) -> RunBundle:
@@ -131,6 +140,14 @@ def validate_run_bundle(
     if errors:
         raise PackedBedValidationError("\n".join(errors))
     return run_bundle
+
+
+def _format_validation_error(label: str, path: Path, exc: ValidationError) -> PackedBedValidationError:
+    lines = [f"{label} is invalid: {path}"]
+    for error in exc.errors():
+        location = ".".join(str(item) for item in error["loc"]) or "<root>"
+        lines.append(f"- {location}: {error['msg']}")
+    return PackedBedValidationError("\n".join(lines))
 
 
 def _validate_phase_disjointness(run_bundle: RunBundle, errors: list[str]) -> None:
