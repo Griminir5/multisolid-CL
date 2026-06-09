@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import ValidationError
 from yaml.resolver import BaseResolver
 
 from .errors import PackedBedValidationError
@@ -32,14 +31,6 @@ def read_yaml_mapping(path: Path, label: str) -> dict[str, Any]:
     return data
 
 
-def format_validation_error(label: str, path: Path, exc: ValidationError) -> PackedBedValidationError:
-    lines = [f"{label} is invalid: {path}"]
-    for error in exc.errors():
-        location = ".".join(str(item) for item in error["loc"]) or "<root>"
-        lines.append(f"- {location}: {error['msg']}")
-    return PackedBedValidationError("\n".join(lines))
-
-
 class _UniqueKeyLoader(yaml.SafeLoader):
     pass
 
@@ -54,12 +45,5 @@ def _construct_unique_mapping(loader: _UniqueKeyLoader, node, deep=False):
         mapping[key] = loader.construct_object(value_node, deep=deep)
     return mapping
 
-
-def validate_model(model_type, data: dict[str, Any], label: str, path: Path):
-    try:
-        return model_type.model_validate(data)
-    except ValidationError as exc:
-        raise format_validation_error(label, path, exc) from exc
-    
 
 _UniqueKeyLoader.add_constructor(BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping)
