@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from packed_bed.properties import PROPERTY_REGISTRY
 from packed_bed.reactions import REACTION_CATALOG, build_reaction_network
 from packed_bed.reporting import REPORT_VARIABLE_REGISTRY
 
-from config import PackedBedValidationError
-from .models import RunBundle
+from .errors import PackedBedValidationError
+
+if TYPE_CHECKING:
+    from .models import RunBundle
 
 
 PROGRAM_DURATION_SUM_ABS_TOLERANCE_S = 1.0e-9

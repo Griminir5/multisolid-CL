@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Protocol
-from config.models import HoldStep, ScalarRampStep, CompositionRampStep
+from typing import Any, Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from packed_bed.config.models import CompositionRampStep, HoldStep, ScalarRampStep
 
 
 DEFAULT_SMOOTH_RAMP_WIDTH_S = 1.0
@@ -22,6 +24,9 @@ class ScalarProgram:
     initial_value: float
     segments: tuple[ProgramSegment, ...]
 
+    def build_segments(self) -> tuple[ProgramSegment, ...]:
+        return self.segments
+
     def smoothed_value_at(self, time_s: float, *, smooth_ramp_width_s: float) -> float:
         value = _evaluate_smoothed_program_value(
             self.initial_value,
@@ -38,6 +43,9 @@ class ScalarProgram:
 class VectorProgram:
     initial_value: tuple[float, ...]
     segments: tuple[ProgramSegment, ...]
+
+    def build_segments(self) -> tuple[ProgramSegment, ...]:
+        return self.segments
 
     def smoothed_value_at(self, time_s: float, *, smooth_ramp_width_s: float) -> tuple[float, ...]:
         value = _evaluate_smoothed_program_value(
@@ -170,5 +178,3 @@ def compile_program_segments(
 
         if not repeat or not steps or (time_horizon is not None and current_time >= time_horizon):
             return tuple(segments)
-
-
