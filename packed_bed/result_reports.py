@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -10,8 +10,13 @@ import numpy as np
 import pandas as pd
 from daetools.pyDAE import daeDataReporterLocal
 
-from .config import DEFAULT_SMOOTH_RAMP_WIDTH_S, RunResult
+from .programs import (
+    DEFAULT_SMOOTH_RAMP_WIDTH_S,
+    compile_composition_channel,
+    compile_scalar_channel,
+)
 from .reporting import DERIVED_REPORT_VARIABLE_NAMES, REPORT_VARIABLE_REGISTRY
+from .results import RunResult
 
 
 @dataclass(frozen=True)
@@ -277,14 +282,16 @@ def _smooth_ramp_width_s_for_result(run_result: RunResult) -> float:
 
 
 def _sample_scalar_program(run_result: RunResult, channel_config: Any, time_s: np.ndarray) -> np.ndarray:
-    program = channel_config.compile_program(
-        repeat=run_result.run_bundle.run.repeat_program,
-        time_horizon=run_result.run_bundle.run.time_horizon_s,
+    simulation = run_result.run_bundle.run.simulation
+    program = compile_scalar_channel(
+        channel_config,
+        repeat=simulation.repeat_program,
+        time_horizon=simulation.time_horizon_s,
     )
     smooth_ramp_width_s = _smooth_ramp_width_s_for_result(run_result)
     return np.asarray(
         [
-            program.smoothed_value_at(float(time_value), smooth_ramp_width_s=smooth_ramp_width_s)
+            program.value_at(float(time_value), smooth_ramp_width_s=smooth_ramp_width_s)
             for time_value in time_s
         ],
         dtype=float,
@@ -293,16 +300,18 @@ def _sample_scalar_program(run_result: RunResult, channel_config: Any, time_s: n
 
 def _sample_inlet_composition(run_result: RunResult, time_s: np.ndarray) -> np.ndarray:
     gas_species = tuple(run_result.run_bundle.chemistry.gas_species)
-    program = run_result.run_bundle.program.inlet_composition.compile_program(
+    simulation = run_result.run_bundle.run.simulation
+    program = compile_composition_channel(
+        run_result.run_bundle.program.inlet_composition,
         gas_species,
-        repeat=run_result.run_bundle.run.repeat_program,
-        time_horizon=run_result.run_bundle.run.time_horizon_s,
+        repeat=simulation.repeat_program,
+        time_horizon=simulation.time_horizon_s,
     )
     smooth_ramp_width_s = _smooth_ramp_width_s_for_result(run_result)
     sampled = np.empty((time_s.size, len(gas_species)), dtype=float)
     for time_index, time_value in enumerate(time_s):
         sampled[time_index, :] = np.asarray(
-            program.smoothed_value_at(float(time_value), smooth_ramp_width_s=smooth_ramp_width_s),
+            program.value_at(float(time_value), smooth_ramp_width_s=smooth_ramp_width_s),
             dtype=float,
         )
     return sampled
@@ -684,18 +693,15 @@ class PackedBedDataFrameReporter(daeDataReporterLocal):
         return self._connected
 
     def write_outputs(self) -> dict[str, Path]:
+        run = self.run_bundle.run.model_copy(
+            update={
+                "outputs": self.run_bundle.run.outputs.model_copy(
+                    update={"requested_reports": self.requested_report_ids}
+                )
+            }
+        )
         run_result = RunResult(
-            run_bundle=self.run_bundle.model_copy(
-                update={
-                    "run": self.run_bundle.run.model_copy(
-                        update={
-                            "outputs": self.run_bundle.run.outputs.model_copy(
-                                update={"requested_reports": self.requested_report_ids}
-                            )
-                        }
-                    )
-                }
-            ),
+            run_bundle=replace(self.run_bundle, run=run),
             output_directory=self.output_directory,
             success=True,
             reporter=self,

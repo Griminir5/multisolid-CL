@@ -11,7 +11,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .config import DEFAULT_SMOOTH_RAMP_WIDTH_S, RunBundle
+from .config import RunBundle
+from .programs import (
+    DEFAULT_SMOOTH_RAMP_WIDTH_S,
+    compile_composition_channel,
+    compile_scalar_channel,
+)
 from .solid_profiles import (
     build_cell_scalar_profile,
     build_face_scalar_profile,
@@ -148,7 +153,7 @@ def _smoothed_program_sample_times(programs, *, final_time: float, smooth_ramp_w
         return np.array([0.0], dtype=float)
 
     times = {0.0, final_time}
-    total_segments = sum(len(program.build_segments()) for program in programs)
+    total_segments = sum(len(program.segments) for program in programs)
     baseline_count = max(400, min(2500, 20 * total_segments + 400))
     times.update(float(value) for value in np.linspace(0.0, final_time, baseline_count))
 
@@ -159,7 +164,7 @@ def _smoothed_program_sample_times(programs, *, final_time: float, smooth_ramp_w
         [-8.0, -4.0, -2.0, -1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
     )
     for program in programs:
-        for segment in program.build_segments():
+        for segment in program.segments:
             start_time = float(segment.start_time)
             end_time = float(segment.end_time)
             for edge_time in (start_time, end_time):
@@ -181,7 +186,7 @@ def _smoothed_program_sample_times(programs, *, final_time: float, smooth_ramp_w
 def _scalar_series_from_smoothed_program(program, times: np.ndarray, *, smooth_ramp_width_s: float) -> np.ndarray:
     return np.asarray(
         [
-            program.smoothed_value_at(float(time_s), smooth_ramp_width_s=smooth_ramp_width_s)
+            program.value_at(float(time_s), smooth_ramp_width_s=smooth_ramp_width_s)
             for time_s in times
         ],
         dtype=float,
@@ -191,7 +196,7 @@ def _scalar_series_from_smoothed_program(program, times: np.ndarray, *, smooth_r
 def _vector_series_from_smoothed_program(program, times: np.ndarray, *, smooth_ramp_width_s: float) -> np.ndarray:
     return np.asarray(
         [
-            program.smoothed_value_at(float(time_s), smooth_ramp_width_s=smooth_ramp_width_s)
+            program.value_at(float(time_s), smooth_ramp_width_s=smooth_ramp_width_s)
             for time_s in times
         ],
         dtype=float,
@@ -332,24 +337,29 @@ def render_operating_program(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    time_horizon = run_bundle.run.time_horizon_s
+    simulation = run_bundle.run.simulation
+    time_horizon = simulation.time_horizon_s
     gas_species = run_bundle.chemistry.gas_species
 
-    inlet_flow_program = run_bundle.program.inlet_flow.compile_program(
-        repeat=run_bundle.run.repeat_program,
+    inlet_flow_program = compile_scalar_channel(
+        run_bundle.program.inlet_flow,
+        repeat=simulation.repeat_program,
         time_horizon=time_horizon,
     )
-    inlet_temperature_program = run_bundle.program.inlet_temperature.compile_program(
-        repeat=run_bundle.run.repeat_program,
+    inlet_temperature_program = compile_scalar_channel(
+        run_bundle.program.inlet_temperature,
+        repeat=simulation.repeat_program,
         time_horizon=time_horizon,
     )
-    outlet_pressure_program = run_bundle.program.outlet_pressure.compile_program(
-        repeat=run_bundle.run.repeat_program,
+    outlet_pressure_program = compile_scalar_channel(
+        run_bundle.program.outlet_pressure,
+        repeat=simulation.repeat_program,
         time_horizon=time_horizon,
     )
-    inlet_composition_program = run_bundle.program.inlet_composition.compile_program(
+    inlet_composition_program = compile_composition_channel(
+        run_bundle.program.inlet_composition,
         gas_species,
-        repeat=run_bundle.run.repeat_program,
+        repeat=simulation.repeat_program,
         time_horizon=time_horizon,
     )
     sample_times = _smoothed_program_sample_times(
@@ -427,7 +437,7 @@ def render_initial_solid_profile(run_bundle: RunBundle, output_dir) -> dict[str,
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    zones = run_bundle.solids.initial_profile_zones
+    zones = run_bundle.solids.initial_profile.zones
     cell_centers, face_positions = build_uniform_axial_grid(
         run_bundle.run.model.bed_length_m,
         run_bundle.run.model.axial_cells,
@@ -446,14 +456,14 @@ def render_initial_solid_profile(run_bundle: RunBundle, output_dir) -> dict[str,
     d_p = build_face_scalar_profile(run_bundle.solids, face_positions, "d_p")
 
     unit_label = {
-        "mol_per_m3_solid": "mol/m^3 solid",
-        "mol_per_m3_bed": "mol/m^3 bed",
-    }.get(run_bundle.solids.concentration_unit, run_bundle.solids.concentration_unit)
+        "solid": "mol/m^3 solid",
+        "bed": "mol/m^3 bed",
+    }.get(run_bundle.solids.initial_profile.basis, run_bundle.solids.initial_profile.basis)
 
     figure, axes = plt.subplots(4, 1, figsize=(12, 15), sharex=True)
 
     for species_id in run_bundle.solids.solid_species:
-        zone_values = [float(zone.values_mol_per_m3[species_id]) for zone in zones]
+        zone_values = [float(zone.values[species_id]) for zone in zones]
         axes[0].stairs(zone_values, authored_edges, label=species_id, linewidth=2)
     axes[0].set_title("Initial Solid Concentration Input")
     axes[0].set_ylabel(unit_label)
