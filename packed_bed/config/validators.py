@@ -3,48 +3,13 @@ from __future__ import annotations
 import math
 from typing import Any, Annotated
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field
 
 
 def _require_string(value: str) -> str:
     if value == "" or value != value.strip():
         raise ValueError("must not be blank or padded with whitespace.")
     return value
-
-
-def _require_float(value: Any) -> float:
-    if isinstance(value, bool) or not isinstance(value, float):
-        raise ValueError("must be written as a float value.")
-    if not math.isfinite(value):
-        raise ValueError("must be finite.")
-    return value
-
-
-def _require_positive(value: float) -> float:
-    if value <= 0.0:
-        raise ValueError("must be strictly positive.")
-    return value
-
-
-def _require_nonnegative(value: float) -> float:
-    if value < 0.0:
-        raise ValueError("must be non-negative.")
-    return value
-
-
-def _require_unit_fraction(value: float) -> float:
-    if not (0.0 < value < 1.0):
-        raise ValueError("must lie strictly between 0 and 1.")
-    return value
-
-
-def _require_nonempty_unique_strings(values: tuple[str, ...]) -> tuple[str, ...]:
-    if not values:
-        raise ValueError("must not be empty.")
-    duplicates = sorted({value for value in values if values.count(value) > 1})
-    if duplicates:
-        raise ValueError(f"contains duplicates: {', '.join(duplicates)}.")
-    return values
 
 
 def _require_unique_strings(values: tuple[str, ...]) -> tuple[str, ...]:
@@ -61,8 +26,6 @@ def _as_tuple(value: Any) -> tuple[Any, ...]:
 
 
 def _require_fraction_mapping(mapping: dict[str, float]) -> dict[str, float]:
-    if not mapping:
-        raise ValueError("must not be empty.")
     total = sum(mapping.values())
     if not math.isclose(total, 1.0, rel_tol=0.0, abs_tol=1e-12):
         raise ValueError(f"must sum to 1.0 exactly, got {total:.16g}.")
@@ -91,6 +54,22 @@ class FrozenConfigModel(BaseModel):
     )
 
 ConfigString = Annotated[str, AfterValidator(_require_string)]
-PositiveFloat = Annotated[float, BeforeValidator(_require_float), AfterValidator(_require_positive)]
-NonNegativeFloat = Annotated[float, BeforeValidator(_require_float), AfterValidator(_require_nonnegative)]
-UnitFraction = Annotated[float, BeforeValidator(_require_float), AfterValidator(_require_unit_fraction)]
+PositiveFloat = Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+NonNegativeFloat = Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
+UnitFraction = Annotated[float, Field(gt=0.0, lt=1.0, allow_inf_nan=False)]
+UniqueStringTuple = Annotated[
+    tuple[ConfigString, ...],
+    BeforeValidator(_as_tuple),
+    AfterValidator(_require_unique_strings),
+]
+NonEmptyUniqueStringTuple = Annotated[
+    tuple[ConfigString, ...],
+    BeforeValidator(_as_tuple),
+    Field(min_length=1),
+    AfterValidator(_require_unique_strings),
+]
+FractionMapping = Annotated[
+    dict[ConfigString, NonNegativeFloat],
+    Field(min_length=1),
+    AfterValidator(_require_fraction_mapping),
+]

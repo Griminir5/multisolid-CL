@@ -2,27 +2,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import ValidationError
-
 from .errors import PackedBedValidationError
-from .io import format_validation_error, read_yaml_mapping, validate_model
-from .models import ChemistryConfig, ProgramConfig, RunBundle, RunConfig, SolidConfig
-from .validation import validate_run_bundle
-
-
-def _resolve_path(base_dir: Path, raw_path: str) -> Path:
-    path = Path(raw_path)
-    return (base_dir / path).resolve() if not path.is_absolute() else path.resolve()
+from .bundle import RunBundle
+from .chemistry import ChemistryConfig
+from .io import read_yaml_mapping, resolve_path, validate_model
+from .program import ProgramConfig
+from .run import RunConfig
+from .solids import SolidConfig
+from .validation import validate_bundle_shape, validate_run_bundle
 
 
 def load_run_bundle(run_yaml_path: str | Path) -> RunBundle:
     run_path = Path(run_yaml_path).resolve()
-    run = validate_model(RunConfig, read_yaml_mapping(run_path, "run.yaml"), "run.yaml", run_path)
+    run = _load_config_model(RunConfig, run_path, "run.yaml")
 
     base_dir = run_path.parent
-    chemistry_path = _resolve_path(base_dir, run.references.chemistry_file)
-    program_path = _resolve_path(base_dir, run.references.program_file)
-    solids_path = _resolve_path(base_dir, run.references.solids_file)
+    chemistry_path = resolve_path(base_dir, run.references.chemistry_file)
+    program_path = resolve_path(base_dir, run.references.program_file)
+    solids_path = resolve_path(base_dir, run.references.solids_file)
 
     for label, path in (
         ("run.references.chemistry_file", chemistry_path),
@@ -34,37 +31,23 @@ def load_run_bundle(run_yaml_path: str | Path) -> RunBundle:
         if not path.is_file():
             raise PackedBedValidationError(f"{label} must point to a file: {path}")
 
-    chemistry = validate_model(
-        ChemistryConfig,
-        read_yaml_mapping(chemistry_path, "chemistry.yaml"),
-        "chemistry.yaml",
-        chemistry_path,
-    )
-    program = validate_model(
-        ProgramConfig,
-        read_yaml_mapping(program_path, "program.yaml"),
-        "program.yaml",
-        program_path,
-    )
-    solids = validate_model(
-        SolidConfig,
-        read_yaml_mapping(solids_path, "solids.yaml"),
-        "solids.yaml",
-        solids_path,
-    )
+    chemistry = _load_config_model(ChemistryConfig, chemistry_path, "chemistry.yaml")
+    program = _load_config_model(ProgramConfig, program_path, "program.yaml")
+    solids = _load_config_model(SolidConfig, solids_path, "solids.yaml")
 
-    try:
-        run_bundle = RunBundle(
-            run_path=run_path,
-            chemistry_path=chemistry_path,
-            solids_path=solids_path,
-            program_path=program_path,
-            chemistry=chemistry,
-            solids=solids,
-            program=program,
-            run=run,
-        )
-    except ValidationError as exc:
-        raise format_validation_error("run bundle", run_path, exc) from exc
-
+    run_bundle = RunBundle(
+        run_path=run_path,
+        chemistry_path=chemistry_path,
+        solids_path=solids_path,
+        program_path=program_path,
+        chemistry=chemistry,
+        solids=solids,
+        program=program,
+        run=run,
+    )
+    validate_bundle_shape(run_bundle)
     return validate_run_bundle(run_bundle)
+
+
+def _load_config_model(model_type, path: Path, label: str):
+    return validate_model(model_type, read_yaml_mapping(path, label), label, path)

@@ -11,15 +11,15 @@ import numpy as np
 from daetools.pyDAE import *
 
 from .axial_schemes import reconstruct_face_states
-from .config import (
+from .config import RunBundle
+from .config.run import ModelConfig, SolverConfig
+from .config.solids import SolidConfig
+from .programs import (
     DEFAULT_SMOOTH_RAMP_WIDTH_S,
-    ModelConfig,
+    Program,
     ProgramSegment,
-    RunBundle,
-    ScalarProgram,
-    SolidConfig,
-    VectorProgram,
-    SolverConfig,
+    compile_composition_channel,
+    compile_scalar_channel,
 )
 from .kinetics import KineticsContext, resolve_kinetics_hooks
 from .reactions import ReactionNetwork, build_reaction_network
@@ -267,9 +267,9 @@ class CLBed_mass(daeModel):
         inlet_temperature_program,
         outlet_pressure_program,
     ):
-        self.inlet_flow_segments = inlet_flow_program.build_segments()
+        self.inlet_flow_segments = inlet_flow_program.segments
         inlet_composition = np.asarray(inlet_composition_program.initial_value, dtype=float)
-        vector_segments = inlet_composition_program.build_segments()
+        vector_segments = inlet_composition_program.segments
         self.inlet_composition_segments = [
             [
                 ProgramSegment(
@@ -282,8 +282,8 @@ class CLBed_mass(daeModel):
             ]
             for gas_idx in range(inlet_composition.size)
         ]
-        self.inlet_temperature_segments = inlet_temperature_program.build_segments()
-        self.outlet_pressure_segments = outlet_pressure_program.build_segments()
+        self.inlet_temperature_segments = inlet_temperature_program.segments
+        self.outlet_pressure_segments = outlet_pressure_program.segments
 
     def _smooth_positive_time(self, elapsed_time):
         width = Constant(self.smooth_ramp_width_s * s)
@@ -700,10 +700,10 @@ class simBed(daeSimulation):
         property_registry,
         mass_scheme,
         heat_scheme,
-        inlet_flow_program: ScalarProgram,
-        inlet_composition_program: VectorProgram,
-        inlet_temperature_program: ScalarProgram,
-        outlet_pressure_program: ScalarProgram,
+        inlet_flow_program: Program,
+        inlet_composition_program: Program,
+        inlet_temperature_program: Program,
+        outlet_pressure_program: Program,
         operation_time_horizon,
         model_config: ModelConfig,
         system_name,
@@ -790,12 +790,12 @@ class simBed(daeSimulation):
         nf = self.model.x_faces.NumberOfPoints
 
         area = self.model.pi.GetValue() * self.model.R_bed.GetValue() ** 2
-        fin = self.inlet_flow_program.smoothed_value_at(
+        fin = float(self.inlet_flow_program.value_at(
             0.0,
             smooth_ramp_width_s=self.smooth_ramp_width_s,
-        )
+        ))
         inlet_y = np.asarray(
-            self.inlet_composition_program.smoothed_value_at(
+            self.inlet_composition_program.value_at(
                 0.0,
                 smooth_ramp_width_s=self.smooth_ramp_width_s,
             ),
@@ -805,14 +805,14 @@ class simBed(daeSimulation):
             raise ValueError("Initialization currently assumes a positive inlet molar flow.")
 
         r_gas = self.model.R_gas.GetValue()
-        outlet_pressure = self.outlet_pressure_program.smoothed_value_at(
+        outlet_pressure = float(self.outlet_pressure_program.value_at(
             0.0,
             smooth_ramp_width_s=self.smooth_ramp_width_s,
-        )
-        inlet_temperature = self.inlet_temperature_program.smoothed_value_at(
+        ))
+        inlet_temperature = float(self.inlet_temperature_program.value_at(
             0.0,
             smooth_ramp_width_s=self.smooth_ramp_width_s,
-        )
+        ))
 
         center_coords = np.asarray(self.model.xval_cells.npyValues, dtype=float)
         face_coords = np.asarray(self.model.xval_faces.npyValues, dtype=float)
@@ -1108,22 +1108,27 @@ def assemble_simulation(
     )
     reaction_rate_hooks = resolve_kinetics_hooks(reaction_network)
 
-    inlet_flow_program = run_bundle.program.inlet_flow.compile_program(
-        repeat=run_bundle.run.repeat_program,
-        time_horizon=run_bundle.run.time_horizon_s,
+    simulation_config = run_bundle.run.simulation
+    inlet_flow_program = compile_scalar_channel(
+        run_bundle.program.inlet_flow,
+        repeat=simulation_config.repeat_program,
+        time_horizon=simulation_config.time_horizon_s,
     )
-    inlet_composition_program = run_bundle.program.inlet_composition.compile_program(
+    inlet_composition_program = compile_composition_channel(
+        run_bundle.program.inlet_composition,
         run_bundle.chemistry.gas_species,
-        repeat=run_bundle.run.repeat_program,
-        time_horizon=run_bundle.run.time_horizon_s,
+        repeat=simulation_config.repeat_program,
+        time_horizon=simulation_config.time_horizon_s,
     )
-    inlet_temperature_program = run_bundle.program.inlet_temperature.compile_program(
-        repeat=run_bundle.run.repeat_program,
-        time_horizon=run_bundle.run.time_horizon_s,
+    inlet_temperature_program = compile_scalar_channel(
+        run_bundle.program.inlet_temperature,
+        repeat=simulation_config.repeat_program,
+        time_horizon=simulation_config.time_horizon_s,
     )
-    outlet_pressure_program = run_bundle.program.outlet_pressure.compile_program(
-        repeat=run_bundle.run.repeat_program,
-        time_horizon=run_bundle.run.time_horizon_s,
+    outlet_pressure_program = compile_scalar_channel(
+        run_bundle.program.outlet_pressure,
+        repeat=simulation_config.repeat_program,
+        time_horizon=simulation_config.time_horizon_s,
     )
     materialize_solid_mole_fractions = "solid_mole_fraction" in run_bundle.run.outputs.requested_reports
 
@@ -1134,15 +1139,15 @@ def assemble_simulation(
         reaction_rate_hooks=reaction_rate_hooks,
         solid_config=run_bundle.solids,
         property_registry=property_registry,
-        mass_scheme=run_bundle.run.mass_scheme,
-        heat_scheme=run_bundle.run.heat_scheme,
+        mass_scheme=simulation_config.mass_scheme,
+        heat_scheme=simulation_config.heat_scheme,
         inlet_flow_program=inlet_flow_program,
         inlet_composition_program=inlet_composition_program,
         inlet_temperature_program=inlet_temperature_program,
         outlet_pressure_program=outlet_pressure_program,
-        operation_time_horizon=run_bundle.run.time_horizon_s,
+        operation_time_horizon=simulation_config.time_horizon_s,
         model_config=run_bundle.run.model,
-        system_name=run_bundle.run.system_name,
+        system_name=simulation_config.system_name,
         smooth_ramp_width_s=smooth_ramp_width_s,
         materialize_solid_mole_fractions=materialize_solid_mole_fractions,
     )
@@ -1213,14 +1218,15 @@ def run_assembled_simulation(
         report_ids,
         include_plot_variables=include_plot_variables,
     )
-    simulation.ReportTimeDerivatives = assembly.run_bundle.run.report_time_derivatives
-    simulation.ReportingInterval = assembly.run_bundle.run.reporting_interval_s
-    simulation.TimeHorizon = assembly.run_bundle.run.time_horizon_s
+    simulation_config = assembly.run_bundle.run.simulation
+    simulation.ReportTimeDerivatives = simulation_config.report_time_derivatives
+    simulation.ReportingInterval = simulation_config.reporting_interval_s
+    simulation.TimeHorizon = simulation_config.time_horizon_s
 
     solver = build_idas_solver(solver_config)
     reporter = data_reporter if data_reporter is not None else daeNoOpDataReporter()
     if data_reporter is not None and hasattr(reporter, "IsConnected") and not reporter.IsConnected():
-        process_name = assembly.run_bundle.run.system_name
+        process_name = simulation_config.system_name
         if not reporter.Connect(str(assembly.run_bundle.output_directory), process_name):
             raise RuntimeError(f"Cannot connect data reporter for process '{process_name}'.")
 

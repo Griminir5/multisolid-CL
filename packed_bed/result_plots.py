@@ -11,8 +11,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .config import DEFAULT_SMOOTH_RAMP_WIDTH_S, RunResult
+from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S, compile_composition_channel
 from .reporting import REPORT_VARIABLE_REGISTRY
+from .results import RunResult
 
 
 _TIME_ATOL = 1e-12
@@ -194,10 +195,12 @@ def _smooth_ramp_width_s_for_result(run_result: RunResult) -> float:
 
 
 def _sample_inlet_composition(run_result: RunResult, time_s: np.ndarray, gas_species: tuple[str, ...]) -> np.ndarray:
-    program = run_result.run_bundle.program.inlet_composition.compile_program(
+    simulation = run_result.run_bundle.run.simulation
+    program = compile_composition_channel(
+        run_result.run_bundle.program.inlet_composition,
         gas_species,
-        repeat=run_result.run_bundle.run.repeat_program,
-        time_horizon=run_result.run_bundle.run.time_horizon_s,
+        repeat=simulation.repeat_program,
+        time_horizon=simulation.time_horizon_s,
     )
     initial_value = np.asarray(program.initial_value, dtype=float)
     sampled = np.empty((time_s.size, initial_value.size), dtype=float)
@@ -205,7 +208,7 @@ def _sample_inlet_composition(run_result: RunResult, time_s: np.ndarray, gas_spe
 
     for time_index, time_value in enumerate(time_s):
         sampled[time_index, :] = np.asarray(
-            program.smoothed_value_at(float(time_value), smooth_ramp_width_s=smooth_ramp_width_s),
+            program.value_at(float(time_value), smooth_ramp_width_s=smooth_ramp_width_s),
             dtype=float,
         )
 

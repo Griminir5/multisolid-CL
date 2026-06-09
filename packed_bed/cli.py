@@ -7,11 +7,12 @@ from pathlib import Path
 import datetime
 
 from .batch import run_batch_file
-from .config import RunBundle, RunResult, load_run_bundle
+from .config import RunBundle, load_run_bundle
 from .incidence_matrix import write_solver_incidence_artifacts
 from .properties import PROPERTY_REGISTRY
 from .result_reports import PackedBedDataFrameReporter, compute_balance_errors, format_balance_error_lines
 from .result_plots import render_run_result_plots
+from .results import RunResult
 from .reactions import REACTION_CATALOG
 from .solver_clean import assemble_simulation, run_assembled_simulation
 from .visualization import (

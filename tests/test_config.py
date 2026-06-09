@@ -3,7 +3,17 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from packed_bed.config import ChemistryConfig, ProgramConfig, RunBundle, RunConfig, SolidConfig
+import packed_bed.config as config
+from packed_bed.config import (
+    ChemistryConfig,
+    PackedBedValidationError,
+    ProgramConfig,
+    RunBundle,
+    RunConfig,
+    SolidConfig,
+    validate_bundle_shape,
+)
+from packed_bed.programs import compile_composition_channel, compile_scalar_channel
 
 
 def build_run_bundle(flow_duration_s: float, composition_duration_s: float | None = None) -> RunBundle:
@@ -85,11 +95,94 @@ class RunBundleValidationTests(unittest.TestCase):
     def test_accepts_sub_nanosecond_duration_sum_drift(self) -> None:
         bundle = build_run_bundle(11999.999999999998)
 
-        self.assertEqual(bundle.run.time_horizon_s, 12000.0)
+        self.assertIs(validate_bundle_shape(bundle), bundle)
+        self.assertEqual(bundle.run.simulation.time_horizon_s, 12000.0)
 
     def test_rejects_material_duration_sum_mismatch(self) -> None:
-        with self.assertRaisesRegex(ValidationError, r"difference -1\.000e-03 s"):
-            build_run_bundle(11999.999, composition_duration_s=12000.0)
+        bundle = build_run_bundle(11999.999, composition_duration_s=12000.0)
+
+        with self.assertRaisesRegex(PackedBedValidationError, r"difference -1\.000e-03 s"):
+            validate_bundle_shape(bundle)
+
+
+class NumericValidationTests(unittest.TestCase):
+    def test_accepts_integer_literals_for_float_fields(self) -> None:
+        program = ProgramConfig.model_validate(
+            {
+                "inlet_flow": {"initial": 1, "steps": []},
+                "inlet_temperature": {"initial": 300, "steps": []},
+                "outlet_pressure": {"initial": 100000, "steps": []},
+                "inlet_composition": {"initial": {"N2": 1}, "steps": []},
+            }
+        )
+
+        self.assertEqual(program.inlet_flow.initial, 1.0)
+        self.assertEqual(program.inlet_composition.initial["N2"], 1.0)
+
+    def test_rejects_bool_for_float_fields(self) -> None:
+        with self.assertRaises(ValidationError):
+            ProgramConfig.model_validate(
+                {
+                    "inlet_flow": {"initial": True, "steps": []},
+                    "inlet_temperature": {"initial": 300.0, "steps": []},
+                    "outlet_pressure": {"initial": 100000.0, "steps": []},
+                    "inlet_composition": {"initial": {"N2": 1.0}, "steps": []},
+                }
+            )
+
+    def test_rejects_nonfinite_float_fields(self) -> None:
+        for value in (float("nan"), float("inf")):
+            with self.subTest(value=value):
+                with self.assertRaises(ValidationError):
+                    ProgramConfig.model_validate(
+                        {
+                            "inlet_flow": {"initial": value, "steps": []},
+                            "inlet_temperature": {"initial": 300.0, "steps": []},
+                            "outlet_pressure": {"initial": 100000.0, "steps": []},
+                            "inlet_composition": {"initial": {"N2": 1.0}, "steps": []},
+                        }
+                    )
+
+
+class ProgramCompilationTests(unittest.TestCase):
+    def test_compiles_scalar_channel_with_function_api(self) -> None:
+        program_config = ProgramConfig.model_validate(
+            {
+                "inlet_flow": {"initial": 1.0, "steps": []},
+                "inlet_temperature": {"initial": 300.0, "steps": []},
+                "outlet_pressure": {"initial": 100000.0, "steps": []},
+                "inlet_composition": {"initial": {"N2": 1.0}, "steps": []},
+            }
+        )
+
+        program = compile_scalar_channel(program_config.inlet_flow)
+
+        self.assertEqual(program.segments, ())
+        self.assertEqual(program.value_at(10.0, smooth_ramp_width_s=1.0), 1.0)
+
+    def test_compiles_composition_channel_with_function_api(self) -> None:
+        program_config = ProgramConfig.model_validate(
+            {
+                "inlet_flow": {"initial": 1.0, "steps": []},
+                "inlet_temperature": {"initial": 300.0, "steps": []},
+                "outlet_pressure": {"initial": 100000.0, "steps": []},
+                "inlet_composition": {"initial": {"N2": 0.75, "H2": 0.25}, "steps": []},
+            }
+        )
+
+        program = compile_composition_channel(program_config.inlet_composition, ("H2", "N2"))
+
+        self.assertEqual(program.initial_value, (0.25, 0.75))
+        self.assertEqual(program.value_at(10.0, smooth_ramp_width_s=1.0), (0.25, 0.75))
+
+
+class PublicImportTests(unittest.TestCase):
+    def test_config_public_surface_is_small(self) -> None:
+        self.assertTrue(hasattr(config, "load_run_bundle"))
+        self.assertTrue(hasattr(config, "validate_bundle_shape"))
+        self.assertFalse(hasattr(config, "RunResult"))
+        self.assertFalse(hasattr(config, "DEFAULT_SMOOTH_RAMP_WIDTH_S"))
+        self.assertFalse(hasattr(config, "ScalarProgram"))
 
 
 if __name__ == "__main__":

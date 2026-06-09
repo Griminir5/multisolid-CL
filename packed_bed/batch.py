@@ -15,7 +15,10 @@ from typing import Any, Callable
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from .config import ConfigString, PackedBedValidationError, RunBundle, RunResult, read_yaml_mapping, load_run_bundle
+from .config import PackedBedValidationError, RunBundle, load_run_bundle
+from .config.io import read_yaml_mapping, resolve_path
+from .config.validators import ConfigString
+from .results import RunResult
 
 
 NORMAL_TEMPERATURE_K = 273.15
@@ -85,11 +88,6 @@ def _parse_config_path(raw_path: str) -> tuple[str | int, ...]:
     if not tokens or not isinstance(tokens[0], str) or tokens[0] not in _CONFIG_ROOTS:
         raise ValueError(f"set path must start with one of: {', '.join(sorted(_CONFIG_ROOTS))}.")
     return tuple(tokens)
-
-
-def _resolve_path(base_dir: Path, raw_path: str) -> Path:
-    path = Path(raw_path)
-    return (base_dir / path).resolve() if not path.is_absolute() else path.resolve()
 
 
 def _set_config_path(root_mappings: dict[str, Any], raw_path: str, value: Any) -> None:
@@ -290,7 +288,7 @@ class BatchDocument:
 
     @property
     def output_directory(self) -> Path:
-        return _resolve_path(self.base_dir, self.spec.output_directory)
+        return resolve_path(self.base_dir, self.spec.output_directory)
 
 
 @dataclass(frozen=True)
@@ -346,7 +344,7 @@ class BatchResult:
 
 def load_batch_spec(batch_yaml_path: str | Path) -> BatchDocument:
     batch_path = Path(batch_yaml_path).resolve()
-    data = _read_yaml_mapping(batch_path, "batch.yaml")
+    data = read_yaml_mapping(batch_path, "batch.yaml")
     try:
         spec = BatchSpec.model_validate(data)
     except ValidationError as exc:
@@ -355,13 +353,13 @@ def load_batch_spec(batch_yaml_path: str | Path) -> BatchDocument:
 
 
 def _load_base_case_mappings(document: BatchDocument) -> BaseCaseMappings:
-    run_path = _resolve_path(document.base_dir, document.spec.base_case)
-    run = _read_yaml_mapping(run_path, "run.yaml")
+    run_path = resolve_path(document.base_dir, document.spec.base_case)
+    run = read_yaml_mapping(run_path, "run.yaml")
     references = _require_mapping(run.get("references"), "run.references")
     base_dir = run_path.parent
-    chemistry = _read_yaml_mapping(_resolve_path(base_dir, references.get("chemistry_file", "")), "chemistry.yaml")
-    program = _read_yaml_mapping(_resolve_path(base_dir, references.get("program_file", "")), "program.yaml")
-    solids = _read_yaml_mapping(_resolve_path(base_dir, references.get("solids_file", "")), "solids.yaml")
+    chemistry = read_yaml_mapping(resolve_path(base_dir, references.get("chemistry_file", "")), "chemistry.yaml")
+    program = read_yaml_mapping(resolve_path(base_dir, references.get("program_file", "")), "program.yaml")
+    solids = read_yaml_mapping(resolve_path(base_dir, references.get("solids_file", "")), "solids.yaml")
     return BaseCaseMappings(
         run_path=run_path,
         run=run,
@@ -373,11 +371,11 @@ def _load_base_case_mappings(document: BatchDocument) -> BaseCaseMappings:
 
 def _load_program_preset(document: BatchDocument, program_name: str) -> dict[str, Any]:
     raw_path = document.spec.programs[program_name]
-    return _read_yaml_mapping(_resolve_path(document.base_dir, raw_path), "program preset")
+    return read_yaml_mapping(resolve_path(document.base_dir, raw_path), "program preset")
 
 
 def _load_solids_preset(document: BatchDocument, raw_path: str) -> dict[str, Any]:
-    return _read_yaml_mapping(_resolve_path(document.base_dir, raw_path), "geometry solids preset")
+    return read_yaml_mapping(resolve_path(document.base_dir, raw_path), "geometry solids preset")
 
 
 def _apply_geometry_preset(

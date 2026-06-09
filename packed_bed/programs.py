@@ -2,72 +2,52 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from packed_bed.config.models import CompositionRampStep, HoldStep, ScalarRampStep
+    from packed_bed.config.program import (
+        CompositionChannelConfig,
+        CompositionRampStep,
+        HoldStep,
+        ScalarChannelConfig,
+        ScalarRampStep,
+    )
 
 
 DEFAULT_SMOOTH_RAMP_WIDTH_S = 1.0
+ProgramValue = float | tuple[float, ...]
 
 
 @dataclass(frozen=True)
 class ProgramSegment:
     start_time: float
     end_time: float
-    start_value: float | tuple[float, ...]
-    end_value: float | tuple[float, ...]
+    start_value: ProgramValue
+    end_value: ProgramValue
 
 
 @dataclass(frozen=True)
-class ScalarProgram:
-    initial_value: float
+class Program:
+    initial_value: ProgramValue
     segments: tuple[ProgramSegment, ...]
 
-    def build_segments(self) -> tuple[ProgramSegment, ...]:
-        return self.segments
-
-    def smoothed_value_at(self, time_s: float, *, smooth_ramp_width_s: float) -> float:
-        value = _evaluate_smoothed_program_value(
+    def value_at(self, time_s: float, *, smooth_ramp_width_s: float) -> ProgramValue:
+        return _evaluate_smoothed_program_value(
             self.initial_value,
             self.segments,
             time_s=time_s,
             smooth_ramp_width_s=smooth_ramp_width_s,
         )
-        if isinstance(value, tuple):
-            raise TypeError("Expected scalar-valued program.")
-        return value
-
-
-@dataclass(frozen=True)
-class VectorProgram:
-    initial_value: tuple[float, ...]
-    segments: tuple[ProgramSegment, ...]
-
-    def build_segments(self) -> tuple[ProgramSegment, ...]:
-        return self.segments
-
-    def smoothed_value_at(self, time_s: float, *, smooth_ramp_width_s: float) -> tuple[float, ...]:
-        value = _evaluate_smoothed_program_value(
-            self.initial_value,
-            self.segments,
-            time_s=time_s,
-            smooth_ramp_width_s=smooth_ramp_width_s,
-        )
-        if not isinstance(value, tuple):
-            raise TypeError("Expected tuple-valued program.")
-        return value
-    
 
 def sum_step_durations(steps: tuple["HoldStep | ScalarRampStep | CompositionRampStep", ...]) -> float:
     return math.fsum(step.duration_s for step in steps)
 
 
 def _interpolate_program_value(
-    start_value: float | tuple[float, ...],
-    end_value: float | tuple[float, ...],
+    start_value: ProgramValue,
+    end_value: ProgramValue,
     fraction: float,
-) -> float | tuple[float, ...]:
+) -> ProgramValue:
     if isinstance(start_value, tuple):
         if not isinstance(end_value, tuple):
             raise TypeError("Expected tuple-valued program endpoints.")
@@ -98,12 +78,12 @@ def _smooth_ramp_fraction_value(segment: "ProgramSegment", time_s: float, smooth
 
 
 def _evaluate_smoothed_program_value(
-    initial_value: float | tuple[float, ...],
+    initial_value: ProgramValue,
     segments: tuple["ProgramSegment", ...],
     *,
     time_s: float,
     smooth_ramp_width_s: float,
-) -> float | tuple[float, ...]:
+) -> ProgramValue:
     if not segments:
         return initial_value
 
@@ -130,8 +110,8 @@ def _evaluate_smoothed_program_value(
     return value
 
 
-def compile_program_segments(
-    initial_value: float | tuple[float, ...],
+def _compile_program_segments(
+    initial_value: ProgramValue,
     steps: tuple["HoldStep | ScalarRampStep | CompositionRampStep", ...],
     *,
     repeat: bool,
@@ -178,3 +158,54 @@ def compile_program_segments(
 
         if not repeat or not steps or (time_horizon is not None and current_time >= time_horizon):
             return tuple(segments)
+
+
+def compile_scalar_channel(
+    channel: "ScalarChannelConfig",
+    *,
+    repeat: bool = False,
+    time_horizon: float | None = None,
+) -> Program:
+    segments = _compile_program_segments(
+        channel.initial,
+        channel.steps,
+        repeat=repeat,
+        time_horizon=time_horizon,
+        resolve_next_value=lambda _step_index, step, current_value: (
+            current_value if step.kind == "hold" else step.target
+        ),
+    )
+    return Program(initial_value=channel.initial, segments=segments)
+
+
+def compile_composition_channel(
+    channel: "CompositionChannelConfig",
+    species_order: tuple[str, ...],
+    *,
+    repeat: bool = False,
+    time_horizon: float | None = None,
+) -> Program:
+    from packed_bed.config.validators import _require_exact_keys
+
+    _require_exact_keys(set(channel.initial), species_order, "program.inlet_composition.initial")
+    initial_value = tuple(channel.initial[species_id] for species_id in species_order)
+
+    def resolve_next_value(step_index: int, step, current_value: ProgramValue) -> ProgramValue:
+        if step.kind == "hold":
+            return current_value
+
+        _require_exact_keys(
+            set(step.target),
+            species_order,
+            f"program.inlet_composition.steps[{step_index}].target",
+        )
+        return tuple(step.target[species_id] for species_id in species_order)
+
+    segments = _compile_program_segments(
+        initial_value,
+        channel.steps,
+        repeat=repeat,
+        time_horizon=time_horizon,
+        resolve_next_value=resolve_next_value,
+    )
+    return Program(initial_value=initial_value, segments=segments)
