@@ -647,6 +647,38 @@ REACTION_CATALOG = {
         reversible=False,
         notes="Empirical oxidation law from the paper. The paper models oxidation as a single fast Fe+O2 step and handles Fe2O3/Fe3O4/FeO redistribution separately by solid-state transformation logic.",
     ),
+
+    "fe_waste_oxidation": ReactionDefinition(
+        id="fe_waste_oxidation",
+        name="One-step Fe waste oxidation by O2 to equivalent Fe2O3",
+        phase="gas_solid",
+        stoichiometry={
+            "Fe": -1.0,
+            "O2": -0.75,
+            "Fe2O3": 0.5,
+        },
+        required_species=("Fe", "O2", "Fe2O3"),
+        source_reference="Solid-State kinetic modelling (iron waste based catalyst).pdf",
+        kinetics_hook="fe_waste_oxidation",
+        reversible=False,
+        notes="Kinetics derived from data collected by Aya on iron waste oxidation/reduction",
+    ),
+    "fe_waste_reduction": ReactionDefinition(
+        id="fe_waste_reduction",
+        name="One-step Fe2O3 reduction by H2 to equivalent Fe",
+        phase="gas_solid",
+        stoichiometry={
+            "Fe2O3": -1.0,
+            "H2": -3.0,
+            "Fe": 2.0,
+            "H2O": 3.0,
+        },
+        required_species=("Fe", "H2", "Fe2O3", "H2O"),
+        source_reference="Solid-State kinetic modelling (iron waste based catalyst).pdf",
+        kinetics_hook="fe_waste_reduction",
+        reversible=False,
+        notes="Kinetics derived from data collected by Aya on iron waste oxidation/reduction",
+    ),
 }
 
 DEFAULT_REACTION_CATALOG = REACTION_CATALOG
