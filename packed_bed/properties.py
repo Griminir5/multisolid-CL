@@ -511,12 +511,13 @@ PROPERTY_REGISTRY = PropertyRegistry(
             name="Aluminium Oxide",
             phase="solid",
             mw=101.961e-3,
-            enthalpy=CpCubicMolar(
-                h_form_ref=-1675700.0,
-                a0=7.9100e01,
-                a1=0.0,
-                a2=0.0,
-                a3=0.0,
+            enthalpy=CpQuarticMolar(
+                h_form_ref=-1675692.0,
+                a0=8.02373934e+01,
+                a1=1.70150370e-01,
+                a2=-2.58981509e-04,
+                a3=1.87231587e-07,
+                a4=-4.94199681e-11
             ),
         ),
         "CuAlO2": SpeciesPropertyRecord(
@@ -589,6 +590,19 @@ PROPERTY_REGISTRY = PropertyRegistry(
                 a1=2.51521981e-01,
                 a2=-3.28757899e-04,
                 a3=1.24389558e-07,
+            ),
+        ),
+        "SiO2": SpeciesPropertyRecord(
+            name="Silicon Dioxide",
+            phase="solid",
+            mw=60.084e-3,
+            enthalpy=CpQuarticMolar(
+                h_form_ref=-910857.0,
+                a0=4.48838385e+01,
+                a1=1.18994056e-01,
+                a2=-1.86293338e-04,
+                a3=1.24813193e-07,
+                a4=-2.97296354e-11,
             ),
         ),
     }

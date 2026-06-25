@@ -2,11 +2,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-T_data = np.genfromtxt(r"Property_Estimation\enth_hcap_data\fe3o4\temp.csv",dtype=float)[1:]
-h_data = np.genfromtxt(r"Property_Estimation\enth_hcap_data\fe3o4\enth.csv",dtype=float)[1:]
-cp_data = np.genfromtxt(r"Property_Estimation\enth_hcap_data\fe3o4\hcap.csv",dtype=float)[1:]
+T_data  = np.genfromtxt(r"Property_Estimation/enth_hcap_data/sio2/temp.csv",dtype=float)[1:]
+h_data  = np.genfromtxt(r"Property_Estimation/enth_hcap_data/sio2/enth.csv",dtype=float)[1:]
+cp_data = np.genfromtxt(r"Property_Estimation/enth_hcap_data/sio2/hcap.csv",dtype=float)[1:]
 
-h_ref = -1118380 # J/mol
+h_ref = -910857.0 # J/mol
 t_ref = 298.15  # K
 
 h_weight = 9.0
