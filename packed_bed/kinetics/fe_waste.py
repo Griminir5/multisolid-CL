@@ -88,9 +88,9 @@ AVRAMI_ORDER = { # not actually used, here for reference
     "H2": 0.1489,
     "O2": None,
 }
-CONC_GATE = 0.1
+CONC_GATE = 0.001
 REDUCTION_SOLID_REMAINDER_ORDER = 0.7769
-H2_POWER_OFFSET_MOLM3 = 0.1
+H2_POWER_OFFSET_MOLM3 = 0.001
 
 # Two-term rational approximations a*x/(1+b*|x|) + c*x/(1+d*|x|), fit over [0, 1]
 # with f(0) = 0 and f(1) = 1.
