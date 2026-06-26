@@ -88,9 +88,9 @@ AVRAMI_ORDER = { # not actually used, here for reference
     "H2": 0.1489,
     "O2": None,
 }
-CONC_GATE = 0.001
+CONC_GATE = 0.0001
 REDUCTION_SOLID_REMAINDER_ORDER = 0.7769
-H2_POWER_OFFSET_MOLM3 = 0.001
+H2_POWER_OFFSET_MOLM3 = 0.0001
 
 # Two-term rational approximations a*x/(1+b*|x|) + c*x/(1+d*|x|), fit over [0, 1]
 # with f(0) = 0 and f(1) = 1.
@@ -116,6 +116,9 @@ def _temperature_k_expression(temperature) -> Any:
 
 def _concentration_expression(conc) -> Any:
     return conc / Constant(1.0 * mol / m**3)
+
+def _gas_phase_concentration_expression(conc, gas_fraction) -> Any:
+    return _concentration_expression(conc / gas_fraction)
 
 def rational_power_value(power: float, x: float) -> float:
     a, b, c, d = RATIONAL_POWER_COEFFICIENTS[power]
@@ -223,8 +226,9 @@ def _fe_waste_terms(context: KineticsContext) -> FeWasteTerms:
     Fe2O3_conc = _concentration_expression(context.model.c_sol(iron_oxide_idx, context.idx_cell))    
     o2_idx = context.gas_index("O2")
     h2_idx = context.gas_index("H2")
-    o2_conc = _concentration_expression(context.model.c_gas(o2_idx, context.idx_cell))
-    h2_conc = _concentration_expression(context.model.c_gas(h2_idx, context.idx_cell))
+    gas_fraction = context.model.gasfrac(context.idx_cell)
+    o2_conc = _gas_phase_concentration_expression(context.model.c_gas(o2_idx, context.idx_cell), gas_fraction)
+    h2_conc = _gas_phase_concentration_expression(context.model.c_gas(h2_idx, context.idx_cell), gas_fraction)
     temperature_k = _temperature_k_expression(context.model.T(context.idx_cell))
 
     return FeWasteTerms(
