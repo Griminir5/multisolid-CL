@@ -1,4 +1,5 @@
 daetools-2.6.0-win64/
+reference_material/
 **/*pyc*
 typings/
 pyrightconfig.json

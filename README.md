@@ -11,6 +11,10 @@ project packaging metadata in this repository yet, so install the runtime
 dependencies into your Python environment and run commands from the repository
 root.
 
+This repository does not redistribute DAETools, OpenCS, OpenCL kernels, PyQt, or
+other third-party runtime packages. Install those dependencies separately under
+their own licenses.
+
 ## Requirements
 
 - Python 3.11 or Python 3.12.
@@ -442,3 +446,14 @@ rules. It checks, among other things:
 - missing or unknown kinetics hooks during simulation assembly.
 
 Use `--validate-only` after editing inputs or adding new model components.
+
+## License
+
+This project is licensed under the GNU General Public License version 3 only
+(`GPL-3.0-only`). See `LICENSE` for the full license text and
+`THIRD_PARTY_NOTICES.md` for dependency license notes.
+
+Third-party software is not relicensed by this project. DAETools, OpenCS, PyQt,
+Graphviz, VTK, NumPy, pandas, SciPy, matplotlib, pydantic, PyYAML, pygraphviz,
+pymoo, and other dependencies retain their own license terms and should be
+installed or obtained separately.
