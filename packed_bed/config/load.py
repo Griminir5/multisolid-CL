@@ -71,7 +71,8 @@ def load_case(run_yaml_path: str | Path) -> Case:
     """Load, resolve, compile, and structurally validate one case."""
 
     run_path = Path(run_yaml_path).resolve()
-    run = _load_config_model(RunConfig, run_path, "run")
+    run_data = read_yaml_mapping(run_path, "run")
+    run = _parse_config_model(RunConfig, run_data, "run", run_path)
     base_dir = run_path.parent
     input_paths = {
         "chemistry": resolve_path(base_dir, run.references.chemistry_file),
@@ -89,9 +90,77 @@ def load_case(run_yaml_path: str | Path) -> Case:
     if path_errors:
         raise PackedBedValidationError("\n".join(path_errors))
 
-    chemistry = _load_config_model(ChemistryConfig, input_paths["chemistry"], "chemistry")
-    program = _load_config_model(ProgramConfig, input_paths["program"], "program")
-    solids = _load_config_model(SolidConfig, input_paths["solids"], "solids")
+    return _build_case(
+        run_path=run_path,
+        chemistry_path=input_paths["chemistry"],
+        program_path=input_paths["program"],
+        solids_path=input_paths["solids"],
+        run=run,
+        chemistry=_parse_config_model(
+            ChemistryConfig,
+            read_yaml_mapping(input_paths["chemistry"], "chemistry"),
+            "chemistry",
+            input_paths["chemistry"],
+        ),
+        program=_parse_config_model(
+            ProgramConfig,
+            read_yaml_mapping(input_paths["program"], "program"),
+            "program",
+            input_paths["program"],
+        ),
+        solids=_parse_config_model(
+            SolidConfig,
+            read_yaml_mapping(input_paths["solids"], "solids"),
+            "solids",
+            input_paths["solids"],
+        ),
+    )
+
+
+def resolve_case(
+    *,
+    run_path: str | Path,
+    chemistry_path: str | Path,
+    program_path: str | Path,
+    solids_path: str | Path,
+    run_data: dict[str, Any],
+    chemistry_data: dict[str, Any],
+    program_data: dict[str, Any],
+    solids_data: dict[str, Any],
+) -> Case:
+    """Resolve an in-memory case without reading or writing files."""
+
+    paths = {
+        "run": Path(run_path).resolve(),
+        "chemistry": Path(chemistry_path).resolve(),
+        "program": Path(program_path).resolve(),
+        "solids": Path(solids_path).resolve(),
+    }
+    return _build_case(
+        run_path=paths["run"],
+        chemistry_path=paths["chemistry"],
+        program_path=paths["program"],
+        solids_path=paths["solids"],
+        run=_parse_config_model(RunConfig, run_data, "run", paths["run"]),
+        chemistry=_parse_config_model(
+            ChemistryConfig, chemistry_data, "chemistry", paths["chemistry"]
+        ),
+        program=_parse_config_model(ProgramConfig, program_data, "program", paths["program"]),
+        solids=_parse_config_model(SolidConfig, solids_data, "solids", paths["solids"]),
+    )
+
+
+def _build_case(
+    *,
+    run_path: Path,
+    chemistry_path: Path,
+    program_path: Path,
+    solids_path: Path,
+    run: RunConfig,
+    chemistry: ChemistryConfig,
+    program: ProgramConfig,
+    solids: SolidConfig,
+) -> Case:
 
     shape_errors = _validate_input_shapes(chemistry, solids, program, run)
     if shape_errors:
@@ -107,14 +176,15 @@ def load_case(run_yaml_path: str | Path) -> Case:
     programs = compile_program_channels(
         program,
         chemistry.gas_species,
+        run.model,
         repeat=run.simulation.repeat_program,
         time_horizon=run.simulation.time_horizon_s,
     )
     case = Case(
         run_path=run_path,
-        chemistry_path=input_paths["chemistry"],
-        solids_path=input_paths["solids"],
-        program_path=input_paths["program"],
+        chemistry_path=chemistry_path,
+        solids_path=solids_path,
+        program_path=program_path,
         chemistry=chemistry,
         solids=solids,
         run=run,
@@ -212,9 +282,9 @@ def resolve_path(base_dir: Path, raw_path: str) -> Path:
     return (base_dir / path).resolve() if not path.is_absolute() else path.resolve()
 
 
-def _load_config_model(model_type, path: Path, label: str):
+def _parse_config_model(model_type, data: dict[str, Any], label: str, path: Path):
     try:
-        return model_type.model_validate(read_yaml_mapping(path, label))
+        return model_type.model_validate(data)
     except ValidationError as exc:
         lines = [f"{label} is invalid: {path}"]
         for error in exc.errors():
@@ -380,6 +450,7 @@ __all__ = (
     "PackedBedValidationError",
     "load_case",
     "read_yaml_mapping",
+    "resolve_case",
     "resolve_path",
     "validate_case",
 )

@@ -1,4 +1,4 @@
-from .load import Case, PackedBedValidationError, load_case, validate_case
+from .load import Case, PackedBedValidationError, load_case, resolve_case, validate_case
 from .models import ChemistryConfig, ProgramConfig, RunConfig, SolidConfig
 
 __all__ = [
@@ -9,5 +9,6 @@ __all__ = [
     "RunConfig",
     "SolidConfig",
     "load_case",
+    "resolve_case",
     "validate_case",
 ]

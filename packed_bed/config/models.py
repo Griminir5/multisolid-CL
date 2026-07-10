@@ -102,13 +102,17 @@ class ScalarChannelConfig(ConfigModel):
     steps: ScalarSteps = Field(default_factory=tuple)
 
 
+class InletFlowConfig(ScalarChannelConfig):
+    basis: Literal["mol_per_s", "ghsv_per_h"] = "mol_per_s"
+
+
 class CompositionChannelConfig(ConfigModel):
     initial: FractionMapping
     steps: CompositionSteps = Field(default_factory=tuple)
 
 
 class ProgramConfig(ConfigModel):
-    inlet_flow: ScalarChannelConfig
+    inlet_flow: InletFlowConfig
     inlet_temperature: ScalarChannelConfig
     outlet_pressure: ScalarChannelConfig
     inlet_composition: CompositionChannelConfig
@@ -241,6 +245,7 @@ __all__ = (
     "CompositionChannelConfig",
     "CompositionRampStep",
     "HoldStep",
+    "InletFlowConfig",
     "ModelConfig",
     "OutputConfig",
     "ProgramConfig",

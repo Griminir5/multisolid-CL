@@ -9,6 +9,7 @@ if TYPE_CHECKING:
         CompositionChannelConfig,
         CompositionRampStep,
         HoldStep,
+        ModelConfig,
         ProgramConfig,
         ScalarChannelConfig,
         ScalarRampStep,
@@ -16,6 +17,12 @@ if TYPE_CHECKING:
 
 
 DEFAULT_SMOOTH_RAMP_WIDTH_S = 1.0
+NORMAL_TEMPERATURE_K = 273.15
+NORMAL_PRESSURE_PA = 100000.0
+GAS_CONSTANT_J_PER_MOL_K = 8.31446
+NORMAL_MOLAR_DENSITY_MOL_PER_M3 = (
+    NORMAL_PRESSURE_PA / (GAS_CONSTANT_J_PER_MOL_K * NORMAL_TEMPERATURE_K)
+)
 ProgramValue = float | tuple[float, ...]
 
 
@@ -185,17 +192,19 @@ def compile_scalar_channel(
     *,
     repeat: bool = False,
     time_horizon: float | None = None,
+    value_scale: float = 1.0,
 ) -> CompiledProgram:
+    initial_value = channel.initial * value_scale
     segments = _compile_program_segments(
-        channel.initial,
+        initial_value,
         channel.steps,
         repeat=repeat,
         time_horizon=time_horizon,
         resolve_next_value=lambda _step_index, step, current_value: (
-            current_value if step.kind == "hold" else step.target
+            current_value if step.kind == "hold" else step.target * value_scale
         ),
     )
-    return CompiledProgram(initial_value=channel.initial, segments=segments)
+    return CompiledProgram(initial_value=initial_value, segments=segments)
 
 
 def compile_composition_channel(
@@ -232,17 +241,24 @@ def compile_composition_channel(
 def compile_program_channels(
     config: "ProgramConfig",
     gas_species: tuple[str, ...],
+    model: "ModelConfig",
     *,
     repeat: bool,
     time_horizon: float,
 ) -> tuple[CompiledProgram, CompiledProgram, CompiledProgram, CompiledProgram]:
     """Compile all operating channels once, in their runtime field order."""
 
+    inlet_flow_scale = 1.0
+    if config.inlet_flow.basis == "ghsv_per_h":
+        empty_bed_volume_m3 = math.pi * model.bed_radius_m**2 * model.bed_length_m
+        inlet_flow_scale = empty_bed_volume_m3 * NORMAL_MOLAR_DENSITY_MOL_PER_M3 / 3600.0
+
     return (
         compile_scalar_channel(
             config.inlet_flow,
             repeat=repeat,
             time_horizon=time_horizon,
+            value_scale=inlet_flow_scale,
         ),
         compile_composition_channel(
             config.inlet_composition,
@@ -266,6 +282,7 @@ def compile_program_channels(
 __all__ = (
     "CompiledProgram",
     "DEFAULT_SMOOTH_RAMP_WIDTH_S",
+    "NORMAL_MOLAR_DENSITY_MOL_PER_M3",
     "ProgramSegment",
     "compile_composition_channel",
     "compile_program_channels",

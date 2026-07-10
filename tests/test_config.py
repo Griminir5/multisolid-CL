@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -11,7 +12,12 @@ import yaml
 
 import packed_bed.config as config
 from packed_bed.config import Case, PackedBedValidationError, ProgramConfig, load_case
-from packed_bed.programs import CompiledProgram, compile_composition_channel, compile_scalar_channel
+from packed_bed.programs import (
+    NORMAL_MOLAR_DENSITY_MOL_PER_M3,
+    CompiledProgram,
+    compile_composition_channel,
+    compile_scalar_channel,
+)
 
 
 def _case_documents(
@@ -118,6 +124,26 @@ def test_load_case_is_side_effect_free(tmp_path: Path) -> None:
 
     assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == files_before
     assert not (tmp_path / "output").exists()
+
+
+def test_ghsv_inlet_flow_is_compiled_for_an_ordinary_case(tmp_path: Path) -> None:
+    documents = _case_documents()
+    documents["program.yaml"]["inlet_flow"].update(
+        basis="ghsv_per_h",
+        initial=3600.0,
+        steps=[{"kind": "ramp", "duration_s": 10.0, "target": 7200.0}],
+    )
+    run_path = _write_case(tmp_path, documents)
+
+    case = load_case(run_path)
+
+    empty_bed_volume_m3 = math.pi * 0.01**2 * 1.0
+    assert case.inlet_flow_program.initial_value == pytest.approx(
+        empty_bed_volume_m3 * NORMAL_MOLAR_DENSITY_MOL_PER_M3
+    )
+    assert case.inlet_flow_program.segments[0].end_value == pytest.approx(
+        2.0 * empty_bed_volume_m3 * NORMAL_MOLAR_DENSITY_MOL_PER_M3
+    )
 
 
 def test_load_case_does_not_import_daetools(tmp_path: Path) -> None:

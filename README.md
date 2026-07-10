@@ -58,6 +58,12 @@ The package entry point is:
 python -m packed_bed packed_bed\examples\medrano_case\run.yaml
 ```
 
+Pre-run diagrams and post-run result plots are explicit options:
+
+```powershell
+python -m packed_bed packed_bed\examples\medrano_case\run.yaml --artifacts --plots
+```
+
 Validate a case without integrating it:
 
 ```powershell
@@ -81,7 +87,8 @@ single-case validation and execution path.
 python -m packed_bed batch packed_bed\examples\default_batch_case\batch.yaml
 ```
 
-Validate and materialize the generated cases without integrating them:
+Expand and validate every generated case without creating directories,
+manifests, plots, or other files:
 
 ```powershell
 python -m packed_bed batch packed_bed\examples\default_batch_case\batch.yaml --validate-only
@@ -99,9 +106,29 @@ CLI option overrides the file setting.
 
 The batch specification lives beside its own base case. Program presets can use
 the normal mol/s inlet-flow form, or can set `inlet_flow.basis: ghsv_per_h`.
-GHSV values are converted during batch materialization using the final case
-geometry, 273.15 K, and 1 bar; the generated `program.yaml` always contains
-mol/s.
+GHSV is ordinary program configuration for both single and batch cases. It is
+compiled to mol/s using the resolved case geometry, 273.15 K, and 1 bar; a
+materialized batch `program.yaml` retains the declared basis and values.
+
+Batch value overrides use recursive document patches. Nested mappings merge,
+later axes win deterministically, and sequences replace as a whole:
+
+```yaml
+axes:
+  - id: temperature
+    values:
+      - id: 700c
+        patch:
+          run:
+            model:
+              ambient_temperature_k: 973.15
+          program:
+            inlet_temperature:
+              initial: 973.15
+```
+
+Set top-level `artifacts: true` or `plots: true` in `batch.yaml` when those
+outputs are wanted. They default to false.
 
 The top-level `run.yaml` points to three sibling input files:
 
