@@ -11,7 +11,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S, compile_composition_channel
+from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S
 from .reporting import REPORT_VARIABLE_REGISTRY
 from .results import RunResult
 
@@ -195,13 +195,7 @@ def _smooth_ramp_width_s_for_result(run_result: RunResult) -> float:
 
 
 def _sample_inlet_composition(run_result: RunResult, time_s: np.ndarray, gas_species: tuple[str, ...]) -> np.ndarray:
-    simulation = run_result.run_bundle.run.simulation
-    program = compile_composition_channel(
-        run_result.run_bundle.program.inlet_composition,
-        gas_species,
-        repeat=simulation.repeat_program,
-        time_horizon=simulation.time_horizon_s,
-    )
+    program = run_result.case.inlet_composition_program
     initial_value = np.asarray(program.initial_value, dtype=float)
     sampled = np.empty((time_s.size, initial_value.size), dtype=float)
     smooth_ramp_width_s = _smooth_ramp_width_s_for_result(run_result)
@@ -356,7 +350,7 @@ def _compute_outlet_flows_and_composition(
     gas_flux: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     outlet_species_flux = gas_flux[:, :, -1]
-    cross_section_area_m2 = np.pi * run_result.run_bundle.run.model.bed_radius_m ** 2
+    cross_section_area_m2 = np.pi * run_result.case.run.model.bed_radius_m ** 2
     outlet_species_flow_mol_s = cross_section_area_m2 * outlet_species_flux
     outlet_flowrate_mol_s = outlet_species_flow_mol_s.sum(axis=1)
 
@@ -402,7 +396,7 @@ def extract_run_result_plot_data(run_result: RunResult) -> RunResultPlotData:
         label="cell-center coordinates",
     )
 
-    gas_species = tuple(run_result.run_bundle.chemistry.gas_species)
+    gas_species = tuple(run_result.case.chemistry.gas_species)
     _validate_plot_series_shapes(
         axial_positions_m=axial_positions_m,
         gas_species=gas_species,
@@ -615,7 +609,7 @@ def render_run_result_plots(
     image_format: str = "svg",
 ) -> dict[str, Path]:
     plot_data = extract_run_result_plot_data(run_result)
-    resolved_output_dir = Path(output_dir) if output_dir is not None else run_result.run_bundle.artifacts_directory
+    resolved_output_dir = Path(output_dir) if output_dir is not None else run_result.case.artifacts_directory
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
     return {

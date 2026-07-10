@@ -11,12 +11,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .config import RunBundle
-from .programs import (
-    DEFAULT_SMOOTH_RAMP_WIDTH_S,
-    compile_composition_channel,
-    compile_scalar_channel,
-)
+from .config import Case
+from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S
 from .solid_profiles import (
     build_cell_scalar_profile,
     build_face_scalar_profile,
@@ -57,7 +53,7 @@ def is_pygraphviz_available() -> bool:
 
 
 def build_system_graph(
-    run_bundle: RunBundle,
+    case: Case,
     *,
     property_registry,
     reaction_catalog
@@ -65,7 +61,7 @@ def build_system_graph(
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
 
-    for species_id in run_bundle.chemistry.gas_species:
+    for species_id in case.chemistry.gas_species:
         record = property_registry.get_record(species_id)
         nodes.append(
             GraphNode(
@@ -77,7 +73,7 @@ def build_system_graph(
             )
         )
 
-    for species_id in run_bundle.solids.solid_species:
+    for species_id in case.solids.solid_species:
         record = property_registry.get_record(species_id)
         nodes.append(
             GraphNode(
@@ -89,7 +85,7 @@ def build_system_graph(
             )
         )
 
-    for reaction_id in run_bundle.chemistry.reaction_ids:
+    for reaction_id in case.chemistry.reaction_ids:
         reaction = reaction_catalog[reaction_id]
         reaction_node_id = f"reaction:{reaction.id}"
         label_lines = [reaction.id]
@@ -329,7 +325,7 @@ def render_system_graph(system_graph: SystemGraph, output_dir) -> dict[str, Path
 
 
 def render_operating_program(
-    run_bundle: RunBundle,
+    case: Case,
     output_dir,
     *,
     smooth_ramp_width_s: float = DEFAULT_SMOOTH_RAMP_WIDTH_S,
@@ -337,31 +333,13 @@ def render_operating_program(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    simulation = run_bundle.run.simulation
+    simulation = case.run.simulation
     time_horizon = simulation.time_horizon_s
-    gas_species = run_bundle.chemistry.gas_species
-
-    inlet_flow_program = compile_scalar_channel(
-        run_bundle.program.inlet_flow,
-        repeat=simulation.repeat_program,
-        time_horizon=time_horizon,
-    )
-    inlet_temperature_program = compile_scalar_channel(
-        run_bundle.program.inlet_temperature,
-        repeat=simulation.repeat_program,
-        time_horizon=time_horizon,
-    )
-    outlet_pressure_program = compile_scalar_channel(
-        run_bundle.program.outlet_pressure,
-        repeat=simulation.repeat_program,
-        time_horizon=time_horizon,
-    )
-    inlet_composition_program = compile_composition_channel(
-        run_bundle.program.inlet_composition,
-        gas_species,
-        repeat=simulation.repeat_program,
-        time_horizon=time_horizon,
-    )
+    gas_species = case.chemistry.gas_species
+    inlet_flow_program = case.inlet_flow_program
+    inlet_temperature_program = case.inlet_temperature_program
+    outlet_pressure_program = case.outlet_pressure_program
+    inlet_composition_program = case.inlet_composition_program
     sample_times = _smoothed_program_sample_times(
         (
             inlet_flow_program,
@@ -433,42 +411,42 @@ def render_operating_program(
     return {"operating_program_svg": svg_path}
 
 
-def render_initial_solid_profile(run_bundle: RunBundle, output_dir) -> dict[str, Path]:
+def render_initial_solid_profile(case: Case, output_dir) -> dict[str, Path]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    zones = run_bundle.solids.initial_profile.zones
+    zones = case.solids.initial_profile.zones
     cell_centers, face_positions = build_uniform_axial_grid(
-        run_bundle.run.model.bed_length_m,
-        run_bundle.run.model.axial_cells,
+        case.run.model.bed_length_m,
+        case.run.model.axial_cells,
     )
-    authored_edges = zone_edges(run_bundle.solids)
-    e_b = build_cell_scalar_profile(run_bundle.solids, cell_centers, "e_b")
-    e_p = build_cell_scalar_profile(run_bundle.solids, cell_centers, "e_p")
+    authored_edges = zone_edges(case.solids)
+    e_b = build_cell_scalar_profile(case.solids, cell_centers, "e_b")
+    e_p = build_cell_scalar_profile(case.solids, cell_centers, "e_p")
     gas_fraction = gas_fraction_from_voidages(e_b, e_p)
     solid_fraction = solid_fraction_from_voidages(e_b, e_p)
     bed_basis_concentration = convert_solid_profile_to_bed_volume(
-        run_bundle.solids,
+        case.solids,
         cell_centers,
         solid_fraction,
-        run_bundle.solids.solid_species,
+        case.solids.solid_species,
     )
-    d_p = build_face_scalar_profile(run_bundle.solids, face_positions, "d_p")
+    d_p = build_face_scalar_profile(case.solids, face_positions, "d_p")
 
     unit_label = {
         "solid": "mol/m^3 solid",
         "bed": "mol/m^3 bed",
-    }.get(run_bundle.solids.initial_profile.basis, run_bundle.solids.initial_profile.basis)
+    }.get(case.solids.initial_profile.basis, case.solids.initial_profile.basis)
 
     figure, axes = plt.subplots(4, 1, figsize=(12, 15), sharex=True)
 
-    for species_id in run_bundle.solids.solid_species:
+    for species_id in case.solids.solid_species:
         zone_values = [float(zone.values[species_id]) for zone in zones]
         axes[0].stairs(zone_values, authored_edges, label=species_id, linewidth=2)
     axes[0].set_title("Initial Solid Concentration Input")
     axes[0].set_ylabel(unit_label)
 
-    for species_index, species_id in enumerate(run_bundle.solids.solid_species):
+    for species_index, species_id in enumerate(case.solids.solid_species):
         axes[1].stairs(
             bed_basis_concentration[species_index],
             face_positions,
@@ -495,9 +473,9 @@ def render_initial_solid_profile(run_bundle: RunBundle, output_dir) -> dict[str,
     axes[1].set_ylim(bottom=0.0)
     axes[3].set_ylim(bottom=0.0)
     _draw_zone_boundaries(axes, authored_edges)
-    _finalize_series_axes(axes, x_min=0.0, x_max=run_bundle.run.model.bed_length_m)
+    _finalize_series_axes(axes, x_min=0.0, x_max=case.run.model.bed_length_m)
 
-    if run_bundle.solids.solid_species:
+    if case.solids.solid_species:
         axes[0].legend(loc="upper right", fontsize=8)
         axes[1].legend(loc="upper right", fontsize=8)
     axes[2].legend(loc="upper right", fontsize=8)

@@ -1,8 +1,4 @@
-"""
-Reusable axial face-reconstruction schemes for DAETOOLS finite-volume models.
-"""
-
-from daetools.pyDAE import Max, Min
+"""Reusable axial face-reconstruction schemes for finite-volume models."""
 
 
 __all__ = (
@@ -34,6 +30,8 @@ def validate_scheme_name(scheme_name):
 
 
 def _minmod(delta_up, delta_dn, zero_like):
+    from daetools.pyDAE import Max, Min
+
     return Max(zero_like, Min(delta_up, delta_dn)) + Min(zero_like, Max(delta_up, delta_dn))
 
 

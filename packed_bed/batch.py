@@ -15,9 +15,9 @@ from typing import Any, Callable
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from .config import PackedBedValidationError, RunBundle, load_run_bundle
-from .config.io import read_yaml_mapping, resolve_path
-from .config.validators import ConfigString
+from .config import Case, PackedBedValidationError, load_case
+from .config.load import read_yaml_mapping, resolve_path
+from .config.models import ConfigString
 from .results import RunResult
 
 
@@ -560,24 +560,24 @@ def _default_batch_functions():
 
 
 def _run_case_direct(
-    run_bundle: RunBundle,
-    generate_artifacts_fn: Callable[[RunBundle], dict[str, Path]] | None,
+    case: Case,
+    generate_artifacts_fn: Callable[[Case], dict[str, Path]] | None,
     run_simulation_fn: Callable[..., RunResult],
 ) -> tuple[Path, dict[str, Any]]:
-    artifact_paths = generate_artifacts_fn(run_bundle) if generate_artifacts_fn is not None else {}
-    run_result = run_simulation_fn(run_bundle, artifact_paths=artifact_paths)
+    artifact_paths = generate_artifacts_fn(case) if generate_artifacts_fn is not None else {}
+    run_result = run_simulation_fn(case, artifact_paths=artifact_paths)
     return run_result.output_directory, dict(run_result.balance_errors)
 
 
 def _run_case_worker(
-    run_bundle: RunBundle,
-    generate_artifacts_fn: Callable[[RunBundle], dict[str, Path]] | None,
+    case: Case,
+    generate_artifacts_fn: Callable[[Case], dict[str, Path]] | None,
     run_simulation_fn: Callable[..., RunResult],
     result_queue,
 ) -> None:
     try:
         output_directory, balance_errors = _run_case_direct(
-            run_bundle,
+            case,
             generate_artifacts_fn,
             run_simulation_fn,
         )
@@ -595,8 +595,8 @@ def _run_case_worker(
 
 
 def _run_case_with_timeout(
-    run_bundle: RunBundle,
-    generate_artifacts_fn: Callable[[RunBundle], dict[str, Path]] | None,
+    case: Case,
+    generate_artifacts_fn: Callable[[Case], dict[str, Path]] | None,
     run_simulation_fn: Callable[..., RunResult],
     timeout_s: float,
 ) -> tuple[Path, dict[str, Any]]:
@@ -608,7 +608,7 @@ def _run_case_with_timeout(
     result_queue = context.Queue(maxsize=1)
     process = context.Process(
         target=_run_case_worker,
-        args=(run_bundle, generate_artifacts_fn, run_simulation_fn, result_queue),
+        args=(case, generate_artifacts_fn, run_simulation_fn, result_queue),
     )
 
     try:
@@ -652,7 +652,7 @@ def run_batch_file(
     *,
     validate_only: bool = False,
     case_timeout_s: float | None = None,
-    generate_artifacts_fn: Callable[[RunBundle], dict[str, Path]] | None = None,
+    generate_artifacts_fn: Callable[[Case], dict[str, Path]] | None = None,
     run_simulation_fn: Callable[..., RunResult] | None = None,
 ) -> BatchResult:
     document = load_batch_spec(batch_yaml_path)
@@ -686,13 +686,13 @@ def run_batch_file(
 
     for record in records:
         try:
-            run_bundle = load_run_bundle(record.run_yaml_path)
+            case = load_case(record.run_yaml_path)
         except Exception as exc:
             record.status = "validation_failed"
             record.error = str(exc)
             continue
 
-        record.output_directory = run_bundle.output_directory
+        record.output_directory = case.output_directory
         if validate_only:
             record.status = "validation_passed"
             continue
@@ -701,13 +701,13 @@ def run_batch_file(
             start = perf_counter()
             if effective_case_timeout_s is None:
                 output_directory, balance_errors = _run_case_direct(
-                    run_bundle,
+                    case,
                     generate_artifacts_fn,
                     run_simulation_fn,
                 )
             else:
                 output_directory, balance_errors = _run_case_with_timeout(
-                    run_bundle,
+                    case,
                     generate_artifacts_fn,
                     run_simulation_fn,
                     effective_case_timeout_s,

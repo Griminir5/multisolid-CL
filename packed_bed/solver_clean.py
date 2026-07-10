@@ -11,15 +11,12 @@ import numpy as np
 from daetools.pyDAE import *
 
 from .axial_schemes import reconstruct_face_states
-from .config import RunBundle
-from .config.run import ModelConfig, SolverConfig
-from .config.solids import SolidConfig
+from .config import Case
+from .config.models import ModelConfig, SolidConfig, SolverConfig
 from .programs import (
+    CompiledProgram,
     DEFAULT_SMOOTH_RAMP_WIDTH_S,
-    Program,
     ProgramSegment,
-    compile_composition_channel,
-    compile_scalar_channel,
 )
 from .kinetics import KineticsContext, resolve_kinetics_hooks
 from .reactions import ReactionNetwork, build_reaction_network
@@ -700,10 +697,10 @@ class simBed(daeSimulation):
         property_registry,
         mass_scheme,
         heat_scheme,
-        inlet_flow_program: Program,
-        inlet_composition_program: Program,
-        inlet_temperature_program: Program,
-        outlet_pressure_program: Program,
+        inlet_flow_program: CompiledProgram,
+        inlet_composition_program: CompiledProgram,
+        inlet_temperature_program: CompiledProgram,
+        outlet_pressure_program: CompiledProgram,
         operation_time_horizon,
         model_config: ModelConfig,
         system_name,
@@ -997,7 +994,7 @@ class simBed(daeSimulation):
 
 @dataclass(frozen=True)
 class SimulationAssembly:
-    run_bundle: RunBundle
+    case: Case
     simulation: simBed
 
 def configure_solver_threads(threads: int):
@@ -1090,69 +1087,48 @@ def build_idas_solver(config: SolverConfig):
 
 
 def assemble_simulation(
-    run_bundle: RunBundle,
+    case: Case,
     *,
     property_registry,
     reaction_catalog,
     smooth_ramp_width_s=SMOOTH_RAMP_WIDTH_S,
 ) -> SimulationAssembly:
     reaction_network = build_reaction_network(
-        run_bundle.chemistry.reaction_ids,
-        run_bundle.chemistry.gas_species,
-        run_bundle.solids.solid_species,
+        case.chemistry.reaction_ids,
+        case.chemistry.gas_species,
+        case.solids.solid_species,
         reaction_catalog=reaction_catalog,
     )
     reaction_rate_hooks = resolve_kinetics_hooks(reaction_network)
 
-    simulation_config = run_bundle.run.simulation
-    inlet_flow_program = compile_scalar_channel(
-        run_bundle.program.inlet_flow,
-        repeat=simulation_config.repeat_program,
-        time_horizon=simulation_config.time_horizon_s,
-    )
-    inlet_composition_program = compile_composition_channel(
-        run_bundle.program.inlet_composition,
-        run_bundle.chemistry.gas_species,
-        repeat=simulation_config.repeat_program,
-        time_horizon=simulation_config.time_horizon_s,
-    )
-    inlet_temperature_program = compile_scalar_channel(
-        run_bundle.program.inlet_temperature,
-        repeat=simulation_config.repeat_program,
-        time_horizon=simulation_config.time_horizon_s,
-    )
-    outlet_pressure_program = compile_scalar_channel(
-        run_bundle.program.outlet_pressure,
-        repeat=simulation_config.repeat_program,
-        time_horizon=simulation_config.time_horizon_s,
-    )
-    materialize_solid_mole_fractions = "solid_mole_fraction" in run_bundle.run.outputs.requested_reports
+    simulation_config = case.run.simulation
+    materialize_solid_mole_fractions = "solid_mole_fraction" in case.run.outputs.requested_reports
 
     simulation = simBed(
-        gas_species=run_bundle.chemistry.gas_species,
-        solid_species=run_bundle.solids.solid_species,
+        gas_species=case.chemistry.gas_species,
+        solid_species=case.solids.solid_species,
         reaction_network=reaction_network,
         reaction_rate_hooks=reaction_rate_hooks,
-        solid_config=run_bundle.solids,
+        solid_config=case.solids,
         property_registry=property_registry,
         mass_scheme=simulation_config.mass_scheme,
         heat_scheme=simulation_config.heat_scheme,
-        inlet_flow_program=inlet_flow_program,
-        inlet_composition_program=inlet_composition_program,
-        inlet_temperature_program=inlet_temperature_program,
-        outlet_pressure_program=outlet_pressure_program,
+        inlet_flow_program=case.inlet_flow_program,
+        inlet_composition_program=case.inlet_composition_program,
+        inlet_temperature_program=case.inlet_temperature_program,
+        outlet_pressure_program=case.outlet_pressure_program,
         operation_time_horizon=simulation_config.time_horizon_s,
-        model_config=run_bundle.run.model,
+        model_config=case.run.model,
         system_name=simulation_config.system_name,
         smooth_ramp_width_s=smooth_ramp_width_s,
         materialize_solid_mole_fractions=materialize_solid_mole_fractions,
     )
-    return SimulationAssembly(run_bundle=run_bundle, simulation=simulation)
+    return SimulationAssembly(case=case, simulation=simulation)
 
 
 def _requested_report_ids(assembly: SimulationAssembly):
     try:
-        return tuple(assembly.run_bundle.run.outputs.requested_reports)
+        return tuple(assembly.case.run.outputs.requested_reports)
     except AttributeError:
         return None
 
@@ -1202,7 +1178,7 @@ def run_assembled_simulation(
     data_reporter=None,
     after_initialize=None,
 ):
-    solver_config = assembly.run_bundle.run.solver
+    solver_config = assembly.case.run.solver
     configure_solver_threads(solver_config.threads)
     configure_evaluation_mode(solver_config.threads)
     
@@ -1214,7 +1190,7 @@ def run_assembled_simulation(
         report_ids,
         include_plot_variables=include_plot_variables,
     )
-    simulation_config = assembly.run_bundle.run.simulation
+    simulation_config = assembly.case.run.simulation
     simulation.ReportTimeDerivatives = simulation_config.report_time_derivatives
     simulation.ReportingInterval = simulation_config.reporting_interval_s
     simulation.TimeHorizon = simulation_config.time_horizon_s
@@ -1223,7 +1199,7 @@ def run_assembled_simulation(
     reporter = data_reporter if data_reporter is not None else daeNoOpDataReporter()
     if data_reporter is not None and hasattr(reporter, "IsConnected") and not reporter.IsConnected():
         process_name = simulation_config.system_name
-        if not reporter.Connect(str(assembly.run_bundle.output_directory), process_name):
+        if not reporter.Connect(str(assembly.case.output_directory), process_name):
             raise RuntimeError(f"Cannot connect data reporter for process '{process_name}'.")
 
     log = daePythonStdOutLog()

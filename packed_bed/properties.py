@@ -6,12 +6,15 @@ from typing import Mapping
 
 import numpy as np
 
-from daetools.pyDAE import Constant
-from pyUnits import J, K, Pa, mol, s
-
-
 def _as_float_array(temperature):
     return np.asarray(temperature, dtype=float)
+
+
+def _dae_symbols():
+    from daetools.pyDAE import Constant
+    from pyUnits import J, K, Pa, mol, s
+
+    return Constant, J, K, Pa, mol, s
 
 
 class BaseCorrelation(ABC):
@@ -31,12 +34,14 @@ class CpZerothMolar(BaseCorrelation):
     a0: float = 0.0
 
     def cp_dae_expression(self, temperature):
+        Constant, J, K, _Pa, mol, _s = _dae_symbols()
         return Constant(self.a0 * J / (mol * K))
 
     def cp_value(self, temperature):
         return np.zeros_like(_as_float_array(temperature), dtype=float) + self.a0
 
     def dae_expression(self, temperature):
+        Constant, J, K, _Pa, mol, _s = _dae_symbols()
         t_ref = Constant(self.t_ref * K)
         h_form = Constant(self.h_form_ref * J / mol)
         a0 = Constant(self.a0 * J / (mol * K))
@@ -55,6 +60,7 @@ class CpQuadraticMolar(BaseCorrelation):
     a2: float = 0.0
 
     def cp_dae_expression(self, temperature):
+        Constant, J, K, _Pa, mol, _s = _dae_symbols()
         t_ref = Constant(self.t_ref * K)
         a0 = Constant(self.a0 * J / (mol * K))
         a1 = Constant(self.a1 * J / (mol * K**2))
@@ -67,6 +73,7 @@ class CpQuadraticMolar(BaseCorrelation):
         return self.a0 + d_t * (self.a1 + d_t * self.a2)
 
     def dae_expression(self, temperature):
+        Constant, J, K, _Pa, mol, _s = _dae_symbols()
         t_ref = Constant(self.t_ref * K)
         h_form = Constant(self.h_form_ref * J / mol)
         a0 = Constant(self.a0 * J / (mol * K))
@@ -92,6 +99,7 @@ class CpCubicMolar(BaseCorrelation):
     a3: float = 0.0
 
     def cp_dae_expression(self, temperature):
+        Constant, J, K, _Pa, mol, _s = _dae_symbols()
         t_ref = Constant(self.t_ref * K)
         a0 = Constant(self.a0 * J / (mol * K))
         a1 = Constant(self.a1 * J / (mol * K**2))
@@ -105,6 +113,7 @@ class CpCubicMolar(BaseCorrelation):
         return self.a0 + d_t * (self.a1 + d_t * (self.a2 + d_t * self.a3))
 
     def dae_expression(self, temperature):
+        Constant, J, K, _Pa, mol, _s = _dae_symbols()
         t_ref = Constant(self.t_ref * K)
         h_form = Constant(self.h_form_ref * J / mol)
         a0 = Constant(self.a0 * J / (mol * K))
@@ -132,6 +141,7 @@ class CpQuarticMolar(BaseCorrelation):
     a4: float = 0.0
 
     def cp_dae_expression(self, temperature):
+        Constant, J, K, _Pa, mol, _s = _dae_symbols()
         t_ref = Constant(self.t_ref * K)
         a0 = Constant(self.a0 * J / (mol * K))
         a1 = Constant(self.a1 * J / (mol * K**2))
@@ -146,6 +156,7 @@ class CpQuarticMolar(BaseCorrelation):
         return self.a0 + d_t * (self.a1 + d_t * (self.a2 + d_t * (self.a3 + d_t * self.a4)))
 
     def dae_expression(self, temperature):
+        Constant, J, K, _Pa, mol, _s = _dae_symbols()
         t_ref = Constant(self.t_ref * K)
         h_form = Constant(self.h_form_ref * J / mol)
         a0 = Constant(self.a0 * J / (mol * K))
@@ -179,6 +190,7 @@ class CpShomateMolar(BaseCorrelation):
     a4: float = 0.0
 
     def cp_dae_expression(self, temperature):
+        Constant, J, K, _Pa, mol, _s = _dae_symbols()
         temp_scale = Constant(1000.0 * K)
         tau = temperature / temp_scale
         a0 = Constant(self.a0 * J / (mol * K))
@@ -193,6 +205,7 @@ class CpShomateMolar(BaseCorrelation):
         return self.a0 + self.a1 * tau + self.a2 * tau**2 + self.a3 * tau**3 + self.a4 / tau**2
 
     def dae_expression(self, temperature):
+        Constant, J, K, _Pa, mol, _s = _dae_symbols()
         t_ref = Constant(self.t_ref * K)
         temp_scale = Constant(1000.0 * K)
         h_form = Constant(self.h_form_ref * J / mol)
@@ -235,6 +248,7 @@ class ViscosityQuadratic(BaseCorrelation):
     a2: float = 0.0
 
     def dae_expression(self, temperature):
+        Constant, _J, K, Pa, _mol, s = _dae_symbols()
         t_ref = Constant(self.t_ref * K)
         a0 = Constant(self.a0 * Pa * s)
         a1 = Constant(self.a1 * (Pa * s) / K)

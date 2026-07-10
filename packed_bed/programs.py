@@ -5,10 +5,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from packed_bed.config.program import (
+    from packed_bed.config.models import (
         CompositionChannelConfig,
         CompositionRampStep,
         HoldStep,
+        ProgramConfig,
         ScalarChannelConfig,
         ScalarRampStep,
     )
@@ -27,7 +28,7 @@ class ProgramSegment:
 
 
 @dataclass(frozen=True)
-class Program:
+class CompiledProgram:
     initial_value: ProgramValue
     segments: tuple[ProgramSegment, ...]
 
@@ -39,8 +40,27 @@ class Program:
             smooth_ramp_width_s=smooth_ramp_width_s,
         )
 
+    @property
+    def duration_s(self) -> float:
+        return self.segments[-1].end_time if self.segments else 0.0
+
+
 def sum_step_durations(steps: tuple["HoldStep | ScalarRampStep | CompositionRampStep", ...]) -> float:
     return math.fsum(step.duration_s for step in steps)
+
+
+def _require_exact_keys(actual: set[str], expected: tuple[str, ...], label: str) -> None:
+    expected_keys = set(expected)
+    if actual == expected_keys:
+        return
+    missing = sorted(expected_keys - actual)
+    extra = sorted(actual - expected_keys)
+    differences = []
+    if missing:
+        differences.append(f"missing {', '.join(missing)}")
+    if extra:
+        differences.append(f"unexpected {', '.join(extra)}")
+    raise ValueError(f"{label} species mismatch: {'; '.join(differences)}.")
 
 
 def _interpolate_program_value(
@@ -165,7 +185,7 @@ def compile_scalar_channel(
     *,
     repeat: bool = False,
     time_horizon: float | None = None,
-) -> Program:
+) -> CompiledProgram:
     segments = _compile_program_segments(
         channel.initial,
         channel.steps,
@@ -175,7 +195,7 @@ def compile_scalar_channel(
             current_value if step.kind == "hold" else step.target
         ),
     )
-    return Program(initial_value=channel.initial, segments=segments)
+    return CompiledProgram(initial_value=channel.initial, segments=segments)
 
 
 def compile_composition_channel(
@@ -184,9 +204,7 @@ def compile_composition_channel(
     *,
     repeat: bool = False,
     time_horizon: float | None = None,
-) -> Program:
-    from packed_bed.config.validators import _require_exact_keys
-
+) -> CompiledProgram:
     _require_exact_keys(set(channel.initial), species_order, "program.inlet_composition.initial")
     initial_value = tuple(channel.initial[species_id] for species_id in species_order)
 
@@ -208,4 +226,49 @@ def compile_composition_channel(
         time_horizon=time_horizon,
         resolve_next_value=resolve_next_value,
     )
-    return Program(initial_value=initial_value, segments=segments)
+    return CompiledProgram(initial_value=initial_value, segments=segments)
+
+
+def compile_program_channels(
+    config: "ProgramConfig",
+    gas_species: tuple[str, ...],
+    *,
+    repeat: bool,
+    time_horizon: float,
+) -> tuple[CompiledProgram, CompiledProgram, CompiledProgram, CompiledProgram]:
+    """Compile all operating channels once, in their runtime field order."""
+
+    return (
+        compile_scalar_channel(
+            config.inlet_flow,
+            repeat=repeat,
+            time_horizon=time_horizon,
+        ),
+        compile_composition_channel(
+            config.inlet_composition,
+            gas_species,
+            repeat=repeat,
+            time_horizon=time_horizon,
+        ),
+        compile_scalar_channel(
+            config.inlet_temperature,
+            repeat=repeat,
+            time_horizon=time_horizon,
+        ),
+        compile_scalar_channel(
+            config.outlet_pressure,
+            repeat=repeat,
+            time_horizon=time_horizon,
+        ),
+    )
+
+
+__all__ = (
+    "CompiledProgram",
+    "DEFAULT_SMOOTH_RAMP_WIDTH_S",
+    "ProgramSegment",
+    "compile_composition_channel",
+    "compile_program_channels",
+    "compile_scalar_channel",
+    "sum_step_durations",
+)

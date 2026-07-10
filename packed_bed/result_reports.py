@@ -10,11 +10,7 @@ import numpy as np
 import pandas as pd
 from daetools.pyDAE import daeDataReporterLocal
 
-from .programs import (
-    DEFAULT_SMOOTH_RAMP_WIDTH_S,
-    compile_composition_channel,
-    compile_scalar_channel,
-)
+from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S
 from .reporting import DERIVED_REPORT_VARIABLE_NAMES, REPORT_VARIABLE_REGISTRY
 from .results import RunResult
 
@@ -232,11 +228,11 @@ def _axis_values(
     axis_size: int,
 ) -> tuple[Any, ...]:
     if spec.kind == "gas_species":
-        values = run_result.run_bundle.chemistry.gas_species
+        values = run_result.case.chemistry.gas_species
     elif spec.kind == "solid_species":
-        values = run_result.run_bundle.solids.solid_species
+        values = run_result.case.solids.solid_species
     elif spec.kind == "reaction":
-        values = run_result.run_bundle.chemistry.reaction_ids
+        values = run_result.case.chemistry.reaction_ids
     else:
         return _domain_points(variable, domain_index, axis_size)
 
@@ -281,13 +277,7 @@ def _smooth_ramp_width_s_for_result(run_result: RunResult) -> float:
     return float(getattr(simulation, "smooth_ramp_width_s", DEFAULT_SMOOTH_RAMP_WIDTH_S))
 
 
-def _sample_scalar_program(run_result: RunResult, channel_config: Any, time_s: np.ndarray) -> np.ndarray:
-    simulation = run_result.run_bundle.run.simulation
-    program = compile_scalar_channel(
-        channel_config,
-        repeat=simulation.repeat_program,
-        time_horizon=simulation.time_horizon_s,
-    )
+def _sample_scalar_program(run_result: RunResult, program: Any, time_s: np.ndarray) -> np.ndarray:
     smooth_ramp_width_s = _smooth_ramp_width_s_for_result(run_result)
     return np.asarray(
         [
@@ -299,14 +289,8 @@ def _sample_scalar_program(run_result: RunResult, channel_config: Any, time_s: n
 
 
 def _sample_inlet_composition(run_result: RunResult, time_s: np.ndarray) -> np.ndarray:
-    gas_species = tuple(run_result.run_bundle.chemistry.gas_species)
-    simulation = run_result.run_bundle.run.simulation
-    program = compile_composition_channel(
-        run_result.run_bundle.program.inlet_composition,
-        gas_species,
-        repeat=simulation.repeat_program,
-        time_horizon=simulation.time_horizon_s,
-    )
+    gas_species = tuple(run_result.case.chemistry.gas_species)
+    program = run_result.case.inlet_composition_program
     smooth_ramp_width_s = _smooth_ramp_width_s_for_result(run_result)
     sampled = np.empty((time_s.size, len(gas_species)), dtype=float)
     for time_index, time_value in enumerate(time_s):
@@ -367,7 +351,7 @@ def _outlet_species_flow_mol_s(
     if gas_flux is None:
         return None
 
-    cross_section_area_m2 = math.pi * run_result.run_bundle.run.model.bed_radius_m**2
+    cross_section_area_m2 = math.pi * run_result.case.run.model.bed_radius_m**2
     return cross_section_area_m2 * gas_flux[:, :, -1]
 
 
@@ -401,14 +385,14 @@ def _build_gas_mole_fraction_dataframe(
     if values.ndim != 3:
         raise ValueError(f"gas_mole_fraction report expected 3 dimensions including time; got shape {values.shape}.")
 
-    gas_species = tuple(run_result.run_bundle.chemistry.gas_species)
+    gas_species = tuple(run_result.case.chemistry.gas_species)
     if values.shape[1] != len(gas_species):
         raise ValueError(
             f"gas_mole_fraction report has {values.shape[1]} gas species, but the run configuration provides {len(gas_species)} labels."
         )
 
     cell_positions_m = _domain_points(variable, 1, values.shape[2])
-    bed_length_m = float(run_result.run_bundle.run.model.bed_length_m)
+    bed_length_m = float(run_result.case.run.model.bed_length_m)
     x_positions_m = (0.0, *cell_positions_m, bed_length_m)
 
     augmented_values = np.empty((time_s.size, len(gas_species), len(x_positions_m)), dtype=float)
@@ -428,11 +412,11 @@ def _build_gas_mole_fraction_dataframe(
 
 def _build_boundary_report_dataframe(run_result: RunResult, reference_time_s: np.ndarray) -> pd.DataFrame:
     process = _require_process(run_result)
-    bed_length_m = float(run_result.run_bundle.run.model.bed_length_m)
+    bed_length_m = float(run_result.case.run.model.bed_length_m)
 
     series: list[np.ndarray] = [
-        _sample_scalar_program(run_result, run_result.run_bundle.program.inlet_temperature, reference_time_s),
-        _sample_scalar_program(run_result, run_result.run_bundle.program.inlet_flow, reference_time_s),
+        _sample_scalar_program(run_result, run_result.case.inlet_temperature_program, reference_time_s),
+        _sample_scalar_program(run_result, run_result.case.inlet_flow_program, reference_time_s),
     ]
     columns: list[tuple[str, float]] = [
         ("inlet_temperature_k", 0.0),
@@ -444,7 +428,9 @@ def _build_boundary_report_dataframe(run_result: RunResult, reference_time_s: np
         series.append(outlet_species_flow.sum(axis=1))
         columns.append(("outlet_flowrate_mol_s", bed_length_m))
 
-    series.append(_sample_scalar_program(run_result, run_result.run_bundle.program.outlet_pressure, reference_time_s))
+    series.append(
+        _sample_scalar_program(run_result, run_result.case.outlet_pressure_program, reference_time_s)
+    )
     columns.append(("outlet_pressure_pa", bed_length_m))
 
     inlet_pressure = _optional_scalar_values(
@@ -566,7 +552,7 @@ def _safe_pickle_path(output_dir: Path, report_id: str) -> Path:
 
 
 def build_requested_report_dataframes(run_result: RunResult) -> dict[str, pd.DataFrame]:
-    requested_report_ids = tuple(run_result.run_bundle.run.outputs.requested_reports)
+    requested_report_ids = tuple(run_result.case.run.outputs.requested_reports)
     dataframes: dict[str, pd.DataFrame] = {}
 
     unknown_reports = [report_id for report_id in requested_report_ids if report_id not in REPORT_VARIABLE_REGISTRY]
@@ -638,7 +624,7 @@ def _write_report_dataframes(
 
 def export_requested_report_pickles(run_result: RunResult, output_dir: str | Path | None = None) -> dict[str, Path]:
     resolved_output_dir = Path(output_dir) if output_dir is not None else run_result.output_directory
-    requested_report_ids = tuple(run_result.run_bundle.run.outputs.requested_reports)
+    requested_report_ids = tuple(run_result.case.run.outputs.requested_reports)
     dataframes = build_requested_report_dataframes(run_result)
     return _write_report_dataframes(dataframes, requested_report_ids, resolved_output_dir)
 
@@ -646,15 +632,15 @@ def export_requested_report_pickles(run_result: RunResult, output_dir: str | Pat
 class PackedBedDataFrameReporter(daeDataReporterLocal):
     """DAE Tools reporter that writes requested packed-bed reports as pickled dataframes."""
 
-    def __init__(self, run_bundle, requested_report_ids: tuple[str, ...] | None = None):
+    def __init__(self, case, requested_report_ids: tuple[str, ...] | None = None):
         daeDataReporterLocal.__init__(self)
-        self.run_bundle = run_bundle
+        self.case = case
         self.requested_report_ids = (
             tuple(requested_report_ids)
             if requested_report_ids is not None
-            else tuple(run_bundle.run.outputs.requested_reports)
+            else tuple(case.run.outputs.requested_reports)
         )
-        self.output_directory = Path(run_bundle.output_directory)
+        self.output_directory = Path(case.output_directory)
         self.ProcessName = ""
         self.ConnectString = ""
         self.report_paths: dict[str, Path] = {}
@@ -693,15 +679,15 @@ class PackedBedDataFrameReporter(daeDataReporterLocal):
         return self._connected
 
     def write_outputs(self) -> dict[str, Path]:
-        run = self.run_bundle.run.model_copy(
+        run = self.case.run.model_copy(
             update={
-                "outputs": self.run_bundle.run.outputs.model_copy(
+                "outputs": self.case.run.outputs.model_copy(
                     update={"requested_reports": self.requested_report_ids}
                 )
             }
         )
         run_result = RunResult(
-            run_bundle=replace(self.run_bundle, run=run),
+            case=replace(self.case, run=run),
             output_directory=self.output_directory,
             success=True,
             reporter=self,

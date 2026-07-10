@@ -7,7 +7,7 @@ from pathlib import Path
 import datetime
 
 from .batch import run_batch_file
-from .config import RunBundle, load_run_bundle
+from .config import Case, load_case
 from .incidence_matrix import write_solver_incidence_artifacts
 from .properties import PROPERTY_REGISTRY
 from .result_reports import PackedBedDataFrameReporter, compute_balance_errors, format_balance_error_lines
@@ -34,22 +34,22 @@ def _positive_float(raw_value: str) -> float:
     return value
 
 
-def generate_artifacts(run_bundle: RunBundle) -> dict[str, Path]:
-    output_directory = run_bundle.output_directory
-    artifacts_directory = run_bundle.artifacts_directory
+def generate_artifacts(case: Case) -> dict[str, Path]:
+    output_directory = case.output_directory
+    artifacts_directory = case.artifacts_directory
     output_directory.mkdir(parents=True, exist_ok=True)
     artifacts_directory.mkdir(parents=True, exist_ok=True)
 
     artifact_paths: dict[str, Path] = {}
     if is_pygraphviz_available():
         system_graph = build_system_graph(
-            run_bundle,
+            case,
             property_registry=PROPERTY_REGISTRY,
             reaction_catalog=REACTION_CATALOG,
         )
         artifact_paths.update(render_system_graph(system_graph, artifacts_directory))
-    artifact_paths.update(render_operating_program(run_bundle, artifacts_directory))
-    artifact_paths.update(render_initial_solid_profile(run_bundle, artifacts_directory))
+    artifact_paths.update(render_operating_program(case, artifacts_directory))
+    artifact_paths.update(render_initial_solid_profile(case, artifacts_directory))
     return artifact_paths
 
 
@@ -87,33 +87,33 @@ def launch_daetools_plotter(run_result: RunResult) -> int:
 
 
 def run_simulation(
-    run_bundle: RunBundle,
+    case: Case,
     property_registry=PROPERTY_REGISTRY,
     reaction_catalog=REACTION_CATALOG,
     artifact_paths: dict[str, Path] | None = None,
 ) -> RunResult:
-    output_directory = run_bundle.output_directory
+    output_directory = case.output_directory
     output_directory.mkdir(parents=True, exist_ok=True)
     solver_artifact_paths: dict[str, Path] = {}
 
     assembly = assemble_simulation(
-        run_bundle,
+        case,
         property_registry=property_registry,
         reaction_catalog=reaction_catalog,
     )
     runtime_report_ids = tuple(
         dict.fromkeys(
             (
-                *run_bundle.run.outputs.requested_reports,
+                *case.run.outputs.requested_reports,
                 "heat_balance",
                 "mass_balance",
             )
         )
     )
-    dataframe_reporter = PackedBedDataFrameReporter(run_bundle)
+    dataframe_reporter = PackedBedDataFrameReporter(case)
     after_initialize = None
-    if run_bundle.run.outputs.solver_incidence_matrix:
-        artifacts_directory = run_bundle.artifacts_directory
+    if case.run.outputs.solver_incidence_matrix:
+        artifacts_directory = case.artifacts_directory
 
         def after_initialize(simulation, solver):
             solver_artifact_paths.update(
@@ -133,7 +133,7 @@ def run_simulation(
     )
 
     run_result = RunResult(
-        run_bundle=run_bundle,
+        case=case,
         output_directory=output_directory,
         success=True,
         artifact_paths={
@@ -238,14 +238,14 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    run_bundle = load_run_bundle(args.run_yaml)
-    artifact_paths = generate_artifacts(run_bundle)
+    case = load_case(args.run_yaml)
+    artifact_paths = generate_artifacts(case)
 
     if args.validate_only:
-        print(f"Validation passed: {run_bundle.run_path}")
+        print(f"Validation passed: {case.run_path}")
         return 0
     start_time = datetime.datetime.now()
-    run_result = run_simulation(run_bundle, artifact_paths=artifact_paths)
+    run_result = run_simulation(case, artifact_paths=artifact_paths)
     end_time = datetime.datetime.now()
     print(f"simulation took {end_time-start_time} seconds")
     for line in format_balance_error_lines(run_result.balance_errors):

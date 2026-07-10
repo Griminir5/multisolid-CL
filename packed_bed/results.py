@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .config.bundle import RunBundle
+    from .config import Case
 
 
 @dataclass(frozen=True)
 class RunResult:
-    run_bundle: RunBundle
+    case: Case
     output_directory: Path
     success: bool
     artifact_paths: dict[str, Path] = field(default_factory=dict)

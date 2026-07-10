@@ -429,8 +429,10 @@ simulation assembly raises `NotImplementedError`.
 
 ## Validation behavior
 
-`load_run_bundle(...)` validates each YAML file and then validates cross-file
-rules. It checks, among other things:
+`load_case(...)` validates each YAML file, resolves its references, compiles the
+four operating-program channels, and returns one `Case` for the runtime. This
+path does not import DAETools or create output files. It checks, among other
+things:
 
 - unknown species IDs,
 - gas/solid phase mismatches,
