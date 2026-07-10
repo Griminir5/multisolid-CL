@@ -5,6 +5,7 @@ import pytest
 from packed_bed.axial_schemes import (
     SUPPORTED_SCHEMES,
     reconstruct_face_states,
+    reconstruct_forward_face_state,
     split_face_flux,
 )
 
@@ -84,6 +85,29 @@ def test_left_and_right_reconstruction_are_mirrored(scheme: str) -> None:
 
     assert left == pytest.approx(mirrored_right)
     assert right == pytest.approx(mirrored_left)
+
+
+@pytest.mark.parametrize("scheme", SUPPORTED_SCHEMES)
+def test_forward_reconstruction_builds_only_the_left_state(scheme: str) -> None:
+    values = (1.0, 1.5, 4.0, 3.0, 8.0, 6.0, 9.0)
+    face_index = 3
+
+    forward_state = reconstruct_forward_face_state(
+        values.__getitem__,
+        face_index,
+        len(values),
+        scheme,
+        1.0e-8,
+    )
+    left_state, _right_state = reconstruct_face_states(
+        values.__getitem__,
+        face_index,
+        len(values),
+        scheme,
+        1.0e-8,
+    )
+
+    assert forward_state == pytest.approx(left_state)
 
 
 @pytest.mark.parametrize(

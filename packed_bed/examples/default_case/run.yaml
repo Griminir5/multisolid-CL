@@ -7,6 +7,7 @@ simulation:
   time_horizon_s: 1000.0
   reporting_interval_s: 1.0
   repeat_program: true
+  interior_flow_mode: forward_only
   mass_scheme: weno3
   heat_scheme: weno3
   report_time_derivatives: false

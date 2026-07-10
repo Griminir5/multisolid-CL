@@ -43,6 +43,7 @@ def _case_documents(
                 "time_horizon_s": 10.0,
                 "reporting_interval_s": 1.0,
                 "repeat_program": False,
+                "interior_flow_mode": "forward_only",
                 "mass_scheme": "weno3",
                 "heat_scheme": "weno3",
                 "report_time_derivatives": False,
@@ -114,6 +115,25 @@ def test_load_case_returns_one_resolved_case_with_compiled_programs(tmp_path: Pa
     assert case.inlet_composition_program.initial_value == (1.0,)
     assert not hasattr(case, "program")
     assert case.output_directory == (tmp_path / "output").resolve()
+
+
+def test_interior_flow_mode_defaults_to_forward_only_and_accepts_reversible(
+    tmp_path: Path,
+) -> None:
+    documents = _case_documents()
+    documents["run.yaml"]["simulation"].pop("interior_flow_mode")
+    default_directory = tmp_path / "default"
+    default_directory.mkdir()
+    default_case = load_case(_write_case(default_directory, documents))
+
+    documents = _case_documents()
+    documents["run.yaml"]["simulation"]["interior_flow_mode"] = "reversible"
+    reversible_directory = tmp_path / "reversible"
+    reversible_directory.mkdir()
+    reversible_case = load_case(_write_case(reversible_directory, documents))
+
+    assert default_case.run.simulation.interior_flow_mode == "forward_only"
+    assert reversible_case.run.simulation.interior_flow_mode == "reversible"
 
 
 def test_load_case_is_side_effect_free(tmp_path: Path) -> None:

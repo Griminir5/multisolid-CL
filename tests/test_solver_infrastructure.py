@@ -64,6 +64,11 @@ def _with_reports(case, reports):
     return replace(case, run=case.run.model_copy(update={"outputs": outputs}))
 
 
+def _with_interior_flow_mode(case, mode):
+    simulation = case.run.simulation.model_copy(update={"interior_flow_mode": mode})
+    return replace(case, run=case.run.model_copy(update={"simulation": simulation}))
+
+
 @pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
 def test_tiny_inert_case_preserves_equation_order_and_executes(tmp_path: Path) -> None:
     from packed_bed.reports import create_dataset_reporter
@@ -190,3 +195,34 @@ def test_requested_balances_control_accounting_dae_size(
     }
     assert ("mass_balance_error" in reporter.dataset) == ("mass_balance" in reports)
     assert ("heat_balance_error" in reporter.dataset) == ("heat_balance" in reports)
+
+
+@pytest.mark.parametrize(
+    ("mode", "nonzero_count"),
+    (("forward_only", 203), ("reversible", 207)),
+)
+@pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
+def test_interior_flow_mode_controls_solver_incidence(
+    tmp_path: Path,
+    mode: str,
+    nonzero_count: int,
+) -> None:
+    from packed_bed.incidence_matrix import collect_solver_incidence_matrix
+    from packed_bed.simulation import PackedBedSimulation, execute_simulation
+
+    case = _with_reports(load_case(_write_inert_case(tmp_path)), ("mass_balance", "heat_balance"))
+    case = _with_interior_flow_mode(case, mode)
+    simulation = PackedBedSimulation(case, PROPERTY_REGISTRY)
+    observed = {}
+
+    def inspect(initialized_simulation, _solver):
+        matrix = collect_solver_incidence_matrix(initialized_simulation.model)
+        observed.update(
+            rows=matrix.row_count,
+            columns=matrix.column_count,
+            nonzeros=matrix.nonzero_count,
+        )
+
+    execute_simulation(simulation, after_initialize=inspect)
+
+    assert observed == {"rows": 64, "columns": 64, "nonzeros": nonzero_count}

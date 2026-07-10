@@ -9,7 +9,11 @@ from daetools.pyDAE import (
     dimless, dt, eClosedClosed,
 )
 
-from .axial_schemes import reconstruct_face_states, split_face_flux
+from .axial_schemes import (
+    reconstruct_face_states,
+    reconstruct_forward_face_state,
+    split_face_flux,
+)
 from .config import Case
 from .initialization import CIRCLE_CONSTANT
 from .kinetics import KineticsContext
@@ -67,6 +71,7 @@ class PackedBedModel(daeModel):
         self.property_registry = property_registry
         self.mass_scheme = case.run.simulation.mass_scheme
         self.heat_scheme = case.run.simulation.heat_scheme
+        self.interior_flow_mode = case.run.simulation.interior_flow_mode
         requested_reports = set(case.run.outputs.requested_reports)
         if smooth_ramp_width_s <= 0.0:
             raise ValueError("smooth_ramp_width_s must be positive.")
@@ -241,6 +246,41 @@ class PackedBedModel(daeModel):
         def heat_loss_density(idx_cell):
             return (self.T(idx_cell) - self.T_env()) * (2.0 * self.U_eff()) / self.R_bed()
 
+        def interior_transport_flux(
+            transport_rate,
+            cell_value,
+            face_index,
+            scheme,
+            epsilon,
+        ):
+            if self.interior_flow_mode == "forward_only":
+                face_state = reconstruct_forward_face_state(
+                    cell_value,
+                    face_index,
+                    Nc,
+                    scheme,
+                    epsilon,
+                    minimum=Min,
+                    maximum=Max,
+                )
+                return transport_rate * face_state
+
+            left_state, right_state = reconstruct_face_states(
+                cell_value,
+                face_index,
+                Nc,
+                scheme,
+                epsilon,
+                minimum=Min,
+                maximum=Max,
+            )
+            return split_face_flux(
+                transport_rate,
+                left_state,
+                right_state,
+                absolute=Abs,
+            )
+
         def gas_face_flux_residual(gas_idx, face_index):
             if face_index == 0:
                 return self.y_in(gas_idx) * self.F_in() / cross_section_area - self.N_gas_face(gas_idx, 0)
@@ -259,20 +299,12 @@ class PackedBedModel(daeModel):
                 ct_L / self.gasfrac(idx_cell_L)
                 + ct_R / self.gasfrac(idx_cell_R)
             )
-            c_face_left, c_face_right = reconstruct_face_states(
+            convective_flux = interior_transport_flux(
+                self.u_s(face_index),
                 lambda idx_cell: self.c_gas(gas_idx, idx_cell) / self.gasfrac(idx_cell),
                 face_index,
-                Nc,
                 self.mass_scheme,
                 conc_eps,
-                minimum=Min,
-                maximum=Max,
-            )
-            convective_flux = split_face_flux(
-                self.u_s(face_index),
-                c_face_left,
-                c_face_right,
-                absolute=Abs,
             )
             return (
                 self.N_gas_face(gas_idx, face_index)
@@ -297,20 +329,12 @@ class PackedBedModel(daeModel):
                     - self.N_gas_face(gas_idx, face_index) * self.h_gas(gas_idx, Nc - 1)
                 )
 
-            h_face_left, h_face_right = reconstruct_face_states(
+            transported_enthalpy_flux = interior_transport_flux(
+                self.N_gas_face(gas_idx, face_index),
                 lambda idx_cell: self.h_gas(gas_idx, idx_cell),
                 face_index,
-                Nc,
                 self.heat_scheme,
                 enthalpy_eps,
-                minimum=Min,
-                maximum=Max,
-            )
-            transported_enthalpy_flux = split_face_flux(
-                self.N_gas_face(gas_idx, face_index),
-                h_face_left,
-                h_face_right,
-                absolute=Abs,
             )
             return self.J_gas_face(gas_idx, face_index) - transported_enthalpy_flux
 

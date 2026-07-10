@@ -243,11 +243,23 @@ initial_profile:
 ```
 
 `run.yaml` selects geometry, solver settings, numerical schemes, and reports.
-Supported axial schemes are `upwind1`, `central`, `linear_upwind2`, `muscl_minmod`, `weno3`, `weno5`.
-Interior faces use conservative flux splitting, so species and advective
-enthalpy transport select the correct reconstructed state when velocity
-reverses. The inlet/outlet equations remain oriented for the existing forward
-flow boundary conditions; this change does not make those boundaries reversible.
+Supported axial schemes are `upwind1`, `central`, `linear_upwind2`,
+`muscl_minmod`, `weno3`, and `weno5`. Interior transport behavior is selected
+alongside them:
+
+```yaml
+simulation:
+  interior_flow_mode: forward_only
+  mass_scheme: weno3
+  heat_scheme: weno3
+```
+
+`forward_only` is the default and constructs only the upstream state needed
+for positive flow. The model currently supports forward flow end-to-end: its
+inlet and outlet equations are oriented in that direction. `reversible`
+enables two-sided flux splitting at interior faces, so local species and
+advective-enthalpy transport can select either reconstructed state, but it does
+not make the boundary conditions reversible.
 
 Common report IDs include `temperature`, `pressure`, `velocity`, `gas_concentration`,
 `gas_mole_fraction`, `solid_concentration`, `solid_mole_fraction`, `gas_flux`,

@@ -129,6 +129,7 @@ class SimulationConfig(ConfigModel):
     time_horizon_s: PositiveFloat
     reporting_interval_s: PositiveFloat
     repeat_program: bool = False
+    interior_flow_mode: Literal["forward_only", "reversible"] = "forward_only"
     mass_scheme: ConfigString
     heat_scheme: ConfigString
     report_time_derivatives: bool

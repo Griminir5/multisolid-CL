@@ -65,7 +65,7 @@ def _weno5(v0, v1, v2, v3, v4, epsilon):
     return (alpha0 * q0 + alpha1 * q1 + alpha2 * q2) / (alpha0 + alpha1 + alpha2)
 
 
-def reconstruct_face_states(
+def reconstruct_forward_face_state(
     cell_value,
     face_index,
     cell_count,
@@ -75,7 +75,7 @@ def reconstruct_face_states(
     minimum=min,
     maximum=max,
 ):
-    """Reconstruct the left and right states at one interior face."""
+    """Reconstruct the upstream state for a known forward-flow interior face."""
 
     validate_scheme_name(scheme_name)
     left_index = face_index - 1
@@ -84,10 +84,9 @@ def reconstruct_face_states(
     right_cell = cell_value(right_index)
 
     if scheme_name == "upwind1":
-        return left_cell, right_cell
+        return left_cell
     if scheme_name == "central":
-        centered = 0.5 * (left_cell + right_cell)
-        return centered, centered
+        return 0.5 * (left_cell + right_cell)
 
     if face_index < 2:
         left_state = left_cell
@@ -116,38 +115,47 @@ def reconstruct_face_states(
                 epsilon,
             )
 
-    if face_index > cell_count - 2:
-        right_state = right_cell
-    else:
-        right_right = cell_value(right_index + 1)
-        if scheme_name == "linear_upwind2":
-            right_state = 1.5 * right_cell - 0.5 * right_right
-        elif scheme_name == "muscl_minmod":
-            slope = _minmod(
-                right_right - right_cell,
-                right_cell - left_cell,
-                0.0 * epsilon,
-                minimum,
-                maximum,
-            )
-            right_state = right_cell - 0.5 * slope
-        elif scheme_name == "weno3" or face_index < 2 or face_index > cell_count - 3:
-            right_state = _weno3(right_right, right_cell, left_cell, epsilon)
-        else:
-            right_state = _weno5(
-                cell_value(right_index + 2),
-                right_right,
-                right_cell,
-                left_cell,
-                cell_value(left_index - 1),
-                epsilon,
-            )
+    return left_state
+
+
+def reconstruct_face_states(
+    cell_value,
+    face_index,
+    cell_count,
+    scheme_name,
+    epsilon,
+    *,
+    minimum=min,
+    maximum=max,
+):
+    """Reconstruct both states for a potentially reversing interior face."""
+
+    validate_scheme_name(scheme_name)
+    left_state = reconstruct_forward_face_state(
+        cell_value,
+        face_index,
+        cell_count,
+        scheme_name,
+        epsilon,
+        minimum=minimum,
+        maximum=maximum,
+    )
+    right_state = reconstruct_forward_face_state(
+        lambda index: cell_value(cell_count - 1 - index),
+        cell_count - face_index,
+        cell_count,
+        scheme_name,
+        epsilon,
+        minimum=minimum,
+        maximum=maximum,
+    )
 
     return left_state, right_state
 
 
 __all__ = (
     "SUPPORTED_SCHEMES",
+    "reconstruct_forward_face_state",
     "reconstruct_face_states",
     "split_face_flux",
     "validate_scheme_name",
