@@ -97,7 +97,7 @@ def run_simulation(
     from .properties import PROPERTY_REGISTRY
     from .result_reports import PackedBedDataFrameReporter, compute_balance_errors
     from .results import RunResult
-    from .solver_clean import assemble_simulation, run_assembled_simulation
+    from .simulation import PackedBedSimulation, execute_simulation
 
     if property_registry is None:
         property_registry = PROPERTY_REGISTRY
@@ -106,7 +106,7 @@ def run_simulation(
     output_directory.mkdir(parents=True, exist_ok=True)
     solver_artifact_paths: dict[str, Path] = {}
 
-    assembly = assemble_simulation(case, property_registry=property_registry)
+    simulation = PackedBedSimulation(case, property_registry)
     runtime_report_ids = tuple(
         dict.fromkeys(
             (
@@ -130,8 +130,8 @@ def run_simulation(
                 )
             )
 
-    reporter = run_assembled_simulation(
-        assembly,
+    reporter = execute_simulation(
+        simulation,
         report_ids=runtime_report_ids,
         include_plot_variables=render_plots,
         data_reporter=dataframe_reporter,
@@ -147,7 +147,7 @@ def run_simulation(
             **solver_artifact_paths,
         },
         reporter=reporter,
-        simulation=assembly.simulation,
+        simulation=simulation,
     )
     report_paths = dict(dataframe_reporter.report_paths)
     balance_errors = compute_balance_errors(run_result)

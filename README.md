@@ -234,6 +234,10 @@ initial_profile:
 
 `run.yaml` selects geometry, solver settings, numerical schemes, and reports.
 Supported axial schemes are `upwind1`, `central`, `linear_upwind2`, `muscl_minmod`, `weno3`, `weno5`.
+Interior faces use conservative flux splitting, so species and advective
+enthalpy transport select the correct reconstructed state when velocity
+reverses. The inlet/outlet equations remain oriented for the existing forward
+flow boundary conditions; this change does not make those boundaries reversible.
 
 Common report IDs include `temperature`, `pressure`, `velocity`, `gas_concentration`,
 `gas_mole_fraction`, `solid_concentration`, `solid_mole_fraction`, `gas_flux`,

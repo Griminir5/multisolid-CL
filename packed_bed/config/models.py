@@ -144,7 +144,7 @@ class SimulationConfig(ConfigModel):
 class ModelConfig(ConfigModel):
     bed_length_m: PositiveFloat
     bed_radius_m: PositiveFloat
-    axial_cells: int = Field(ge=1)
+    axial_cells: int = Field(ge=3)
     ambient_temperature_k: PositiveFloat = 873.15
     heat_transfer_coefficient_w_per_m2_k: NonNegativeFloat = 100.0
 
