@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from pydantic import ValidationError
 import yaml
@@ -18,6 +18,9 @@ from .models import (
     RunConfig,
     SolidConfig,
 )
+
+if TYPE_CHECKING:
+    from packed_bed.reactions import ReactionFamily
 
 
 _PROGRAM_DURATION_SUM_ABS_TOLERANCE_S = 1.0e-9
@@ -49,6 +52,7 @@ class Case:
     chemistry: ChemistryConfig
     solids: SolidConfig
     run: RunConfig
+    reaction_families: tuple[ReactionFamily, ...]
     inlet_flow_program: CompiledProgram
     inlet_composition_program: CompiledProgram
     inlet_temperature_program: CompiledProgram
@@ -93,6 +97,13 @@ def load_case(run_yaml_path: str | Path) -> Case:
     if shape_errors:
         raise PackedBedValidationError("\n".join(shape_errors))
 
+    from packed_bed.kinetics import load_reaction_families
+
+    try:
+        reaction_families = load_reaction_families(chemistry.reaction_families)
+    except ValueError as exc:
+        raise PackedBedValidationError(f"chemistry.reaction_families: {exc}") from exc
+
     programs = compile_program_channels(
         program,
         chemistry.gas_species,
@@ -107,6 +118,7 @@ def load_case(run_yaml_path: str | Path) -> Case:
         chemistry=chemistry,
         solids=solids,
         run=run,
+        reaction_families=reaction_families,
         inlet_flow_program=programs[0],
         inlet_composition_program=programs[1],
         inlet_temperature_program=programs[2],
@@ -119,7 +131,6 @@ def validate_case(
     case: Case,
     *,
     property_registry=None,
-    reaction_catalog=None,
     report_variable_registry=None,
 ) -> Case:
     """Validate resolved component, reaction, property, and report references."""
@@ -128,21 +139,18 @@ def validate_case(
         from packed_bed.properties import PROPERTY_REGISTRY
 
         property_registry = PROPERTY_REGISTRY
-    if reaction_catalog is None:
-        from packed_bed.reactions import REACTION_CATALOG
-
-        reaction_catalog = REACTION_CATALOG
     if report_variable_registry is None:
         from packed_bed.reporting import REPORT_VARIABLE_REGISTRY
 
         report_variable_registry = REPORT_VARIABLE_REGISTRY
 
-    from packed_bed.reactions import build_reaction_network
+    from packed_bed.reactions import build_reaction_network, reaction_catalog
 
     errors: list[str] = []
     gas_species = set(case.chemistry.gas_species)
     solid_species = set(case.solids.solid_species)
     selected_species = gas_species | solid_species
+    catalog = reaction_catalog(case.reaction_families)
     unknown_reactions = False
 
     _validate_species_group(
@@ -159,7 +167,7 @@ def validate_case(
     )
 
     for reaction_id in case.chemistry.reaction_ids:
-        reaction = reaction_catalog.get(reaction_id)
+        reaction = catalog.get(reaction_id)
         if reaction is None:
             errors.append(f"chemistry.reaction_ids contains unknown id '{reaction_id}'.")
             unknown_reactions = True
@@ -176,7 +184,7 @@ def validate_case(
                 case.chemistry.reaction_ids,
                 case.chemistry.gas_species,
                 case.solids.solid_species,
-                reaction_catalog=reaction_catalog,
+                families=case.reaction_families,
             )
         except (KeyError, ValueError) as exc:
             message = str(exc).strip("'")

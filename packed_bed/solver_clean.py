@@ -1090,16 +1090,15 @@ def assemble_simulation(
     case: Case,
     *,
     property_registry,
-    reaction_catalog,
     smooth_ramp_width_s=SMOOTH_RAMP_WIDTH_S,
 ) -> SimulationAssembly:
     reaction_network = build_reaction_network(
         case.chemistry.reaction_ids,
         case.chemistry.gas_species,
         case.solids.solid_species,
-        reaction_catalog=reaction_catalog,
+        families=case.reaction_families,
     )
-    reaction_rate_hooks = resolve_kinetics_hooks(reaction_network)
+    reaction_rate_hooks = resolve_kinetics_hooks(reaction_network, case.reaction_families)
 
     simulation_config = case.run.simulation
     materialize_solid_mole_fractions = "solid_mole_fraction" in case.run.outputs.requested_reports

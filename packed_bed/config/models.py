@@ -70,6 +70,7 @@ FractionMapping = Annotated[
 
 class ChemistryConfig(ConfigModel):
     gas_species: NonEmptyUniqueStringTuple
+    reaction_families: UniqueStringTuple
     reaction_ids: UniqueStringTuple
 
 

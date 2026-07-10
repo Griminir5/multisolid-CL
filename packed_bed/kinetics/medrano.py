@@ -4,11 +4,9 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from daetools.pyDAE import Constant, Exp, Max, Min, Abs
-
-from pyUnits import K, Pa, m, mol, s
-
-from . import KineticsContext, register_kinetics_hook
+from ..reactions import ReactionDefinition, ReactionFamily
+from . import KineticsContext
+from .runtime import Abs, Constant, Exp, K, Max, Min, Pa, m, mol, s
 
 
 GAS_CONSTANT_J_PER_MOL_K = 8.31446261815324
@@ -438,7 +436,6 @@ def _medrano_reaction_rate_expr(
     )
 
 
-@register_kinetics_hook("medrano_reduction_h2")
 def medrano_reduction_h2(context: KineticsContext):
     terms = _medrano_terms(context, "H2")
     state = _medrano_reaction_state_expr("H2", terms)
@@ -454,7 +451,6 @@ def medrano_reduction_h2(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("medrano_reduction_co")
 def medrano_reduction_co(context: KineticsContext):
     terms = _medrano_terms(context, "CO")
     state = _medrano_reaction_state_expr("CO", terms)
@@ -470,7 +466,6 @@ def medrano_reduction_co(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("medrano_oxidation_o2")
 def medrano_oxidation_o2(context: KineticsContext):
     terms = _medrano_terms(context, "O2")
     state = _medrano_reaction_state_expr("O2", terms)
@@ -486,7 +481,49 @@ def medrano_oxidation_o2(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
+FAMILY = ReactionFamily(
+    name="nickel_medrano",
+    required_gas_species=("H2", "H2O", "CO", "CO2", "O2"),
+    required_solid_species=("Ni", "NiO"),
+    reactions=(
+        ReactionDefinition(
+            id="ni_reduction_h2_medrano",
+            name="NiO reduction by H2 (Medrano AN)",
+            phase="gas_solid",
+            stoichiometry={"H2": -1.0, "NiO": -1.0, "Ni": 1.0, "H2O": 1.0},
+            required_species=("H2", "H2O", "Ni", "NiO"),
+            source_reference="Andrew Wright, Chemical Looping Reactor Modelling - 2D, Technical Report",
+            notes="Technical report-based Medrano shrinking-core redox kinetics using rational fractional-power approximations.",
+        ),
+        ReactionDefinition(
+            id="ni_reduction_co_medrano",
+            name="NiO reduction by CO",
+            phase="gas_solid",
+            stoichiometry={"CO": -1.0, "NiO": -1.0, "Ni": 1.0, "CO2": 1.0},
+            required_species=("CO", "CO2", "Ni", "NiO"),
+            source_reference="Andrew Wright, Chemical Looping Reactor Modelling - 2D, Technical Report",
+            notes="Technical report-based Medrano shrinking-core redox kinetics using rational fractional-power approximations.",
+        ),
+        ReactionDefinition(
+            id="ni_oxidation_o2_medrano",
+            name="Ni oxidation by O2",
+            phase="gas_solid",
+            stoichiometry={"O2": -0.5, "Ni": -1.0, "NiO": 1.0},
+            required_species=("O2", "Ni", "NiO"),
+            source_reference="Andrew Wright, Chemical Looping Reactor Modelling - 2D, Technical Report",
+            notes="Technical report-based Medrano shrinking-core redox kinetics using rational fractional-power approximations.",
+        ),
+    ),
+    kinetics_hooks={
+        "ni_reduction_h2_medrano": medrano_reduction_h2,
+        "ni_reduction_co_medrano": medrano_reduction_co,
+        "ni_oxidation_o2_medrano": medrano_oxidation_o2,
+    },
+)
+
+
 __all__ = [
+    "FAMILY",
     "ACTIVATION_ENERGY_J_PER_MOL",
     "B",
     "CS_MOL_PER_M3",

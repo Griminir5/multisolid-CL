@@ -105,7 +105,7 @@ mol/s.
 
 The top-level `run.yaml` points to three sibling input files:
 
-- `chemistry.yaml`: selected gas species and reaction IDs.
+- `chemistry.yaml`: selected gas species, reaction families, and reaction IDs.
 - `program.yaml`: inlet flow, inlet temperature, outlet pressure, and inlet
   gas composition programs.
 - `solids.yaml`: selected solid species and the initial axial solid profile.
@@ -143,9 +143,12 @@ gas_species:
   - N2
   - O2
 
+reaction_families:
+  - nickel_medrano
+
 reaction_ids:
-  - ni_reduction_h2_medrano_an
-  - ni_oxidation_o2_medrano_an
+  - ni_reduction_h2_medrano
+  - ni_oxidation_o2_medrano
 ```
 
 `program.yaml` defines scalar channels and the inlet composition channel. Every
@@ -222,7 +225,7 @@ profiles.
 
 To add a component:
 
-1. Add a `SpeciesPropertyRecord` to `PROPERTY_REGISTRY` in
+1. Add a `SpeciesProperties` record to `PROPERTY_REGISTRY` in
    `packed_bed/properties.py`.
 2. Use `phase="gas"` for gas species and `phase="solid"` for solid species.
 3. Provide `mw` in `kg/mol`.
@@ -242,18 +245,15 @@ the same ID appears in both `gas_species` and `solid_species`.
 Example gas record:
 
 ```python
-"H2": SpeciesPropertyRecord(
+"H2": SpeciesProperties(
     name="Hydrogen",
     phase="gas",
     mw=2.01588e-3,
-    enthalpy=CpCubicMolar(
+    enthalpy=PolynomialHeatCapacity(
         h_form_ref=0.0,
-        a0=2.94409905e01,
-        a1=-2.38377533e-03,
-        a2=6.39601662e-06,
-        a3=-2.03147561e-09,
+        coefficients=(2.94409905e01, -2.38377533e-03, 6.39601662e-06, -2.03147561e-09),
     ),
-    viscosity=ViscosityQuadratic(
+    viscosity=QuadraticViscosity(
         a0=2.04091133e-05,
         a1=1.41343819e-08,
         a2=-2.34255119e-12,
@@ -264,16 +264,13 @@ Example gas record:
 Example solid record:
 
 ```python
-"NiO": SpeciesPropertyRecord(
+"NiO": SpeciesProperties(
     name="Nickel Oxide",
     phase="solid",
     mw=74.6928e-3,
-    enthalpy=CpCubicMolar(
+    enthalpy=PolynomialHeatCapacity(
         h_form_ref=-239701.0,
-        a0=5.64774634e01,
-        a1=-1.56343578e-02,
-        a2=2.10045988e-05,
-        a3=-4.78601077e-09,
+        coefficients=(5.64774634e01, -1.56343578e-02, 2.10045988e-05, -4.78601077e-09),
     ),
 )
 ```
@@ -282,21 +279,10 @@ Example solid record:
 
 Property correlations are defined in `packed_bed/properties.py`.
 
-Molar enthalpy correlations implement `MolarEnthalpyCorrelation`:
+All property correlations implement `BaseCorrelation`:
 
 ```python
-class MolarEnthalpyCorrelation(ABC):
-    def dae_expression(self, temperature):
-        ...
-
-    def value(self, temperature):
-        ...
-```
-
-Gas viscosity correlations implement `GasViscosityCorrelation`:
-
-```python
-class GasViscosityCorrelation(ABC):
+class BaseCorrelation(ABC):
     def dae_expression(self, temperature):
         ...
 
@@ -315,40 +301,41 @@ Follow the existing pattern:
 - Heat capacity coefficients should evaluate to J/(mol K).
 - Gas viscosity is in Pa s.
 
-Existing enthalpy/Cp bases include `CpZerothMolar`, `CpQuadraticMolar`,
-`CpCubicMolar`, `CpQuarticMolar`, and `CpShomateMolar`. Existing gas viscosity
-support includes `ViscosityQuadratic`.
+Polynomial heat capacities use `PolynomialHeatCapacity`; its coefficients are
+ordered by ascending powers of `T - t_ref`. `ShomateHeatCapacity` remains a
+separate correlation, and gas viscosity uses `QuadraticViscosity`.
 
-After adding a new correlation class, use it in a `SpeciesPropertyRecord` in
+After adding a genuinely different correlation, use it in a `SpeciesProperties` record in
 `PROPERTY_REGISTRY`.
 
-## Adding reaction definitions
+## Adding a reaction family
 
-Reaction metadata lives in `packed_bed/reactions.py`. Add a
-`ReactionDefinition` to `REACTION_CATALOG`:
+Generic reaction data structures live in `packed_bed/reactions.py`; actual
+reaction definitions and rate hooks belong together in one module under
+`packed_bed/kinetics`. Each module exports one `FAMILY` object:
 
 ```python
-"my_reaction_id": ReactionDefinition(
-    id="my_reaction_id",
-    name="Readable reaction name",
-    phase="gas_solid",
-    stoichiometry={
-        "H2": -1.0,
-        "NiO": -1.0,
-        "Ni": 1.0,
-        "H2O": 1.0,
-    },
-    required_species=("H2", "H2O", "Ni", "NiO"),
-    source_reference="Citation or source note",
-    kinetics_hook="my_kinetics_hook",
-    reversible=False,
-    notes="Short implementation note.",
+FAMILY = ReactionFamily(
+    name="my_family",
+    required_gas_species=("H2", "H2O"),
+    required_solid_species=("Ni", "NiO"),
+    reactions=(
+        ReactionDefinition(
+            id="my_reaction",
+            name="Readable reaction name",
+            phase="gas_solid",
+            stoichiometry={"H2": -1.0, "NiO": -1.0, "Ni": 1.0, "H2O": 1.0},
+            required_species=("H2", "H2O", "Ni", "NiO"),
+            source_reference="Citation or source note",
+        ),
+    ),
+    kinetics_hooks={"my_reaction": my_reaction_rate},
 )
 ```
 
 Important rules:
 
-- `id` must match the dictionary key.
+- Family names and reaction IDs must be unique.
 - `phase` must be one of `gas_gas`, `gas_solid`, or `solid_solid`.
 - Reactants use negative stoichiometric coefficients.
 - Products use positive stoichiometric coefficients.
@@ -356,45 +343,31 @@ Important rules:
 - `required_species` must include every stoichiometric species and every
   catalyst species.
 - Catalysts go in `catalyst_species`, not in `stoichiometry`.
-- Set `kinetics_hook` to the registry key for the hook that computes this
-  reaction rate.
-- Add the reaction ID to `chemistry.yaml` to select it for a run.
+- `required_gas_species` and `required_solid_species` describe only components
+  that the family can use.
+- `kinetics_hooks` maps reaction IDs directly to their rate functions.
+- Add `FAMILY` to the explicit registry in `packed_bed/kinetics/__init__.py`,
+  then select both the family and desired reaction IDs in `chemistry.yaml`.
 
 The reaction network builder creates gas and solid source matrices from the
 stoichiometry. The current solver stores reaction rates as `mol/(m^3 s)` per
 total bed volume, so convert any catalyst-volume, gas-volume, or solid-volume
 rate expression inside the kinetics hook before returning it.
 
-## Adding kinetics hooks
+## Kinetics hook shape
 
-Kinetics hooks are registered through `packed_bed/kinetics/__init__.py`.
-Existing implementations are split into files such as `medrano.py`,
-`medrano_an.py`, `xu_froment.py`, `numaguchi_an.py`, `coper_redox.py`, and
-`fe_redox.py`.
-
-The workflow is:
-
-1. Add a `ReactionDefinition` in `packed_bed/reactions.py`.
-2. Implement a hook function in a module under `packed_bed/kinetics`.
-3. Decorate it with `@register_kinetics_hook("hook_name")`.
-4. Set `ReactionDefinition.kinetics_hook="hook_name"`.
-5. Ensure the kinetics module is imported from `packed_bed/kinetics/__init__.py`
-   so the decorator runs at package import time.
-6. Add numeric helper tests where possible. Existing kinetics modules usually
-   separate numeric helper functions from DAETools expression helpers for this
-   reason.
+Hooks are ordinary functions referenced directly by their family; importing a
+family does not register anything or import DAETools. Solver symbols are loaded
+only when an expression function executes.
 
 Minimal hook shape:
 
 ```python
-from daetools.pyDAE import Constant, Exp
-from pyUnits import K, m, mol, s
-
-from . import KineticsContext, register_kinetics_hook
+from . import KineticsContext
+from .runtime import Constant, Exp, K, m, mol, s
 
 
-@register_kinetics_hook("my_kinetics_hook")
-def my_kinetics_hook(context: KineticsContext):
+def my_reaction_rate(context: KineticsContext):
     gas_idx = context.gas_index("H2")
     solid_idx = context.solid_index("NiO")
 
@@ -423,9 +396,8 @@ Frequently used model variables in kinetics hooks include:
 - `model.c_sol(solid_idx, idx_cell)`: solid concentration.
 - `model.R_rxn(reaction_idx, idx_cell)`: reaction rate variable.
 
-Each selected reaction must have a resolvable kinetics hook. If a selected
-reaction has `kinetics_hook=None`, or if the hook name is not registered, the
-simulation assembly raises `NotImplementedError`.
+Each selected reaction must have a hook in its selected family. Missing hooks
+are rejected before solver assembly.
 
 ## Validation behavior
 

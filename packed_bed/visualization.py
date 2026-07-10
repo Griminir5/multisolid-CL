@@ -56,8 +56,10 @@ def build_system_graph(
     case: Case,
     *,
     property_registry,
-    reaction_catalog
 ) -> SystemGraph:
+    from .reactions import reaction_catalog
+
+    reactions = reaction_catalog(case.reaction_families)
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
 
@@ -86,7 +88,7 @@ def build_system_graph(
         )
 
     for reaction_id in case.chemistry.reaction_ids:
-        reaction = reaction_catalog[reaction_id]
+        reaction = reactions[reaction_id]
         reaction_node_id = f"reaction:{reaction.id}"
         label_lines = [reaction.id]
         if reaction.reversible:

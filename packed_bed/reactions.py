@@ -1,21 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Mapping
+import math
+from typing import Any, Callable, Literal, Mapping
 
 
 ReactionPhase = Literal["gas_gas", "gas_solid", "solid_solid"]
 ReactionRateBasis = Literal["bed_volume", "gas_volume", "solid_volume", "catalyst_volume"]
+KineticsHook = Callable[[Any], Any]
 
 
 def _unique_ordered(values: tuple[str, ...]) -> tuple[str, ...]:
-    seen: set[str] = set()
-    unique: list[str] = []
-    for value in values:
-        if value not in seen:
-            unique.append(value)
-            seen.add(value)
-    return tuple(unique)
+    return tuple(dict.fromkeys(values))
 
 
 @dataclass(frozen=True)
@@ -26,39 +22,52 @@ class ReactionDefinition:
     stoichiometry: Mapping[str, float]
     required_species: tuple[str, ...]
     source_reference: str
-    kinetics_hook: str | None = None
     reversible: bool = False
     catalyst_species: tuple[str, ...] = ()
     rate_basis: ReactionRateBasis = "bed_volume"
     notes: str = ""
 
     def __post_init__(self) -> None:
+        if not self.id or self.id != self.id.strip():
+            raise ValueError("Reaction ids must not be blank or padded.")
+        if not self.name or self.name != self.name.strip():
+            raise ValueError(f"Reaction '{self.id}' must have a readable name.")
+        if not self.source_reference or self.source_reference != self.source_reference.strip():
+            raise ValueError(f"Reaction '{self.id}' must have a source reference.")
+        if any(not species or species != species.strip() for species in self.required_species):
+            raise ValueError(f"Reaction '{self.id}' contains an invalid required species id.")
+        if len(self.required_species) != len(set(self.required_species)):
+            raise ValueError(f"Reaction '{self.id}' contains duplicate required species.")
+        if len(self.catalyst_species) != len(set(self.catalyst_species)):
+            raise ValueError(f"Reaction '{self.id}' contains duplicate catalyst species.")
         if not self.stoichiometry:
             raise ValueError(f"Reaction '{self.id}' must define a non-empty stoichiometry mapping.")
-
-        zero_species = sorted(
+        invalid_coefficients = sorted(
             species_id
             for species_id, coefficient in self.stoichiometry.items()
-            if coefficient == 0.0
+            if coefficient == 0.0 or not math.isfinite(coefficient)
         )
-        if zero_species:
+        if invalid_coefficients:
             raise ValueError(
-                f"Reaction '{self.id}' contains zero stoichiometric coefficients: {', '.join(zero_species)}."
+                f"Reaction '{self.id}' contains zero or non-finite stoichiometric "
+                f"coefficients: {', '.join(invalid_coefficients)}."
             )
 
-        stoich_species = set(self.stoichiometry)
-        catalyst_species = set(self.catalyst_species)
-        overlap = sorted(stoich_species & catalyst_species)
+        stoichiometric_species = set(self.stoichiometry)
+        catalysts = set(self.catalyst_species)
+        overlap = sorted(stoichiometric_species & catalysts)
         if overlap:
             raise ValueError(
-                f"Reaction '{self.id}' lists catalyst species in stoichiometry: {', '.join(overlap)}."
+                f"Reaction '{self.id}' lists catalyst species in stoichiometry: "
+                f"{', '.join(overlap)}."
             )
-
-        missing_required = sorted((stoich_species | catalyst_species) - set(self.required_species))
+        missing_required = sorted(
+            (stoichiometric_species | catalysts) - set(self.required_species)
+        )
         if missing_required:
             raise ValueError(
-                f"Reaction '{self.id}' required_species must include all stoichiometric and catalyst species: "
-                f"{', '.join(missing_required)}."
+                f"Reaction '{self.id}' required_species must include all stoichiometric "
+                f"and catalyst species: {', '.join(missing_required)}."
             )
 
     @property
@@ -67,7 +76,7 @@ class ReactionDefinition:
 
     @property
     def all_species(self) -> tuple[str, ...]:
-        return _unique_ordered(tuple(self.required_species) + tuple(self.catalyst_species))
+        return _unique_ordered(self.required_species + self.catalyst_species)
 
     @property
     def reactants(self) -> Mapping[str, float]:
@@ -90,6 +99,79 @@ class ReactionDefinition:
 
     def has_catalyst(self, species_id: str) -> bool:
         return species_id in self.catalyst_species
+
+
+@dataclass(frozen=True)
+class ReactionFamily:
+    name: str
+    reactions: tuple[ReactionDefinition, ...]
+    required_gas_species: tuple[str, ...]
+    required_solid_species: tuple[str, ...]
+    kinetics_hooks: Mapping[str, KineticsHook]
+
+    def __post_init__(self) -> None:
+        if not self.name or self.name != self.name.strip():
+            raise ValueError("Reaction family names must not be blank or padded.")
+        reaction_ids = tuple(reaction.id for reaction in self.reactions)
+        if len(reaction_ids) != len(set(reaction_ids)):
+            raise ValueError(f"Reaction family '{self.name}' contains duplicate reaction ids.")
+        if len(self.required_gas_species) != len(set(self.required_gas_species)):
+            raise ValueError(f"Reaction family '{self.name}' contains duplicate gas requirements.")
+        if len(self.required_solid_species) != len(set(self.required_solid_species)):
+            raise ValueError(f"Reaction family '{self.name}' contains duplicate solid requirements.")
+        if any(
+            not species or species != species.strip()
+            for species in self.required_gas_species + self.required_solid_species
+        ):
+            raise ValueError(f"Reaction family '{self.name}' contains an invalid species requirement.")
+        phase_overlap = sorted(
+            set(self.required_gas_species) & set(self.required_solid_species)
+        )
+        if phase_overlap:
+            raise ValueError(
+                f"Reaction family '{self.name}' declares species in both phases: "
+                f"{', '.join(phase_overlap)}."
+            )
+
+        requirements = set(self.required_gas_species) | set(self.required_solid_species)
+        missing_requirements = sorted(
+            species_id
+            for reaction in self.reactions
+            for species_id in reaction.all_species
+            if species_id not in requirements
+        )
+        if missing_requirements:
+            raise ValueError(
+                f"Reaction family '{self.name}' does not declare requirements for: "
+                f"{', '.join(dict.fromkeys(missing_requirements))}."
+            )
+
+        missing_hooks = sorted(set(reaction_ids) - set(self.kinetics_hooks))
+        extra_hooks = sorted(set(self.kinetics_hooks) - set(reaction_ids))
+        if missing_hooks or extra_hooks:
+            differences = []
+            if missing_hooks:
+                differences.append(f"missing {', '.join(missing_hooks)}")
+            if extra_hooks:
+                differences.append(f"unexpected {', '.join(extra_hooks)}")
+            raise ValueError(
+                f"Reaction family '{self.name}' kinetics hook mismatch: "
+                f"{'; '.join(differences)}."
+            )
+        non_callable_hooks = sorted(
+            reaction_id
+            for reaction_id, hook in self.kinetics_hooks.items()
+            if not callable(hook)
+        )
+        if non_callable_hooks:
+            raise ValueError(
+                f"Reaction family '{self.name}' has non-callable kinetics hooks: "
+                f"{', '.join(non_callable_hooks)}."
+            )
+
+    @property
+    def reaction_ids(self) -> tuple[str, ...]:
+        return tuple(reaction.id for reaction in self.reactions)
 
 
 @dataclass(frozen=True)
@@ -119,6 +201,21 @@ class ReactionNetwork:
         return self.solid_source_matrix[self.solid_species.index(solid_species_id)]
 
 
+def reaction_catalog(families: tuple[ReactionFamily, ...]) -> dict[str, ReactionDefinition]:
+    catalog: dict[str, ReactionDefinition] = {}
+    owners: dict[str, str] = {}
+    for family in families:
+        for reaction in family.reactions:
+            if reaction.id in catalog:
+                raise ValueError(
+                    f"Reaction '{reaction.id}' is provided by both '{owners[reaction.id]}' "
+                    f"and '{family.name}'."
+                )
+            catalog[reaction.id] = reaction
+            owners[reaction.id] = family.name
+    return catalog
+
+
 def _validate_reaction_phase_membership(
     reaction: ReactionDefinition,
     gas_species: tuple[str, ...],
@@ -127,44 +224,42 @@ def _validate_reaction_phase_membership(
     gas_species_set = set(gas_species)
     solid_species_set = set(solid_species)
     selected_species = gas_species_set | solid_species_set
-
-    missing_species = sorted(
-        species_id
-        for species_id in reaction.all_species
-        if species_id not in selected_species
-    )
+    missing_species = sorted(set(reaction.all_species) - selected_species)
     if missing_species:
         raise ValueError(
-            f"Reaction '{reaction.id}' requires unselected species: {', '.join(missing_species)}."
+            f"Reaction '{reaction.id}' requires unselected species: "
+            f"{', '.join(missing_species)}."
         )
 
     stoichiometric_species = set(reaction.participating_species)
     gas_members = sorted(stoichiometric_species & gas_species_set)
     solid_members = sorted(stoichiometric_species & solid_species_set)
-
     if reaction.phase == "gas_gas":
         if not gas_members:
-            raise ValueError(f"Reaction '{reaction.id}' is marked gas_gas but has no selected gas species.")
+            raise ValueError(
+                f"Reaction '{reaction.id}' is marked gas_gas but has no selected gas species."
+            )
         if solid_members:
             raise ValueError(
-                f"Reaction '{reaction.id}' is marked gas_gas but references selected solid species: "
-                f"{', '.join(solid_members)}."
+                f"Reaction '{reaction.id}' is marked gas_gas but references selected "
+                f"solid species: {', '.join(solid_members)}."
             )
-
-    if reaction.phase == "gas_solid":
-        if not gas_members:
-            raise ValueError(f"Reaction '{reaction.id}' is marked gas_solid but has no selected gas species.")
-        if not solid_members:
-            raise ValueError(f"Reaction '{reaction.id}' is marked gas_solid but has no selected solid species.")
-
-    if reaction.phase == "solid_solid":
-        if gas_members:
+    elif reaction.phase == "gas_solid":
+        if not gas_members or not solid_members:
+            missing_phase = "gas" if not gas_members else "solid"
             raise ValueError(
-                f"Reaction '{reaction.id}' is marked solid_solid but references selected gas species: "
-                f"{', '.join(gas_members)}."
+                f"Reaction '{reaction.id}' is marked gas_solid but has no selected "
+                f"{missing_phase} species."
             )
-        if not solid_members:
-            raise ValueError(f"Reaction '{reaction.id}' is marked solid_solid but has no selected solid species.")
+    elif gas_members:
+        raise ValueError(
+            f"Reaction '{reaction.id}' is marked solid_solid but references selected "
+            f"gas species: {', '.join(gas_members)}."
+        )
+    elif not solid_members:
+        raise ValueError(
+            f"Reaction '{reaction.id}' is marked solid_solid but has no selected solid species."
+        )
 
 
 def build_reaction_network(
@@ -172,408 +267,35 @@ def build_reaction_network(
     gas_species: tuple[str, ...] | list[str],
     solid_species: tuple[str, ...] | list[str],
     *,
-    reaction_catalog: Mapping[str, ReactionDefinition],
+    families: tuple[ReactionFamily, ...],
 ) -> ReactionNetwork:
     gas_species_tuple = tuple(gas_species)
     solid_species_tuple = tuple(solid_species)
-    reactions = tuple(reaction_catalog[reaction_id] for reaction_id in reaction_ids)
-
+    catalog = reaction_catalog(families)
+    reactions = tuple(catalog[reaction_id] for reaction_id in reaction_ids)
     for reaction in reactions:
         _validate_reaction_phase_membership(reaction, gas_species_tuple, solid_species_tuple)
-
-    gas_source_matrix = tuple(
-        tuple(reaction.source_coefficient(species_id) for reaction in reactions)
-        for species_id in gas_species_tuple
-    )
-    solid_source_matrix = tuple(
-        tuple(reaction.source_coefficient(species_id) for reaction in reactions)
-        for species_id in solid_species_tuple
-    )
 
     return ReactionNetwork(
         gas_species=gas_species_tuple,
         solid_species=solid_species_tuple,
         reactions=reactions,
-        gas_source_matrix=gas_source_matrix,
-        solid_source_matrix=solid_source_matrix,
+        gas_source_matrix=tuple(
+            tuple(reaction.source_coefficient(species_id) for reaction in reactions)
+            for species_id in gas_species_tuple
+        ),
+        solid_source_matrix=tuple(
+            tuple(reaction.source_coefficient(species_id) for reaction in reactions)
+            for species_id in solid_species_tuple
+        ),
     )
 
 
-REACTION_CATALOG = {
-    "ni_reduction_h2_medrano": ReactionDefinition(
-        id="ni_reduction_h2_medrano",
-        name="NiO reduction by H2 (Medrano AN)",
-        phase="gas_solid",
-        stoichiometry={
-            "H2": -1.0,
-            "NiO": -1.0,
-            "Ni": 1.0,
-            "H2O": 1.0,
-        },
-        required_species=("H2", "H2O", "Ni", "NiO"),
-        source_reference="Andrew Wright, Chemical Looping Reactor Modelling - 2D, Technical Report",
-        kinetics_hook="medrano_reduction_h2",
-        reversible=False,
-        notes="Technical report-based Medrano shrinking-core redox kinetics using rational fractional-power approximations.",
-    ),
-    "ni_reduction_co_medrano": ReactionDefinition(
-        id="ni_reduction_co_medrano",
-        name="NiO reduction by CO",
-        phase="gas_solid",
-        stoichiometry={
-            "CO": -1.0,
-            "NiO": -1.0,
-            "Ni": 1.0,
-            "CO2": 1.0,
-        },
-        required_species=("CO", "CO2", "Ni", "NiO"),
-        source_reference="Andrew Wright, Chemical Looping Reactor Modelling - 2D, Technical Report",
-        kinetics_hook="medrano_reduction_co",
-        reversible=False,
-        notes="Technical report-based Medrano shrinking-core redox kinetics using rational fractional-power approximations.",
-    ),
-    "ni_oxidation_o2_medrano": ReactionDefinition(
-        id="ni_oxidation_o2_medrano",
-        name="Ni oxidation by O2",
-        phase="gas_solid",
-        stoichiometry={
-            "O2": -0.5,
-            "Ni": -1.0,
-            "NiO": 1.0,
-        },
-        required_species=("O2", "Ni", "NiO"),
-        source_reference="Andrew Wright, Chemical Looping Reactor Modelling - 2D, Technical Report",
-        kinetics_hook="medrano_oxidation_o2",
-        reversible=False,
-        notes="Technical report-based Medrano shrinking-core redox kinetics using rational fractional-power approximations.",
-    ),
-    "smr_reaction_xu_froment": ReactionDefinition(
-        id="smr_reaction_xu_froment",
-        name="Steam methane reforming on Ni (Xu-Froment)",
-        phase="gas_gas",
-        stoichiometry={"CH4": -1.0, "H2O": -1.0, "CO": 1.0, "H2": 3.0},
-        required_species=("CH4", "H2O", "CO", "H2", "Ni"),
-        catalyst_species=("Ni",),
-        reversible=True,
-        kinetics_hook="xu_froment_smr",
-        source_reference="Xu and Froment, AIChE Journal 1989, https://doi.org/10.1002/aic.690350109",
-        notes="Xu-Froment steam methane reforming rate expression.",
-    ),
-    "wgs_reaction_xu_froment": ReactionDefinition(
-        id="wgs_reaction_xu_froment",
-        name="Water-gas shift on Ni (Xu-Froment)",
-        phase="gas_gas",
-        stoichiometry={"CO": -1.0, "H2O": -1.0, "CO2": 1.0, "H2": 1.0},
-        required_species=("CO", "H2O", "CO2", "H2", "Ni"),
-        catalyst_species=("Ni",),
-        reversible=True,
-        kinetics_hook="xu_froment_wgs",
-        source_reference="Xu and Froment, AIChE Journal 1989, https://doi.org/10.1002/aic.690350109",
-        notes="Xu-Froment water-gas shift rate expression.",
-    ),
-    "overall_reforming_xu_froment": ReactionDefinition(
-        id="overall_reforming_xu_froment",
-        name="Overall steam reforming on Ni (Xu-Froment)",
-        phase="gas_gas",
-        stoichiometry={"CH4": -1.0, "H2O": -2.0, "CO2": 1.0, "H2": 4.0},
-        required_species=("CH4", "H2O", "CO2", "H2", "Ni"),
-        catalyst_species=("Ni",),
-        reversible=True,
-        kinetics_hook="xu_froment_overall",
-        source_reference="Xu and Froment, AIChE Journal 1989, https://doi.org/10.1002/aic.690350109",
-        notes="Xu-Froment overall reforming rate expression.",
-    ),
-    "smr_reaction_numaguchi": ReactionDefinition(
-        id="smr_reaction_numaguchi",
-        name="Steam methane reforming on Ni (Numaguchi and Kikuchi) as documented by Andrew Wright",
-        phase="gas_gas",
-        stoichiometry={"CH4": -1.0, "H2O": -1.0, "CO": 1.0, "H2": 3.0},
-        required_species=("CH4", "H2O", "CO", "H2", "Ni"),
-        catalyst_species=("Ni",),
-        reversible=True,
-        kinetics_hook="numaguchi_smr",
-        source_reference="Andrew Wright, Chemical Looping Reactor Modelling – 2D, Technical Report",
-        notes="This appears to be different from the actual paper by Numaguchi and Kikuchi",
-    ),
-    "wgs_reaction_numaguchi": ReactionDefinition(
-        id="wgs_reaction_numaguchi",
-        name="Water-gas shift on Ni (Numaguchi and Kikuchi) as documented by Andrew Wright",
-        phase="gas_gas",
-        stoichiometry={"CO": -1.0, "H2O": -1.0, "CO2": 1.0, "H2": 1.0},
-        required_species=("CO", "H2O", "CO2", "H2", "Ni"),
-        catalyst_species=("Ni",),
-        reversible=True,
-        kinetics_hook="numaguchi_wgs",
-        source_reference="Andrew Wright, Chemical Looping Reactor Modelling – 2D, Technical Report",
-        notes="This appears to be different from the actual paper by Numaguchi and Kikuchi",
-    ),
-    "cuo_h2_reduction_san_pio": ReactionDefinition(
-        id="cuo_h2_reduction_san_pio",
-        name="CuO reduction to Cu2O by H2",
-        phase="gas_solid",
-        stoichiometry={
-            "H2": -1.0,
-            "CuO": -2.0,
-            "Cu2O": 1.0,
-            "H2O": 1.0,
-        },
-        required_species=("H2", "H2O", "CuO", "Cu2O"),
-        kinetics_hook="san_pio_cuo_h2_reduction_ph",
-        reversible=False,
-        source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
-        notes="Pseudo-homogeneous CuO reduction reaction rred1 = kred1 * C_CuO from Table 4.",
-    ),
-    "cu2o_h2_reduction_san_pio": ReactionDefinition(
-        id="cu2o_h2_reduction_san_pio",
-        name="Cu2O reduction to Cu by H2",
-        phase="gas_solid",
-        stoichiometry={
-            "H2": -1.0,
-            "Cu2O": -1.0,
-            "Cu": 2.0,
-            "H2O": 1.0,
-        },
-        required_species=("H2", "H2O", "Cu2O", "Cu"),
-        kinetics_hook="san_pio_cu2o_h2_reduction_ph",
-        reversible=False,
-        source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
-        notes="Pseudo-homogeneous Cu2O reduction reaction rred2 = kred2 * C_Cu2O from Table 4.",
-    ),
-    "cu_al2o3_spinel_reduction_1_san_pio": ReactionDefinition(
-        id="cu_al2o3_spinel_reduction_1_san_pio",
-        name="CuAl2O4 reduction to Cu on CuO/Al2O3",
-        phase="gas_solid",
-        stoichiometry={
-            "H2": -1.0,
-            "CuAl2O4": -1.0,
-            "Cu": 1.0,
-            "Al2O3": 1.0,
-            "H2O": 1.0,
-        },
-        required_species=("H2", "H2O", "CuAl2O4", "Cu", "Al2O3"),
-        kinetics_hook="san_pio_cu_al2o3_sp1_ph",
-        reversible=False,
-        source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
-        notes="Pseudo-homogeneous spinel reduction reaction rsp1 = ksp1 * C_CuAl2O4 for CuO/Al2O3.",
-    ),
-
-    "cu_al2o3_spinel_reduction_2_san_pio": ReactionDefinition(
-        id="cu_al2o3_spinel_reduction_2_san_pio",
-        name="CuAl2O4 reduction to CuAlO2 on CuO/Al2O3",
-        phase="gas_solid",
-        stoichiometry={
-            "H2": -1.0,
-            "CuAl2O4": -2.0,
-            "CuAlO2": 2.0,
-            "Al2O3": 1.0,
-            "H2O": 1.0,
-        },
-        required_species=("H2", "H2O", "CuAl2O4", "CuAlO2", "Al2O3"),
-        kinetics_hook="san_pio_cu_al2o3_sp2_ph",
-        reversible=False,
-        source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
-        notes="Pseudo-homogeneous spinel reduction reaction rsp2 = ksp2 * C_CuAl2O4 for CuO/Al2O3.",
-    ),
-
-    "cu_al2o3_spinel_reduction_3_san_pio": ReactionDefinition(
-        id="cu_al2o3_spinel_reduction_3_san_pio",
-        name="CuAlO2 reduction to Cu on CuO/Al2O3",
-        phase="gas_solid",
-        stoichiometry={
-            "H2": -1.0,
-            "CuAlO2": -2.0,
-            "Cu": 2.0,
-            "Al2O3": 1.0,
-            "H2O": 1.0,
-        },
-        required_species=("H2", "H2O", "CuAlO2", "Cu", "Al2O3"),
-        kinetics_hook="san_pio_cu_al2o3_sp3_ph",
-        reversible=False,
-        source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
-        notes="Pseudo-homogeneous spinel reduction reaction rsp3 = ksp3 * C_CuAlO2 for CuO/Al2O3.",
-    ),
-
-    "cu_al2o3_oxidation_1_san_pio": ReactionDefinition(
-        id="cu_al2o3_oxidation_1_san_pio",
-        name="Cu oxidation to CuO on CuO/Al2O3",
-        phase="gas_solid",
-        stoichiometry={
-            "O2": -0.5,
-            "Cu": -1.0,
-            "CuO": 1.0,
-        },
-        required_species=("O2", "Cu", "CuO"),
-        kinetics_hook="san_pio_cu_al2o3_ox1_ph",
-        reversible=False,
-        source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
-        notes="Pseudo-homogeneous oxidation reaction rox1 = kox1 * C_Cu * P_O2^0.5 for CuO/Al2O3.",
-    ),
-
-    "cu_al2o3_oxidation_2_san_pio": ReactionDefinition(
-        id="cu_al2o3_oxidation_2_san_pio",
-        name="CuO reaction with Al2O3 to form CuAl2O4",
-        phase="solid_solid",
-        stoichiometry={
-            "CuO": -1.0,
-            "Al2O3": -1.0,
-            "CuAl2O4": 1.0,
-        },
-        required_species=("CuO", "Al2O3", "CuAl2O4"),
-        kinetics_hook="san_pio_cu_al2o3_ox2_ph",
-        reversible=False,
-        source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
-        notes="Pseudo-homogeneous oxidation reaction rox2 = kox2 * C_CuO * C_Al2O3 for CuO/Al2O3.",
-    ),
-
-    "cu_al2o3_oxidation_3_san_pio": ReactionDefinition(
-        id="cu_al2o3_oxidation_3_san_pio",
-        name="CuAlO2 oxidation with Al2O3 to form CuAl2O4",
-        phase="gas_solid",
-        stoichiometry={
-            "O2": -0.5,
-            "CuAlO2": -2.0,
-            "Al2O3": -1.0,
-            "CuAl2O4": 2.0,
-        },
-        required_species=("O2", "CuAlO2", "Al2O3", "CuAl2O4"),
-        kinetics_hook="san_pio_cu_al2o3_ox3_ph",
-        reversible=False,
-        source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
-        notes="Pseudo-homogeneous oxidation reaction rox3 = kox3 * C_CuAlO2 * C_Al2O3 * P_O2^0.5 for CuO/Al2O3.",
-    ),
-    "fe2o3_h2_reduction_he_2023": ReactionDefinition(
-        id="fe2o3_h2_reduction_he_2023",
-        name="Fe2O3 reduction to Fe3O4 by H2",
-        phase="gas_solid",
-        stoichiometry={
-            "Fe2O3": -3.0,
-            "H2": -1.0,
-            "Fe3O4": 2.0,
-            "H2O": 1.0,
-        },
-        required_species=("Fe2O3", "Fe3O4", "H2", "H2O"),
-        source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
-        kinetics_hook="he_fe2o3_h2_reduction",
-        reversible=False,
-        notes="First-stage Fe reduction by H2. Paper treats Fe2O3->Fe3O4 as effectively irreversible.",
-    ),
-
-    "fe3o4_h2_reduction_he_2023": ReactionDefinition(
-        id="fe3o4_h2_reduction_he_2023",
-        name="Fe3O4 reduction to FeO by H2",
-        phase="gas_solid",
-        stoichiometry={
-            "Fe3O4": -1.0,
-            "H2": -1.0,
-            "FeO": 3.0,
-            "H2O": 1.0,
-        },
-        required_species=("Fe3O4", "FeO", "H2", "H2O"),
-        source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
-        kinetics_hook="he_fe3o4_h2_reduction",
-        reversible=True,
-        notes="Second-stage Fe reduction by H2 with equilibrium driving force.",
-    ),
-
-    "feo_h2_reduction_he_2023": ReactionDefinition(
-        id="feo_h2_reduction_he_2023",
-        name="FeO reduction to Fe by H2",
-        phase="gas_solid",
-        stoichiometry={
-            "FeO": -1.0,
-            "H2": -1.0,
-            "Fe": 1.0,
-            "H2O": 1.0,
-        },
-        required_species=("FeO", "Fe", "H2", "H2O"),
-        source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
-        kinetics_hook="he_feo_h2_reduction",
-        reversible=True,
-        notes="Third-stage Fe reduction by H2 with equilibrium driving force.",
-    ),
-
-    "fe2o3_co_reduction_he_2023": ReactionDefinition(
-        id="fe2o3_co_reduction_he_2023",
-        name="Fe2O3 reduction to Fe3O4 by CO",
-        phase="gas_solid",
-        stoichiometry={
-            "Fe2O3": -3.0,
-            "CO": -1.0,
-            "Fe3O4": 2.0,
-            "CO2": 1.0,
-        },
-        required_species=("Fe2O3", "Fe3O4", "CO", "CO2"),
-        source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
-        kinetics_hook="he_fe2o3_co_reduction",
-        reversible=False,
-        notes="First-stage Fe reduction by CO. Paper treats Fe2O3->Fe3O4 as effectively irreversible.",
-    ),
-
-    "fe3o4_co_reduction_he_2023": ReactionDefinition(
-        id="fe3o4_co_reduction_he_2023",
-        name="Fe3O4 reduction to FeO by CO",
-        phase="gas_solid",
-        stoichiometry={
-            "Fe3O4": -1.0,
-            "CO": -1.0,
-            "FeO": 3.0,
-            "CO2": 1.0,
-        },
-        required_species=("Fe3O4", "FeO", "CO", "CO2"),
-        source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
-        kinetics_hook="he_fe3o4_co_reduction",
-        reversible=True,
-        notes="Second-stage Fe reduction by CO with equilibrium driving force.",
-    ),
-
-    "feo_co_reduction_he_2023": ReactionDefinition(
-        id="feo_co_reduction_he_2023",
-        name="FeO reduction to Fe by CO",
-        phase="gas_solid",
-        stoichiometry={
-            "FeO": -1.0,
-            "CO": -1.0,
-            "Fe": 1.0,
-            "CO2": 1.0,
-        },
-        required_species=("FeO", "Fe", "CO", "CO2"),
-        source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
-        kinetics_hook="he_feo_co_reduction",
-        reversible=True,
-        notes="Third-stage Fe reduction by CO using the random pore model. This reaction entry is correct, but it will only run if the kinetics hook is completed with symbolic logarithm support.",
-    ),
-
-    "fe2o3_ch4_reduction_he_2023": ReactionDefinition(
-        id="fe2o3_ch4_reduction_he_2023",
-        name="Fe2O3 reduction to Fe3O4 by CH4",
-        phase="gas_solid",
-        stoichiometry={
-            "Fe2O3": -12.0,
-            "CH4": -1.0,
-            "Fe3O4": 8.0,
-            "CO2": 1.0,
-            "H2O": 2.0,
-        },
-        required_species=("Fe2O3", "Fe3O4", "CH4", "CO2", "H2O"),
-        source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
-        kinetics_hook="he_fe2o3_ch4_reduction",
-        reversible=False,
-        notes="Paper includes only CH4 reduction of hematite; CH4 reduction of Fe3O4 and FeO is neglected.",
-    ),
-
-    "fe_o2_oxidation_he_2023": ReactionDefinition(
-        id="fe_o2_oxidation_he_2023",
-        name="Fe oxidation by O2 to equivalent Fe2O3",
-        phase="gas_solid",
-        stoichiometry={
-            "Fe": -1.0,
-            "O2": -0.75,
-            "Fe2O3": 0.5,
-        },
-        required_species=("Fe", "O2", "Fe2O3"),
-        source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
-        kinetics_hook="he_fe_o2_oxidation",
-        reversible=False,
-        notes="Empirical oxidation law from the paper. The paper models oxidation as a single fast Fe+O2 step and handles Fe2O3/Fe3O4/FeO redistribution separately by solid-state transformation logic.",
-    ),
-}
+__all__ = (
+    "KineticsHook",
+    "ReactionDefinition",
+    "ReactionFamily",
+    "ReactionNetwork",
+    "build_reaction_network",
+    "reaction_catalog",
+)

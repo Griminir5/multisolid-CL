@@ -4,12 +4,10 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from daetools.pyDAE import Constant, Exp, Max, Sqrt
-
-from pyUnits import K, Pa, m, mol, s
-
 from ..properties import PROPERTY_REGISTRY
-from . import KineticsContext, register_kinetics_hook
+from ..reactions import ReactionDefinition, ReactionFamily
+from . import KineticsContext
+from .runtime import Constant, Exp, K, Max, Pa, Sqrt, m, mol, s
 
 
 GAS_CONSTANT_J_PER_MOL_K = 8.31446261815324
@@ -353,7 +351,6 @@ def _xu_froment_terms(context: KineticsContext) -> XuFromentTerms:
     )
 
 
-@register_kinetics_hook("xu_froment_smr")
 def xu_froment_smr(context: KineticsContext):
     terms = _xu_froment_terms(context)
     driving_force = terms.p_ch4_pa * terms.p_h2o_pa - (
@@ -367,7 +364,6 @@ def xu_froment_smr(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("xu_froment_wgs")
 def xu_froment_wgs(context: KineticsContext):
     terms = _xu_froment_terms(context)
     driving_force = terms.p_co_pa * terms.p_h2o_pa - (
@@ -381,7 +377,6 @@ def xu_froment_wgs(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("xu_froment_overall")
 def xu_froment_overall(context: KineticsContext):
     terms = _xu_froment_terms(context)
     driving_force = terms.p_ch4_pa * terms.p_h2o_pa**2 - (
@@ -397,7 +392,55 @@ def xu_froment_overall(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
+FAMILY = ReactionFamily(
+    name="reforming_xu_froment",
+    required_gas_species=("CH4", "H2O", "CO", "CO2", "H2"),
+    required_solid_species=("Ni",),
+    reactions=(
+        ReactionDefinition(
+            id="smr_reaction_xu_froment",
+            name="Steam methane reforming on Ni (Xu-Froment)",
+            phase="gas_gas",
+            stoichiometry={"CH4": -1.0, "H2O": -1.0, "CO": 1.0, "H2": 3.0},
+            required_species=("CH4", "H2O", "CO", "H2", "Ni"),
+            catalyst_species=("Ni",),
+            reversible=True,
+            source_reference="Xu and Froment, AIChE Journal 1989, https://doi.org/10.1002/aic.690350109",
+            notes="Xu-Froment steam methane reforming rate expression.",
+        ),
+        ReactionDefinition(
+            id="wgs_reaction_xu_froment",
+            name="Water-gas shift on Ni (Xu-Froment)",
+            phase="gas_gas",
+            stoichiometry={"CO": -1.0, "H2O": -1.0, "CO2": 1.0, "H2": 1.0},
+            required_species=("CO", "H2O", "CO2", "H2", "Ni"),
+            catalyst_species=("Ni",),
+            reversible=True,
+            source_reference="Xu and Froment, AIChE Journal 1989, https://doi.org/10.1002/aic.690350109",
+            notes="Xu-Froment water-gas shift rate expression.",
+        ),
+        ReactionDefinition(
+            id="overall_reforming_xu_froment",
+            name="Overall steam reforming on Ni (Xu-Froment)",
+            phase="gas_gas",
+            stoichiometry={"CH4": -1.0, "H2O": -2.0, "CO2": 1.0, "H2": 4.0},
+            required_species=("CH4", "H2O", "CO2", "H2", "Ni"),
+            catalyst_species=("Ni",),
+            reversible=True,
+            source_reference="Xu and Froment, AIChE Journal 1989, https://doi.org/10.1002/aic.690350109",
+            notes="Xu-Froment overall reforming rate expression.",
+        ),
+    ),
+    kinetics_hooks={
+        "smr_reaction_xu_froment": xu_froment_smr,
+        "wgs_reaction_xu_froment": xu_froment_wgs,
+        "overall_reforming_xu_froment": xu_froment_overall,
+    },
+)
+
+
 __all__ = [
+    "FAMILY",
     "MIN_H2_MOLE_FRACTION",
     "XU_FROMENT_ACTIVATION_ENERGIES_J_PER_MOL",
     "XU_FROMENT_ADSORPTION_COEFFICIENTS",

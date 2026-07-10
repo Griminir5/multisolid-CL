@@ -55,7 +55,11 @@ def _case_documents(
                 "requested_reports": [],
             },
         },
-        "chemistry.yaml": {"gas_species": ["N2"], "reaction_ids": []},
+        "chemistry.yaml": {
+            "gas_species": ["N2"],
+            "reaction_families": [],
+            "reaction_ids": [],
+        },
         "program.yaml": {
             "inlet_flow": {"initial": 1.0, "steps": flow_steps},
             "inlet_temperature": {"initial": 300.0, "steps": []},
@@ -203,6 +207,7 @@ def test_component_reaction_and_report_references_are_aggregated(tmp_path: Path)
     documents = _case_documents()
     documents["chemistry.yaml"] = {
         "gas_species": ["MysteryGas"],
+        "reaction_families": [],
         "reaction_ids": ["mystery_reaction"],
     }
     documents["program.yaml"]["inlet_composition"]["initial"] = {"MysteryGas": 1.0}
@@ -216,6 +221,33 @@ def test_component_reaction_and_report_references_are_aggregated(tmp_path: Path)
     assert "Unknown gas species 'MysteryGas'" in message
     assert "chemistry.reaction_ids contains unknown id 'mystery_reaction'" in message
     assert "run.outputs.requested_reports contains unknown ids: mystery_report" in message
+
+
+def test_unknown_reaction_family_uses_configuration_path(tmp_path: Path) -> None:
+    documents = _case_documents()
+    documents["chemistry.yaml"]["reaction_families"] = ["mystery_family"]
+    run_path = _write_case(tmp_path, documents)
+
+    with pytest.raises(PackedBedValidationError) as caught:
+        load_case(run_path)
+
+    assert "chemistry.reaction_families: Unknown reaction families: mystery_family" in str(
+        caught.value
+    )
+
+
+def test_reaction_must_belong_to_a_selected_family(tmp_path: Path) -> None:
+    documents = _case_documents()
+    documents["chemistry.yaml"]["reaction_families"] = ["nickel_medrano"]
+    documents["chemistry.yaml"]["reaction_ids"] = ["smr_reaction_xu_froment"]
+    run_path = _write_case(tmp_path, documents)
+
+    with pytest.raises(PackedBedValidationError) as caught:
+        load_case(run_path)
+
+    assert "chemistry.reaction_ids contains unknown id 'smr_reaction_xu_froment'" in str(
+        caught.value
+    )
 
 
 def test_accepts_sub_nanosecond_duration_sum_drift(tmp_path: Path) -> None:

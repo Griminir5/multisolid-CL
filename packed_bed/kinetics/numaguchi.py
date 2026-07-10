@@ -4,12 +4,10 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from daetools.pyDAE import Constant, Exp, Max, Sqrt
-
-from pyUnits import K, Pa, m, mol, s
-
 from ..properties import PROPERTY_REGISTRY
-from . import KineticsContext, register_kinetics_hook
+from ..reactions import ReactionDefinition, ReactionFamily
+from . import KineticsContext
+from .runtime import Constant, Exp, K, Max, Pa, Sqrt, m, mol, s
 
 
 GAS_CONSTANT_J_PER_MOL_K = 8.31446261815324
@@ -223,7 +221,6 @@ def _numaguchi_terms(context: KineticsContext) -> NumaguchiTerms:
     )
 
 
-@register_kinetics_hook("numaguchi_smr")
 def numaguchi_smr(context: KineticsContext):
     terms = _numaguchi_terms(context)
     driving_force = terms.p_ch4_bar * terms.p_h2o_bar - (
@@ -237,7 +234,6 @@ def numaguchi_smr(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("numaguchi_wgs")
 def numaguchi_wgs(context: KineticsContext):
     terms = _numaguchi_terms(context)
     driving_force = terms.p_co_bar * terms.p_h2o_bar - (
@@ -251,7 +247,43 @@ def numaguchi_wgs(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
+FAMILY = ReactionFamily(
+    name="reforming_numaguchi",
+    required_gas_species=("CH4", "H2O", "CO", "CO2", "H2"),
+    required_solid_species=("Ni",),
+    reactions=(
+        ReactionDefinition(
+            id="smr_reaction_numaguchi",
+            name="Steam methane reforming on Ni (Numaguchi and Kikuchi) as documented by Andrew Wright",
+            phase="gas_gas",
+            stoichiometry={"CH4": -1.0, "H2O": -1.0, "CO": 1.0, "H2": 3.0},
+            required_species=("CH4", "H2O", "CO", "H2", "Ni"),
+            catalyst_species=("Ni",),
+            reversible=True,
+            source_reference="Andrew Wright, Chemical Looping Reactor Modelling – 2D, Technical Report",
+            notes="This appears to be different from the actual paper by Numaguchi and Kikuchi",
+        ),
+        ReactionDefinition(
+            id="wgs_reaction_numaguchi",
+            name="Water-gas shift on Ni (Numaguchi and Kikuchi) as documented by Andrew Wright",
+            phase="gas_gas",
+            stoichiometry={"CO": -1.0, "H2O": -1.0, "CO2": 1.0, "H2": 1.0},
+            required_species=("CO", "H2O", "CO2", "H2", "Ni"),
+            catalyst_species=("Ni",),
+            reversible=True,
+            source_reference="Andrew Wright, Chemical Looping Reactor Modelling – 2D, Technical Report",
+            notes="This appears to be different from the actual paper by Numaguchi and Kikuchi",
+        ),
+    ),
+    kinetics_hooks={
+        "smr_reaction_numaguchi": numaguchi_smr,
+        "wgs_reaction_numaguchi": numaguchi_wgs,
+    },
+)
+
+
 __all__ = [
+    "FAMILY",
     "NUMAGUCHI_ACTIVATION_ENERGIES_J_PER_MOL",
     "NUMAGUCHI_RATE_COEFFICIENTS",
     "catalyst_mass_density_value",

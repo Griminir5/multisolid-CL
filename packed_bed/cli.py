@@ -13,7 +13,6 @@ from .properties import PROPERTY_REGISTRY
 from .result_reports import PackedBedDataFrameReporter, compute_balance_errors, format_balance_error_lines
 from .result_plots import render_run_result_plots
 from .results import RunResult
-from .reactions import REACTION_CATALOG
 from .solver_clean import assemble_simulation, run_assembled_simulation
 from .visualization import (
     build_system_graph,
@@ -45,7 +44,6 @@ def generate_artifacts(case: Case) -> dict[str, Path]:
         system_graph = build_system_graph(
             case,
             property_registry=PROPERTY_REGISTRY,
-            reaction_catalog=REACTION_CATALOG,
         )
         artifact_paths.update(render_system_graph(system_graph, artifacts_directory))
     artifact_paths.update(render_operating_program(case, artifacts_directory))
@@ -89,7 +87,6 @@ def launch_daetools_plotter(run_result: RunResult) -> int:
 def run_simulation(
     case: Case,
     property_registry=PROPERTY_REGISTRY,
-    reaction_catalog=REACTION_CATALOG,
     artifact_paths: dict[str, Path] | None = None,
 ) -> RunResult:
     output_directory = case.output_directory
@@ -99,7 +96,6 @@ def run_simulation(
     assembly = assemble_simulation(
         case,
         property_registry=property_registry,
-        reaction_catalog=reaction_catalog,
     )
     runtime_report_ids = tuple(
         dict.fromkeys(

@@ -4,11 +4,9 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from daetools.pyDAE import Constant, Exp, Sqrt
-
-from pyUnits import K, Pa, m, mol, s
-
-from . import KineticsContext, register_kinetics_hook
+from ..reactions import ReactionDefinition, ReactionFamily
+from . import KineticsContext
+from .runtime import Constant, Exp, K, Pa, Sqrt, m, mol, s
 
 
 GAS_CONSTANT_J_PER_MOL_K = 8.31446261815324
@@ -285,7 +283,6 @@ def _cu_al2o3_terms(context: KineticsContext) -> CuAl2O3Terms:
 
 
 
-@register_kinetics_hook("san_pio_cuo_h2_reduction_ph")
 def san_pio_cuo_h2_reduction_ph(context: KineticsContext):
     terms = _cu_al2o3_terms(context)
     rate_expression = (
@@ -300,7 +297,6 @@ def san_pio_cuo_h2_reduction_ph(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("san_pio_cu2o_h2_reduction_ph")
 def san_pio_cu2o_h2_reduction_ph(context: KineticsContext):
     terms = _cu_al2o3_terms(context)
     rate_expression = (
@@ -315,7 +311,6 @@ def san_pio_cu2o_h2_reduction_ph(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("san_pio_cu_al2o3_sp1_ph")
 def san_pio_cu_al2o3_sp1_ph(context: KineticsContext):
     terms = _cu_al2o3_terms(context)
     rate_expression = (
@@ -330,7 +325,6 @@ def san_pio_cu_al2o3_sp1_ph(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("san_pio_cu_al2o3_sp2_ph")
 def san_pio_cu_al2o3_sp2_ph(context: KineticsContext):
     terms = _cu_al2o3_terms(context)
     rate_expression = (
@@ -345,7 +339,6 @@ def san_pio_cu_al2o3_sp2_ph(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("san_pio_cu_al2o3_sp3_ph")
 def san_pio_cu_al2o3_sp3_ph(context: KineticsContext):
     terms = _cu_al2o3_terms(context)
     rate_expression = (
@@ -361,7 +354,6 @@ def san_pio_cu_al2o3_sp3_ph(context: KineticsContext):
 
 
 
-@register_kinetics_hook("san_pio_cu_al2o3_ox1_ph")
 def san_pio_cu_al2o3_ox1_ph(context: KineticsContext):
     terms = _cu_al2o3_terms(context)
     rate_expression = (
@@ -376,7 +368,6 @@ def san_pio_cu_al2o3_ox1_ph(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("san_pio_cu_al2o3_ox2_ph")
 def san_pio_cu_al2o3_ox2_ph(context: KineticsContext):
     terms = _cu_al2o3_terms(context)
     rate_expression = (
@@ -391,7 +382,6 @@ def san_pio_cu_al2o3_ox2_ph(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("san_pio_cu_al2o3_ox3_ph")
 def san_pio_cu_al2o3_ox3_ph(context: KineticsContext):
     terms = _cu_al2o3_terms(context)
     rate_expression = (
@@ -407,7 +397,122 @@ def san_pio_cu_al2o3_ox3_ph(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
+FAMILY = ReactionFamily(
+    name="copper_san_pio",
+    required_gas_species=("H2", "H2O", "O2"),
+    required_solid_species=("Cu", "Cu2O", "CuO", "Al2O3", "CuAlO2", "CuAl2O4"),
+    reactions=(
+        ReactionDefinition(
+            id="cuo_h2_reduction_san_pio",
+            name="CuO reduction to Cu2O by H2",
+            phase="gas_solid",
+            stoichiometry={"H2": -1.0, "CuO": -2.0, "Cu2O": 1.0, "H2O": 1.0},
+            required_species=("H2", "H2O", "CuO", "Cu2O"),
+            source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
+            notes="Pseudo-homogeneous CuO reduction reaction rred1 = kred1 * C_CuO from Table 4.",
+        ),
+        ReactionDefinition(
+            id="cu2o_h2_reduction_san_pio",
+            name="Cu2O reduction to Cu by H2",
+            phase="gas_solid",
+            stoichiometry={"H2": -1.0, "Cu2O": -1.0, "Cu": 2.0, "H2O": 1.0},
+            required_species=("H2", "H2O", "Cu2O", "Cu"),
+            source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
+            notes="Pseudo-homogeneous Cu2O reduction reaction rred2 = kred2 * C_Cu2O from Table 4.",
+        ),
+        ReactionDefinition(
+            id="cu_al2o3_spinel_reduction_1_san_pio",
+            name="CuAl2O4 reduction to Cu on CuO/Al2O3",
+            phase="gas_solid",
+            stoichiometry={
+                "H2": -1.0,
+                "CuAl2O4": -1.0,
+                "Cu": 1.0,
+                "Al2O3": 1.0,
+                "H2O": 1.0,
+            },
+            required_species=("H2", "H2O", "CuAl2O4", "Cu", "Al2O3"),
+            source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
+            notes="Pseudo-homogeneous spinel reduction reaction rsp1 = ksp1 * C_CuAl2O4 for CuO/Al2O3.",
+        ),
+        ReactionDefinition(
+            id="cu_al2o3_spinel_reduction_2_san_pio",
+            name="CuAl2O4 reduction to CuAlO2 on CuO/Al2O3",
+            phase="gas_solid",
+            stoichiometry={
+                "H2": -1.0,
+                "CuAl2O4": -2.0,
+                "CuAlO2": 2.0,
+                "Al2O3": 1.0,
+                "H2O": 1.0,
+            },
+            required_species=("H2", "H2O", "CuAl2O4", "CuAlO2", "Al2O3"),
+            source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
+            notes="Pseudo-homogeneous spinel reduction reaction rsp2 = ksp2 * C_CuAl2O4 for CuO/Al2O3.",
+        ),
+        ReactionDefinition(
+            id="cu_al2o3_spinel_reduction_3_san_pio",
+            name="CuAlO2 reduction to Cu on CuO/Al2O3",
+            phase="gas_solid",
+            stoichiometry={
+                "H2": -1.0,
+                "CuAlO2": -2.0,
+                "Cu": 2.0,
+                "Al2O3": 1.0,
+                "H2O": 1.0,
+            },
+            required_species=("H2", "H2O", "CuAlO2", "Cu", "Al2O3"),
+            source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
+            notes="Pseudo-homogeneous spinel reduction reaction rsp3 = ksp3 * C_CuAlO2 for CuO/Al2O3.",
+        ),
+        ReactionDefinition(
+            id="cu_al2o3_oxidation_1_san_pio",
+            name="Cu oxidation to CuO on CuO/Al2O3",
+            phase="gas_solid",
+            stoichiometry={"O2": -0.5, "Cu": -1.0, "CuO": 1.0},
+            required_species=("O2", "Cu", "CuO"),
+            source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
+            notes="Pseudo-homogeneous oxidation reaction rox1 = kox1 * C_Cu * P_O2^0.5 for CuO/Al2O3.",
+        ),
+        ReactionDefinition(
+            id="cu_al2o3_oxidation_2_san_pio",
+            name="CuO reaction with Al2O3 to form CuAl2O4",
+            phase="solid_solid",
+            stoichiometry={"CuO": -1.0, "Al2O3": -1.0, "CuAl2O4": 1.0},
+            required_species=("CuO", "Al2O3", "CuAl2O4"),
+            source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
+            notes="Pseudo-homogeneous oxidation reaction rox2 = kox2 * C_CuO * C_Al2O3 for CuO/Al2O3.",
+        ),
+        ReactionDefinition(
+            id="cu_al2o3_oxidation_3_san_pio",
+            name="CuAlO2 oxidation with Al2O3 to form CuAl2O4",
+            phase="gas_solid",
+            stoichiometry={
+                "O2": -0.5,
+                "CuAlO2": -2.0,
+                "Al2O3": -1.0,
+                "CuAl2O4": 2.0,
+            },
+            required_species=("O2", "CuAlO2", "Al2O3", "CuAl2O4"),
+            source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
+            notes="Pseudo-homogeneous oxidation reaction rox3 = kox3 * C_CuAlO2 * C_Al2O3 * P_O2^0.5 for CuO/Al2O3.",
+        ),
+    ),
+    kinetics_hooks={
+        "cuo_h2_reduction_san_pio": san_pio_cuo_h2_reduction_ph,
+        "cu2o_h2_reduction_san_pio": san_pio_cu2o_h2_reduction_ph,
+        "cu_al2o3_spinel_reduction_1_san_pio": san_pio_cu_al2o3_sp1_ph,
+        "cu_al2o3_spinel_reduction_2_san_pio": san_pio_cu_al2o3_sp2_ph,
+        "cu_al2o3_spinel_reduction_3_san_pio": san_pio_cu_al2o3_sp3_ph,
+        "cu_al2o3_oxidation_1_san_pio": san_pio_cu_al2o3_ox1_ph,
+        "cu_al2o3_oxidation_2_san_pio": san_pio_cu_al2o3_ox2_ph,
+        "cu_al2o3_oxidation_3_san_pio": san_pio_cu_al2o3_ox3_ph,
+    },
+)
+
+
 __all__ = [
+    "FAMILY",
     "CU_REDUCTION_COEFFICIENTS",
     "CU_REDUCTION_EA_J_PER_MOL",
     "CU_AL2O3_SPINEL_REDUCTION_COEFFICIENTS",

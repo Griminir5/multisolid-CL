@@ -4,12 +4,10 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from daetools.pyDAE import Constant, Exp, Log, Sqrt
-
-from pyUnits import K, Pa, m, mol, s
-
 from ..properties import PROPERTY_REGISTRY
-from . import KineticsContext, register_kinetics_hook
+from ..reactions import ReactionDefinition, ReactionFamily
+from . import KineticsContext
+from .runtime import Constant, Exp, K, Log, Pa, Sqrt, m, mol, s
 
 
 GAS_CONSTANT_J_PER_MOL_K = 8.31446261815324
@@ -492,7 +490,6 @@ def _fe_terms(context: KineticsContext) -> FeReductionTerms:
     )
 
 
-@register_kinetics_hook("he_fe2o3_h2_reduction")
 def he_fe2o3_h2_reduction(context: KineticsContext):
     terms = _fe_terms(context)
     one_minus_x = _safe_one_minus_conversion(terms.x_fe2o3)
@@ -524,7 +521,6 @@ def he_fe2o3_h2_reduction(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("he_fe3o4_h2_reduction")
 def he_fe3o4_h2_reduction(context: KineticsContext):
     terms = _fe_terms(context)
     one_minus_x = _safe_one_minus_conversion(terms.x_fe3o4)
@@ -558,7 +554,6 @@ def he_fe3o4_h2_reduction(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("he_feo_h2_reduction")
 def he_feo_h2_reduction(context: KineticsContext):
     terms = _fe_terms(context)
     one_minus_x = _safe_one_minus_conversion(terms.x_feo)
@@ -592,7 +587,6 @@ def he_feo_h2_reduction(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("he_fe2o3_co_reduction")
 def he_fe2o3_co_reduction(context: KineticsContext):
     terms = _fe_terms(context)
 
@@ -609,7 +603,6 @@ def he_fe2o3_co_reduction(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("he_fe3o4_co_reduction")
 def he_fe3o4_co_reduction(context: KineticsContext):
     terms = _fe_terms(context)
     keq = _equilibrium_constant_expression(*CO_EQUILIBRIUM_COEFFICIENTS["Fe3O4_to_FeO"], terms.temperature_k)
@@ -628,7 +621,6 @@ def he_fe3o4_co_reduction(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("he_feo_co_reduction")
 def he_feo_co_reduction(context: KineticsContext):
     terms = _fe_terms(context)
     one_minus_x = _safe_one_minus_conversion(terms.x_feo)
@@ -671,7 +663,6 @@ def he_feo_co_reduction(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("he_fe2o3_ch4_reduction")
 def he_fe2o3_ch4_reduction(context: KineticsContext):
     terms = _fe_terms(context)
 
@@ -688,7 +679,6 @@ def he_fe2o3_ch4_reduction(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
-@register_kinetics_hook("he_fe_o2_oxidation")
 def he_fe_o2_oxidation(context: KineticsContext):
     terms = _fe_terms(context)
 
@@ -708,7 +698,109 @@ def he_fe_o2_oxidation(context: KineticsContext):
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
+FAMILY = ReactionFamily(
+    name="iron_he",
+    required_gas_species=("H2", "H2O", "CO", "CO2", "CH4", "O2"),
+    required_solid_species=("Fe", "FeO", "Fe3O4", "Fe2O3"),
+    reactions=(
+        ReactionDefinition(
+            id="fe2o3_h2_reduction_he_2023",
+            name="Fe2O3 reduction to Fe3O4 by H2",
+            phase="gas_solid",
+            stoichiometry={"Fe2O3": -3.0, "H2": -1.0, "Fe3O4": 2.0, "H2O": 1.0},
+            required_species=("Fe2O3", "Fe3O4", "H2", "H2O"),
+            source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
+            notes="First-stage Fe reduction by H2. Paper treats Fe2O3->Fe3O4 as effectively irreversible.",
+        ),
+        ReactionDefinition(
+            id="fe3o4_h2_reduction_he_2023",
+            name="Fe3O4 reduction to FeO by H2",
+            phase="gas_solid",
+            stoichiometry={"Fe3O4": -1.0, "H2": -1.0, "FeO": 3.0, "H2O": 1.0},
+            required_species=("Fe3O4", "FeO", "H2", "H2O"),
+            source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
+            reversible=True,
+            notes="Second-stage Fe reduction by H2 with equilibrium driving force.",
+        ),
+        ReactionDefinition(
+            id="feo_h2_reduction_he_2023",
+            name="FeO reduction to Fe by H2",
+            phase="gas_solid",
+            stoichiometry={"FeO": -1.0, "H2": -1.0, "Fe": 1.0, "H2O": 1.0},
+            required_species=("FeO", "Fe", "H2", "H2O"),
+            source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
+            reversible=True,
+            notes="Third-stage Fe reduction by H2 with equilibrium driving force.",
+        ),
+        ReactionDefinition(
+            id="fe2o3_co_reduction_he_2023",
+            name="Fe2O3 reduction to Fe3O4 by CO",
+            phase="gas_solid",
+            stoichiometry={"Fe2O3": -3.0, "CO": -1.0, "Fe3O4": 2.0, "CO2": 1.0},
+            required_species=("Fe2O3", "Fe3O4", "CO", "CO2"),
+            source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
+            notes="First-stage Fe reduction by CO. Paper treats Fe2O3->Fe3O4 as effectively irreversible.",
+        ),
+        ReactionDefinition(
+            id="fe3o4_co_reduction_he_2023",
+            name="Fe3O4 reduction to FeO by CO",
+            phase="gas_solid",
+            stoichiometry={"Fe3O4": -1.0, "CO": -1.0, "FeO": 3.0, "CO2": 1.0},
+            required_species=("Fe3O4", "FeO", "CO", "CO2"),
+            source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
+            reversible=True,
+            notes="Second-stage Fe reduction by CO with equilibrium driving force.",
+        ),
+        ReactionDefinition(
+            id="feo_co_reduction_he_2023",
+            name="FeO reduction to Fe by CO",
+            phase="gas_solid",
+            stoichiometry={"FeO": -1.0, "CO": -1.0, "Fe": 1.0, "CO2": 1.0},
+            required_species=("FeO", "Fe", "CO", "CO2"),
+            source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
+            reversible=True,
+            notes="Third-stage Fe reduction by CO using the random pore model. This reaction entry is correct, but it will only run if the kinetics hook is completed with symbolic logarithm support.",
+        ),
+        ReactionDefinition(
+            id="fe2o3_ch4_reduction_he_2023",
+            name="Fe2O3 reduction to Fe3O4 by CH4",
+            phase="gas_solid",
+            stoichiometry={
+                "Fe2O3": -12.0,
+                "CH4": -1.0,
+                "Fe3O4": 8.0,
+                "CO2": 1.0,
+                "H2O": 2.0,
+            },
+            required_species=("Fe2O3", "Fe3O4", "CH4", "CO2", "H2O"),
+            source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
+            notes="Paper includes only CH4 reduction of hematite; CH4 reduction of Fe3O4 and FeO is neglected.",
+        ),
+        ReactionDefinition(
+            id="fe_o2_oxidation_he_2023",
+            name="Fe oxidation by O2 to equivalent Fe2O3",
+            phase="gas_solid",
+            stoichiometry={"Fe": -1.0, "O2": -0.75, "Fe2O3": 0.5},
+            required_species=("Fe", "O2", "Fe2O3"),
+            source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
+            notes="Empirical oxidation law from the paper. The paper models oxidation as a single fast Fe+O2 step and handles Fe2O3/Fe3O4/FeO redistribution separately by solid-state transformation logic.",
+        ),
+    ),
+    kinetics_hooks={
+        "fe2o3_h2_reduction_he_2023": he_fe2o3_h2_reduction,
+        "fe3o4_h2_reduction_he_2023": he_fe3o4_h2_reduction,
+        "feo_h2_reduction_he_2023": he_feo_h2_reduction,
+        "fe2o3_co_reduction_he_2023": he_fe2o3_co_reduction,
+        "fe3o4_co_reduction_he_2023": he_fe3o4_co_reduction,
+        "feo_co_reduction_he_2023": he_feo_co_reduction,
+        "fe2o3_ch4_reduction_he_2023": he_fe2o3_ch4_reduction,
+        "fe_o2_oxidation_he_2023": he_fe_o2_oxidation,
+    },
+)
+
+
 __all__ = [
+    "FAMILY",
     "FULLY_OXIDIZED_FE2O3_CONCENTRATION_MOL_PER_M3",
     "H2_REDUCTION_PREEXPONENTIALS",
     "H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL",

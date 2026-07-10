@@ -9,6 +9,10 @@ gas_species:
   - N2
   - O2
 
+reaction_families:
+  - reforming_xu_froment
+  - nickel_medrano
+
 reaction_ids:
   - smr_reaction_xu_froment
   - wgs_reaction_xu_froment
