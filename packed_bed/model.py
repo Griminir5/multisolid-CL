@@ -67,9 +67,7 @@ class PackedBedModel(daeModel):
         self.property_registry = property_registry
         self.mass_scheme = case.run.simulation.mass_scheme
         self.heat_scheme = case.run.simulation.heat_scheme
-        self.materialize_solid_mole_fractions = (
-            "solid_mole_fraction" in case.run.outputs.requested_reports
-        )
+        requested_reports = set(case.run.outputs.requested_reports)
         if smooth_ramp_width_s <= 0.0:
             raise ValueError("smooth_ramp_width_s must be positive.")
         self.smooth_ramp_width_s = float(smooth_ramp_width_s)
@@ -118,9 +116,6 @@ class PackedBedModel(daeModel):
         self.ct_gas = daeVariable("c_gas_tot", molar_conc_type, self, "Total concentration of gas per total bed volume", [self.x_centers])
         self.ct_sol = daeVariable("c_sol_tot", molar_conc_sol_type, self, "Total concentration of solid per total bed volume", [self.x_centers])
         self.y_gas = daeVariable("y_gas", molar_frac_type, self, "Molar fraction of gaseous component i", [self.N_gas, self.x_centers])
-        self.y_sol = None
-        if self.materialize_solid_mole_fractions:
-            self.y_sol = daeVariable("y_sol", molar_frac_type, self, "Molar fraction of solid component i", [self.N_sol, self.x_centers])
         self.c_gas = daeVariable("c_gas", molar_conc_type, self, "Concentration of gaseous component i per total bed volume", [self.N_gas, self.x_centers])
 
         self.R_rxn = None
@@ -140,14 +135,19 @@ class PackedBedModel(daeModel):
         self.mu_g = daeVariable("mu_g", viscosity_type, self, "Mole-averaged gas viscosity in a cell", [self.x_centers])
         self.rho_g = daeVariable("rho_g", density_type, self, "Gas density in a cell", [self.x_centers])
 
-        self.mass_in_total = daeVariable("mass_in_total", mass_inventory_type, self, "Cumulative gas-phase mass that has entered the bed")
-        self.mass_out_total = daeVariable("mass_out_total", mass_inventory_type, self, "Cumulative gas-phase mass that has left the bed")
-        self.mass_bed_total = daeVariable("mass_bed_total", mass_inventory_type, self, "Gas plus solid mass currently residing in the bed")
+        self.mass_in_total = self.mass_out_total = self.mass_bed_total = None
+        if "mass_balance" in requested_reports:
+            self.mass_in_total = daeVariable("mass_in_total", mass_inventory_type, self, "Cumulative gas-phase mass that has entered the bed")
+            self.mass_out_total = daeVariable("mass_out_total", mass_inventory_type, self, "Cumulative gas-phase mass that has left the bed")
+            self.mass_bed_total = daeVariable("mass_bed_total", mass_inventory_type, self, "Gas plus solid mass currently residing in the bed")
 
-        self.heat_in_total = daeVariable("heat_in_total", energy_inventory_type, self, "Cumulative gas-phase enthalpy that has entered the bed")
-        self.heat_out_total = daeVariable("heat_out_total", energy_inventory_type, self, "Cumulative gas-phase enthalpy that has left the bed")
-        self.heat_loss_total = daeVariable("heat_loss_total", energy_inventory_type, self, "Cumulative heat transferred from the bed to the environment")
-        self.heat_bed_total = daeVariable("heat_bed_total", energy_inventory_type, self, "Gas plus solid enthalpy currently residing in the bed")
+        self.heat_in_total = self.heat_out_total = None
+        self.heat_loss_total = self.heat_bed_total = None
+        if "heat_balance" in requested_reports:
+            self.heat_in_total = daeVariable("heat_in_total", energy_inventory_type, self, "Cumulative gas-phase enthalpy that has entered the bed")
+            self.heat_out_total = daeVariable("heat_out_total", energy_inventory_type, self, "Cumulative gas-phase enthalpy that has left the bed")
+            self.heat_loss_total = daeVariable("heat_loss_total", energy_inventory_type, self, "Cumulative heat transferred from the bed to the environment")
+            self.heat_bed_total = daeVariable("heat_bed_total", energy_inventory_type, self, "Gas plus solid enthalpy currently residing in the bed")
 
         self.F_in_const = daeParameter("F_in_const", molar_flow_type.Units, self, "Default fixed total molar flow at the inlet")
         self.y_in_const = daeParameter("y_in_const", molar_frac_type.Units, self, "Default fixed molar fraction of component i at the inlet", [self.N_gas])
@@ -362,10 +362,8 @@ class PackedBedModel(daeModel):
             )
             return (self.P(idx_cell_L) - self.P(idx_cell_R)) / dx - drag
 
-        def inventory_expressions():
+        def bed_mass_expression():
             mass_bed_total = Constant(0.0 * kg)
-            heat_bed_total = Constant(0.0 * J)
-            heat_loss_rate_total = Constant(0.0 * J / s)
             for idx_cell in range(Nc):
                 dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
                 gas_mass_density = Constant(0.0 * kg / m**3)
@@ -376,11 +374,17 @@ class PackedBedModel(daeModel):
                 for sol_idx in range(Ns):
                     solid_mass_density = solid_mass_density + self.c_sol(sol_idx, idx_cell) * solid_molecular_weights[sol_idx]
 
-                cell_heat_loss_density = heat_loss_density(idx_cell)
                 mass_bed_total = mass_bed_total + cross_section_area * (gas_mass_density + solid_mass_density) * dx
+            return mass_bed_total
+
+        def bed_heat_expressions():
+            heat_bed_total = Constant(0.0 * J)
+            heat_loss_rate_total = Constant(0.0 * J / s)
+            for idx_cell in range(Nc):
+                dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
                 heat_bed_total = heat_bed_total + cross_section_area * self.h_cell(idx_cell) * dx
-                heat_loss_rate_total = heat_loss_rate_total + cross_section_area * cell_heat_loss_density * dx
-            return mass_bed_total, heat_bed_total, heat_loss_rate_total
+                heat_loss_rate_total = heat_loss_rate_total + cross_section_area * heat_loss_density(idx_cell) * dx
+            return heat_bed_total, heat_loss_rate_total
 
         def mass_flux_expressions():
             mass_flux_in = Constant(0.0 * kg / (s * m**2))
@@ -433,12 +437,6 @@ class PackedBedModel(daeModel):
         idx_gas = eq.DistributeOnDomain(self.N_gas, eClosedClosed, "i")
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
         eq.Residual = self.y_gas(idx_gas, idx_cell) * self.ct_gas(idx_cell) - self.c_gas(idx_gas, idx_cell)
-
-        if self.y_sol is not None:
-            eq = self.CreateEquation("solid_molar_fraction_calc")
-            idx_sol = eq.DistributeOnDomain(self.N_sol, eClosedClosed, "j")
-            idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-            eq.Residual = self.y_sol(idx_sol, idx_cell) * self.ct_sol(idx_cell) - self.c_sol(idx_sol, idx_cell)
 
         # Gas face fluxes and reaction rates.
         for gas_idx, species_name in enumerate(self.gas_species):
@@ -543,29 +541,30 @@ class PackedBedModel(daeModel):
         )
 
         # Integral mass and heat accounting.
-        mass_bed_total, heat_bed_total, heat_loss_rate_total = inventory_expressions()
-        mass_flux_in, mass_flux_out = mass_flux_expressions()
+        if self.mass_in_total is not None:
+            mass_flux_in, mass_flux_out = mass_flux_expressions()
+            eq = self.CreateEquation("mass_in_total_accumulation")
+            eq.Residual = dt(self.mass_in_total()) - cross_section_area * mass_flux_in
 
-        eq = self.CreateEquation("mass_in_total_accumulation")
-        eq.Residual = dt(self.mass_in_total()) - cross_section_area * mass_flux_in
+            eq = self.CreateEquation("mass_out_total_accumulation")
+            eq.Residual = dt(self.mass_out_total()) - cross_section_area * mass_flux_out
 
-        eq = self.CreateEquation("mass_out_total_accumulation")
-        eq.Residual = dt(self.mass_out_total()) - cross_section_area * mass_flux_out
+            eq = self.CreateEquation("mass_bed_total_definition")
+            eq.Residual = self.mass_bed_total() - bed_mass_expression()
 
-        eq = self.CreateEquation("mass_bed_total_definition")
-        eq.Residual = self.mass_bed_total() - mass_bed_total
+        if self.heat_in_total is not None:
+            heat_bed_total, heat_loss_rate_total = bed_heat_expressions()
+            eq = self.CreateEquation("heat_in_total_accumulation")
+            eq.Residual = dt(self.heat_in_total()) - cross_section_area * Sum(self.J_gas_face.array("*", 0))
 
-        eq = self.CreateEquation("heat_in_total_accumulation")
-        eq.Residual = dt(self.heat_in_total()) - cross_section_area * Sum(self.J_gas_face.array("*", 0))
+            eq = self.CreateEquation("heat_out_total_accumulation")
+            eq.Residual = dt(self.heat_out_total()) - cross_section_area * Sum(self.J_gas_face.array("*", Nf - 1))
 
-        eq = self.CreateEquation("heat_out_total_accumulation")
-        eq.Residual = dt(self.heat_out_total()) - cross_section_area * Sum(self.J_gas_face.array("*", Nf - 1))
+            eq = self.CreateEquation("heat_loss_total_accumulation")
+            eq.Residual = dt(self.heat_loss_total()) - heat_loss_rate_total
 
-        eq = self.CreateEquation("heat_loss_total_accumulation")
-        eq.Residual = dt(self.heat_loss_total()) - heat_loss_rate_total
-
-        eq = self.CreateEquation("heat_bed_total_definition")
-        eq.Residual = self.heat_bed_total() - heat_bed_total
+            eq = self.CreateEquation("heat_bed_total_definition")
+            eq.Residual = self.heat_bed_total() - heat_bed_total
 
         # Smooth operating programs and the existing oriented boundary equations.
         eq = self.CreateEquation("Active_inlet_flow_smooth")

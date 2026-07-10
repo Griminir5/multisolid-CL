@@ -249,6 +249,14 @@ def test_component_reaction_and_report_references_are_aggregated(tmp_path: Path)
     assert "run.outputs.requested_reports contains unknown ids: mystery_report" in message
 
 
+def test_reaction_rate_report_requires_a_selected_reaction(tmp_path: Path) -> None:
+    documents = _case_documents()
+    documents["run.yaml"]["outputs"]["requested_reports"] = ["reaction_rate"]
+
+    with pytest.raises(PackedBedValidationError, match="requires at least one selected reaction"):
+        load_case(_write_case(tmp_path, documents))
+
+
 def test_unknown_reaction_family_uses_configuration_path(tmp_path: Path) -> None:
     documents = _case_documents()
     documents["chemistry.yaml"]["reaction_families"] = ["mystery_family"]

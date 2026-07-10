@@ -98,6 +98,7 @@ from packed_bed.cli import main
 assert main([sys.argv[1], '--validate-only']) == 0
 assert not any(name == 'daetools' or name.startswith('daetools.') for name in sys.modules)
 assert 'pyUnits' not in sys.modules
+assert 'xarray' not in sys.modules
 """
     environment = dict(os.environ, PYTHONPATH=str(Path(__file__).parents[1]))
 

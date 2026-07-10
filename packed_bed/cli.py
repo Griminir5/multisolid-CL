@@ -6,13 +6,14 @@ import math
 from pathlib import Path
 import sys
 from time import perf_counter
+import traceback
 from typing import TYPE_CHECKING
 
 from .batch import BatchResult, run_batch_file
 from .config import Case, PackedBedValidationError, load_case
 
 if TYPE_CHECKING:
-    from .results import RunResult
+    from .reports import RunResult
 
 
 def _positive_float(raw_value: str) -> float:
@@ -95,8 +96,12 @@ def run_simulation(
 
     from .incidence_matrix import write_solver_incidence_artifacts
     from .properties import PROPERTY_REGISTRY
-    from .result_reports import PackedBedDataFrameReporter, compute_balance_errors
-    from .results import RunResult
+    from .reports import (
+        RunResult,
+        compute_balance_errors,
+        create_dataset_reporter,
+        write_run_manifest,
+    )
     from .simulation import PackedBedSimulation, execute_simulation
 
     if property_registry is None:
@@ -106,63 +111,82 @@ def run_simulation(
     output_directory.mkdir(parents=True, exist_ok=True)
     solver_artifact_paths: dict[str, Path] = {}
 
-    simulation = PackedBedSimulation(case, property_registry)
-    runtime_report_ids = tuple(
-        dict.fromkeys(
-            (
-                *case.run.outputs.requested_reports,
-                "heat_balance",
-                "mass_balance",
-            )
+    stage = "model construction"
+    started_at = perf_counter()
+    dataset_reporter = None
+    run_result = None
+    try:
+        simulation = PackedBedSimulation(case, property_registry)
+        dataset_reporter = create_dataset_reporter(
+            case,
+            smooth_ramp_width_s=simulation.smooth_ramp_width_s,
         )
-    )
-    dataframe_reporter = PackedBedDataFrameReporter(case)
-    after_initialize = None
-    if case.run.outputs.solver_incidence_matrix:
-        artifacts_directory = case.artifacts_directory
+        after_initialize = None
+        if case.run.outputs.solver_incidence_matrix:
+            artifacts_directory = case.artifacts_directory
 
-        def after_initialize(simulation, solver):
-            solver_artifact_paths.update(
-                write_solver_incidence_artifacts(
-                    model=simulation.model,
-                    solver=solver,
-                    output_dir=artifacts_directory,
+            def after_initialize(simulation, solver):
+                solver_artifact_paths.update(
+                    write_solver_incidence_artifacts(
+                        model=simulation.model,
+                        solver=solver,
+                        output_dir=artifacts_directory,
+                    )
                 )
+
+        stage = "solver execution"
+        reporter = execute_simulation(
+            simulation,
+            include_plot_variables=render_plots,
+            data_reporter=dataset_reporter,
+            after_initialize=after_initialize,
+        )
+
+        run_result = RunResult(
+            case=case,
+            output_directory=output_directory,
+            results_path=dataset_reporter.results_path,
+            runtime_s=perf_counter() - started_at,
+            dataset=dataset_reporter.dataset,
+            artifact_paths={
+                **dict(artifact_paths or {}),
+                **solver_artifact_paths,
+            },
+            reporter=reporter,
+            balance_errors=compute_balance_errors(dataset_reporter.dataset),
+        )
+        if render_plots:
+            stage = "plotting"
+            from .plots import render_run_result_plots
+
+            plot_paths = render_run_result_plots(run_result)
+            run_result = replace(
+                run_result,
+                artifact_paths={**run_result.artifact_paths, **plot_paths},
             )
-
-    reporter = execute_simulation(
-        simulation,
-        report_ids=runtime_report_ids,
-        include_plot_variables=render_plots,
-        data_reporter=dataframe_reporter,
-        after_initialize=after_initialize,
-    )
-
-    run_result = RunResult(
-        case=case,
-        output_directory=output_directory,
-        success=True,
-        artifact_paths={
-            **dict(artifact_paths or {}),
-            **solver_artifact_paths,
-        },
-        reporter=reporter,
-        simulation=simulation,
-    )
-    report_paths = dict(dataframe_reporter.report_paths)
-    balance_errors = compute_balance_errors(run_result)
-    plot_paths: dict[str, Path] = {}
-    if render_plots:
-        from .result_plots import render_run_result_plots
-
-        plot_paths = render_run_result_plots(run_result)
-    return replace(
-        run_result,
-        artifact_paths={**run_result.artifact_paths, **plot_paths},
-        report_paths=report_paths,
-        balance_errors=balance_errors,
-        balances_path=report_paths.get("balances"),
-    )
+        stage = "manifest writing"
+        manifest_path = write_run_manifest(run_result)
+        return replace(run_result, manifest_path=manifest_path)
+    except Exception as exc:
+        if stage != "manifest writing":
+            failed_result = replace(run_result, status="failed") if run_result else RunResult(
+                case=case,
+                output_directory=output_directory,
+                status="failed",
+                runtime_s=perf_counter() - started_at,
+                results_path=getattr(dataset_reporter, "results_path", None),
+                dataset=getattr(dataset_reporter, "dataset", None),
+                artifact_paths={**dict(artifact_paths or {}), **solver_artifact_paths},
+            )
+            try:
+                write_run_manifest(
+                    failed_result,
+                    failure_stage=stage,
+                    traceback_text=traceback.format_exc(),
+                )
+            except Exception as manifest_error:
+                exc.add_note(f"Could not write failure manifest: {manifest_error}")
+        raise
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -259,15 +283,14 @@ def _run_cli(argv: list[str]) -> int:
         return 0
 
     artifact_paths = generate_artifacts(case) if args.artifacts else {}
-    start_time = perf_counter()
     run_result = run_simulation(
         case,
         artifact_paths=artifact_paths,
         render_plots=args.plots or args.launch_dae_plotter,
     )
-    print(f"Simulation took {perf_counter() - start_time:.3f} seconds.")
+    print(f"Simulation took {run_result.runtime_s:.3f} seconds.")
 
-    from .result_reports import format_balance_error_lines
+    from .reports import format_balance_error_lines
 
     for line in format_balance_error_lines(run_result.balance_errors):
         print(line)

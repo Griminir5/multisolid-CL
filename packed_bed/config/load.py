@@ -210,9 +210,9 @@ def validate_case(
 
         property_registry = PROPERTY_REGISTRY
     if report_variable_registry is None:
-        from packed_bed.reporting import REPORT_VARIABLE_REGISTRY
+        from packed_bed.reports import REPORT_SPECS
 
-        report_variable_registry = REPORT_VARIABLE_REGISTRY
+        report_variable_registry = REPORT_SPECS
 
     from packed_bed.reactions import build_reaction_network, reaction_catalog
 
@@ -270,6 +270,18 @@ def validate_case(
         errors.append(
             "run.outputs.requested_reports contains unknown ids: "
             f"{', '.join(unknown_reports)}."
+        )
+    unavailable_reports = sorted(
+        report_id
+        for report_id in case.run.outputs.requested_reports
+        if report_id in report_variable_registry
+        and getattr(report_variable_registry[report_id], "requires_reactions", False)
+        and not case.chemistry.reaction_ids
+    )
+    if unavailable_reports:
+        errors.append(
+            "run.outputs.requested_reports requires at least one selected reaction for: "
+            f"{', '.join(unavailable_reports)}."
         )
 
     if errors:

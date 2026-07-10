@@ -21,7 +21,8 @@ their own licenses.
 - DAETools 2.6.0, including the dependencies normally required by DAETools.
 - Runtime Python dependencies used directly by this package:
   - `numpy`
-  - `pandas`
+  - `xarray`
+  - `scipy` (used for portable NetCDF output)
   - `pydantic`
   - `PyYAML`
   - `matplotlib`
@@ -37,7 +38,7 @@ Example environment setup:
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install numpy pandas pydantic PyYAML matplotlib
+python -m pip install numpy xarray scipy pydantic PyYAML matplotlib
 ```
 Afterwards follow `daetools` installation guide.
 
@@ -140,24 +141,27 @@ The top-level `run.yaml` points to three sibling input files:
 Outputs are written under the `outputs.directory` configured in `run.yaml`.
 Artifacts are written under `outputs.artifacts_directory`.
 
-Requested report data are written as pickled pandas dataframes:
+Each run writes:
 
-- `reports.pkl` contains spatial reports such as temperature and pressure
-  with multi-indexed columns `(feature, x_cell_m)`, plus explicit boundary
-  columns for inlet temperature, inlet/outlet flowrate, outlet pressure, and
-  inlet pressure when it was reported by the solver.
-- `balances.pkl` contains requested mass and heat balance totals and errors.
-- species/spatial reports are written one feature per file, for example
-  `gas_mole_fraction.pkl`, with multi-indexed columns such as
-  `(gas_species, x_cell_m)`. Gas mole fractions include the inlet boundary at
-  `x_cell_m = 0.0`, cell centers, and the outlet boundary at
-  `x_cell_m = bed_length_m`.
+- `results.nc`: one labelled xarray dataset containing the requested solver
+  variables, program values, derived boundaries, and requested balances.
+- `manifest.json`: configuration, Git and package versions, hashes, dataset
+  dimensions/units, runtime and balance summaries, or failure stage/traceback.
 
-Each report can be loaded in one line:
+The dataset uses separate labelled dimensions including `time`, `x_cell`,
+`x_face`, `gas_species`, `solid_species`, and `reaction`. Solid mole fractions
+are derived during extraction, so requesting them does not change the DAE
+system. Load all results in one line:
 
 ```python
-reports = pd.read_pickle("output/reports.pkl")
+import xarray as xr
+
+results = xr.load_dataset("output/results.nc", engine="scipy")
 ```
+
+For an explicitly selected downstream ML matrix, use
+`tools/to_ml_matrix.py`; core extraction does not impose a permanent feature
+list. The xarray adoption spike is recorded in `docs/xarray-spike.md`.
 
 ## Input file shape
 
@@ -242,6 +246,14 @@ flow boundary conditions; this change does not make those boundaries reversible.
 Common report IDs include `temperature`, `pressure`, `velocity`, `gas_concentration`,
 `gas_mole_fraction`, `solid_concentration`, `solid_mole_fraction`, `gas_flux`,
 `reaction_rate`, `gas_enthalpy_flux`, `heat_balance`, and `mass_balance`.
+
+Most reports only control recording of variables required by the physical
+model. The mass and heat balances are optional solver-integrated diagnostics:
+their three and four accounting variables/equations, respectively, exist only
+when those reports are requested. `reaction_rate` requires at least one
+selected reaction. Solid mole fraction remains a derived output and does not
+add a solver variable. With an empty report list, `results.nc` contains only
+the scheduled time coordinate and operating-program values.
 
 Set `outputs.solver_incidence_matrix: true` to write solver sparsity artifacts
 after DAETools initializes the model. The run writes the raw DAETools XPM plus a
@@ -458,6 +470,6 @@ This project is licensed under the GNU General Public License version 3 only
 `THIRD_PARTY_NOTICES.md` for dependency license notes.
 
 Third-party software is not relicensed by this project. DAETools, OpenCS, PyQt,
-Graphviz, VTK, NumPy, pandas, SciPy, matplotlib, pydantic, PyYAML, pygraphviz,
+Graphviz, VTK, NumPy, xarray, SciPy, matplotlib, pydantic, PyYAML, pygraphviz,
 pymoo, and other dependencies retain their own license terms and should be
 installed or obtained separately.

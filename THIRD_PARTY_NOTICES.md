@@ -14,7 +14,9 @@ those projects.
 - OpenCS: LGPLv3. Install or obtain separately when needed by the DAETools
   workflow.
 - NumPy: BSD-3-Clause and other permissive notices in the NumPy distribution.
-- pandas: BSD-3-Clause and bundled permissive third-party notices.
+- xarray: Apache-2.0.
+- pandas: BSD-3-Clause and bundled permissive third-party notices. It is an
+  xarray dependency and is used by the optional ML matrix conversion tool.
 - SciPy: BSD-3-Clause and bundled permissive third-party notices.
 - matplotlib: matplotlib license and bundled third-party notices.
 - pydantic: MIT.

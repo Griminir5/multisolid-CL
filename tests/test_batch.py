@@ -12,7 +12,7 @@ from packed_bed.batch import (
     run_batch_file,
 )
 from packed_bed.config import resolve_case
-from packed_bed.results import RunResult
+from packed_bed.reports import RunResult
 
 
 BASE_CASE = (
@@ -239,7 +239,7 @@ def test_all_cases_are_validated_before_any_case_is_written_or_run(tmp_path: Pat
 
     def fake_run(case, **_kwargs):
         calls.append(case)
-        return RunResult(case=case, output_directory=case.output_directory, success=True)
+        return RunResult(case=case, output_directory=case.output_directory)
 
     result = run_batch_file(batch_path, run_simulation_fn=fake_run)
 
@@ -269,7 +269,7 @@ def test_existing_case_output_is_rejected_before_a_run(tmp_path: Path) -> None:
 
     def fake_run(case, **_kwargs):
         calls.append(case)
-        return RunResult(case=case, output_directory=case.output_directory, success=True)
+        return RunResult(case=case, output_directory=case.output_directory)
 
     with pytest.raises(BatchValidationError, match="refusing to overwrite"):
         run_batch_file(batch_path, run_simulation_fn=fake_run)
@@ -300,7 +300,7 @@ def test_batch_execution_uses_resolved_cases_and_explicit_render_options(tmp_pat
 
     def fake_run(case, *, artifact_paths, render_plots):
         run_calls.append((case, artifact_paths, render_plots))
-        return RunResult(case=case, output_directory=case.output_directory, success=True)
+        return RunResult(case=case, output_directory=case.output_directory)
 
     result = run_batch_file(
         batch_path,

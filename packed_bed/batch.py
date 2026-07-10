@@ -20,7 +20,7 @@ import yaml
 from .config import Case, PackedBedValidationError, resolve_case
 from .config.load import read_yaml_mapping, resolve_path
 from .config.models import ConfigString
-from .results import RunResult
+from .reports import RunResult
 
 
 _PROCESS_TERMINATE_GRACE_S = 5.0

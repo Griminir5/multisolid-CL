@@ -289,10 +289,6 @@ def apply_initial_state(model, state: InitialState) -> None:
             model.c_sol.SetInitialCondition(
                 solid_index, cell_index, concentration * mol / m**3
             )
-            if model.y_sol is not None:
-                total = solid_total[cell_index]
-                mole_fraction = 0.0 if total <= 0.0 else concentration / total
-                model.y_sol.SetInitialGuess(solid_index, cell_index, mole_fraction)
             model.h_sol.SetInitialGuess(
                 solid_index, cell_index, state.solid_enthalpy_j_mol[solid_index] * J / mol
             )
@@ -301,13 +297,15 @@ def apply_initial_state(model, state: InitialState) -> None:
     model.T_in.SetInitialGuess(state.inlet_temperature_k * K)
     model.P_in.SetInitialGuess(state.inlet_pressure_pa * Pa)
     model.P_out.SetInitialGuess(state.outlet_pressure_pa * Pa)
-    model.mass_in_total.SetInitialCondition(0.0 * kg)
-    model.mass_out_total.SetInitialCondition(0.0 * kg)
-    model.mass_bed_total.SetInitialGuess(state.bed_mass_kg * kg)
-    model.heat_in_total.SetInitialCondition(0.0 * J)
-    model.heat_out_total.SetInitialCondition(0.0 * J)
-    model.heat_loss_total.SetInitialCondition(0.0 * J)
-    model.heat_bed_total.SetInitialGuess(state.bed_heat_j * J)
+    if model.mass_in_total is not None:
+        model.mass_in_total.SetInitialCondition(0.0 * kg)
+        model.mass_out_total.SetInitialCondition(0.0 * kg)
+        model.mass_bed_total.SetInitialGuess(state.bed_mass_kg * kg)
+    if model.heat_in_total is not None:
+        model.heat_in_total.SetInitialCondition(0.0 * J)
+        model.heat_out_total.SetInitialCondition(0.0 * J)
+        model.heat_loss_total.SetInitialCondition(0.0 * J)
+        model.heat_bed_total.SetInitialGuess(state.bed_heat_j * J)
 
     axial_dispersion = 0.5 * np.abs(state.face_velocity_m_s) * state.particle_diameter_m
     species_flux = state.inlet_composition * state.inlet_molar_flux_mol_m2_s

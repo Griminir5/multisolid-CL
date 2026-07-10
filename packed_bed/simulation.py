@@ -19,7 +19,7 @@ from .kinetics import resolve_kinetics_hooks
 from .model import PackedBedModel
 from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S
 from .reactions import build_reaction_network
-from .reporting import reporting_targets
+from .reports import reporting_targets
 
 
 _SOLVER_REGISTRY = {
@@ -142,38 +142,28 @@ def create_linear_solver(name: str):
 
 def _configure_reporting(
     simulation: PackedBedSimulation,
-    report_ids,
     *,
     include_plot_variables: bool,
 ) -> None:
-    if report_ids is None:
-        simulation.model.SetReportingOn(True)
-        return
-
-    variable_names, parameter_names = reporting_targets(
-        report_ids,
+    variable_names = reporting_targets(
+        simulation.case.run.outputs.requested_reports,
         include_plot_variables=include_plot_variables,
     )
     simulation.model.SetReportingOn(False)
-    for names, registry_name in (
-        (variable_names, "dictVariables"),
-        (parameter_names, "dictParameters"),
-    ):
-        registry = getattr(simulation.model, registry_name, {})
-        missing = [name for name in names if name not in registry]
-        if missing:
-            raise ValueError(
-                f"Cannot enable reporting for unknown {registry_name} entries: "
-                f"{', '.join(missing)}. Available entries: {', '.join(sorted(registry))}."
-            )
-        for name in names:
-            registry[name].ReportingOn = True
+    missing = [name for name in variable_names if name not in simulation.model.dictVariables]
+    if missing:
+        raise ValueError(
+            "Cannot enable reporting for unknown variables: "
+            f"{', '.join(missing)}. Available entries: "
+            f"{', '.join(sorted(simulation.model.dictVariables))}."
+        )
+    for name in variable_names:
+        simulation.model.dictVariables[name].ReportingOn = True
 
 
 def execute_simulation(
     simulation: PackedBedSimulation,
     *,
-    report_ids=None,
     include_plot_variables: bool = False,
     data_reporter=None,
     after_initialize=None,
@@ -182,11 +172,8 @@ def execute_simulation(
 
     case = simulation.case
     configure_threads(case.run.solver.threads)
-    if report_ids is None:
-        report_ids = case.run.outputs.requested_reports
     _configure_reporting(
         simulation,
-        report_ids,
         include_plot_variables=include_plot_variables,
     )
     simulation.ReportTimeDerivatives = case.run.simulation.report_time_derivatives
