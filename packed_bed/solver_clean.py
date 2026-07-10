@@ -176,6 +176,7 @@ class CLBed_mass(daeModel):
         self.h_gas = daeVariable("h_gas", molar_enthalpy_type, self, "Molar enthalpy of gas i in a cell", [self.N_gas, self.x_centers])
         self.h_sol = daeVariable("h_sol", molar_enthalpy_type, self, "Molar enthalpy of solid i in a cell", [self.N_sol, self.x_centers])
         self.J_gas_face = daeVariable("J_gas_face", heat_flux_type, self, "Enthalpy flow at cell faces attributable to component i", [self.N_gas, self.x_faces])
+        self.J_heat_disp_face = daeVariable("J_heat_disp_face", heat_flux_type, self, "Axial thermal dispersion heat flux at cell faces", [self.x_faces])
         
         self.Dax = daeVariable("Dax", dispersion_type, self, "Face axial dispersion coefficient", [self.x_faces])
         self.u_s = daeVariable("u_s", velocity_type, self, "Face superficial velocity", [self.x_faces])
@@ -205,6 +206,7 @@ class CLBed_mass(daeModel):
 
         self.T_env = daeParameter("T_env", K, self, "Temperature of the ambient environment outisde the reactor")
         self.U_eff = daeParameter("U_eff", J / (K * s * m**2), self, "Heat transfer coefficient from inside of the bed to the environment")
+        self.k_heat_disp = daeParameter("k_heat_disp", J / (K * s * m), self, "Effective axial heat dispersion coefficient")
 
     def build_kinetics_context(self, idx_cell):
         return KineticsContext(
@@ -526,6 +528,18 @@ class CLBed_mass(daeModel):
                 self.T(idx_cell),
             )
 
+        def heat_dispersion_face_residual(face_index):
+            if face_index == 0 or face_index == Nf - 1:
+                return self.J_heat_disp_face(face_index)
+
+            idx_cell_L = face_index - 1
+            idx_cell_R = face_index
+            dx = center_coords[idx_cell_R] - center_coords[idx_cell_L]
+            return (
+                self.J_heat_disp_face(face_index)
+                + self.k_heat_disp() * (self.T(idx_cell_R) - self.T(idx_cell_L)) / dx
+            )
+
         temperature_anchor_gas_idx = max(range(Ng), key=initial_inlet_fraction)
 
         # Declare equations in DAETools' flattened variable order so ILU-based solvers see a populated diagonal.
@@ -599,6 +613,7 @@ class CLBed_mass(daeModel):
             eq = self.CreateEquation(f"energy_balance_cell_{idx_cell}")
             eq.Residual = dt(self.h_cell(idx_cell)) + (
                 Sum(self.J_gas_face.array("*", idx_cell + 1)) - Sum(self.J_gas_face.array("*", idx_cell))
+                + self.J_heat_disp_face(idx_cell + 1) - self.J_heat_disp_face(idx_cell)
             ) / dx + heat_loss_density(idx_cell)
 
         for gas_idx, species_name in enumerate(self.gas_species):
@@ -629,6 +644,10 @@ class CLBed_mass(daeModel):
                     equation_name = f"face_enthalpy_flux_{face_index}_{species_name}"
                 eq = self.CreateEquation(equation_name)
                 eq.Residual = gas_face_enthalpy_residual(gas_idx, face_index)
+
+        for face_index in range(Nf):
+            eq = self.CreateEquation(f"face_heat_dispersion_{face_index}")
+            eq.Residual = heat_dispersion_face_residual(face_index)
 
         eq = self.CreateEquation("axial_dispersion_face")
         idx_face = eq.DistributeOnDomain(self.x_faces, eClosedClosed, "x_f")
@@ -759,6 +778,9 @@ class simBed(daeSimulation):
         self.model.T_env.SetValue(self.model_config.ambient_temperature_k * K)
         self.model.U_eff.SetValue(
             self.model_config.heat_transfer_coefficient_w_per_m2_k * J / (K * s * m**2)
+        )
+        self.model.k_heat_disp.SetValue(
+            self.model_config.heat_dispersion_coefficient_w_per_m_k * J / (K * s * m)
         )
 
         inlet_temperature = self.inlet_temperature_program.initial_value
@@ -980,6 +1002,7 @@ class simBed(daeSimulation):
         for face_idx in range(nf):
             self.model.u_s.SetInitialGuess(face_idx, face_velocity0[face_idx] * m / s)
             self.model.Dax.SetInitialGuess(face_idx, dax0[face_idx] * m**2 / s)
+            self.model.J_heat_disp_face.SetInitialGuess(face_idx, 0.0 * J / (s * m**2))
             for gas_idx in range(ng):
                 self.model.N_gas_face.SetInitialGuess(gas_idx, face_idx, face_flux[gas_idx] * mol / (s * m**2))
                 self.model.J_gas_face.SetInitialGuess(

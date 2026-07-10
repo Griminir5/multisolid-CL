@@ -576,6 +576,7 @@ class ModelConfig(FrozenConfigModel):
     axial_cells: int
     ambient_temperature_k: PositiveFloat = 873.15
     heat_transfer_coefficient_w_per_m2_k: NonNegativeFloat = 100.0
+    heat_dispersion_coefficient_w_per_m_k: NonNegativeFloat = 0.0
 
     @field_validator("axial_cells")
     @classmethod

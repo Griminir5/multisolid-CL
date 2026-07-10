@@ -21,20 +21,25 @@ FE_MW_KG_PER_MOL = PROPERTY_REGISTRY.get_record("Fe").mw
 Fe + 0.75 O2 -> 0.5 Fe2O3
 
 For oxidation, the conversion (X) is defined in the PDF as 1 when the entirety of iron is converted to Fe2O3.
-Because of this, the approximation to the power function must be equal to 0  when X is 1 (and 1-X is 0) to correctly
-stop the reaction when all metallic iron is exhausted.
+Because of this, the solid-state term must be equal to 0 when X is 1 (and 1-X is 0) to correctly stop the
+reaction when all metallic iron is exhausted.
 Following the definintion of conversion, the oxidation equation can be rewritten in terms of molar concentrations
 of Fe and Fe2O3 as follows: 
 
 X = C_Fe2O3/(C_Fe2O3 + 0.5*C_Fe)
-dX/dt = K_MT * (1-X)^n * G(O2), where G is an availabilty gate function that is 1 when O2 is available and 0 if not.
+dX/dt = k_ox * f_RPM(X) * G(O2), where G is an O2 availability term and f_RPM is a random-pore
+solid-state term. The positive-part on (1-X) makes the expression shut off if the solver slightly overshoots
+full oxidation.
 
-d(C_Fe2O3/(C_Fe2O3 + 0.5*C_Fe))/dt = K_MT * (1 - C_Fe2O3/(C_Fe2O3 + 0.5*C_Fe))^n * G(O2)
-d(C_Fe2O3)/dt * 1/(C_Fe2O3 + 0.5*C_Fe) = K_MT * (1 - C_Fe2O3/(C_Fe2O3 + 0.5*C_Fe))^n * G(O2)
+f_RPM(X) = (1-X)_+ * sqrt(1 - psi*ln((1-X)_+ + eps))
+G(O2) = C_O2/(C_O2 + K_O2)
+
+d(C_Fe2O3/(C_Fe2O3 + 0.5*C_Fe))/dt = k_ox * f_RPM(X) * G(O2)
+d(C_Fe2O3)/dt * 1/(C_Fe2O3 + 0.5*C_Fe) = k_ox * f_RPM(X) * G(O2)
 d(C_Fe2O3)/dt = (C_Fe2O3 + 0.5*C_Fe) * dX/dt
 d(C_Fe2O3)/dt = 0.5 * R
 
-R = 2 * (C_Fe2O3 + 0.5*C_Fe) * K_MT * (1 - C_Fe2O3/(C_Fe2O3 + 0.5*C_Fe))^n * G(O2)
+R = 2 * (C_Fe2O3 + 0.5*C_Fe) * k_ox * f_RPM(X) * G(O2)
 '''
 
 
@@ -88,7 +93,11 @@ AVRAMI_ORDER = { # not actually used, here for reference
     "H2": 0.1489,
     "O2": None,
 }
-CONC_GATE = 0.0001
+OXIDATION_RATE_CONSTANT_S_INV = 0.0073738573592314
+OXIDATION_O2_HALF_SATURATION_MOLM3 = 1.0
+OXIDATION_RANDOM_PORE_PSI = 8.0
+OXIDATION_REMAINING_EPS = 1.0e-10
+CONC_GATE = OXIDATION_O2_HALF_SATURATION_MOLM3
 REDUCTION_SOLID_REMAINDER_ORDER = 0.7769
 H2_POWER_OFFSET_MOLM3 = 0.0001
 
@@ -135,13 +144,33 @@ def _rational_power_expr(power: float, x):
     raw_value_at_one = a / (1.0 + b) + c / (1.0 + d)
     return raw_value / Constant(raw_value_at_one)
 
-def _conc_gate_value(x: float) -> float:
+def _positive_part_value(x: float) -> float:
+    return 0.5 * (x + abs(x))
 
-    return x / (x + CONC_GATE)
+def _positive_part_expr(x):
+    return Constant(0.5) * (x + Abs(x))
 
-def _conc_gate_expr(x):
+def _random_pore_oxidation_solid_term_value(x_ox: float) -> float:
+    remaining = _positive_part_value(1.0 - x_ox)
+    if remaining <= 0.0:
+        return 0.0
+    pore_term = 1.0 - OXIDATION_RANDOM_PORE_PSI * math.log(remaining + OXIDATION_REMAINING_EPS)
+    return remaining * math.sqrt(max(pore_term, 0.0))
 
-    return x / (x + Constant(CONC_GATE))
+def _random_pore_oxidation_solid_term_expr(x_ox):
+    remaining = _positive_part_expr(Constant(1.0) - x_ox)
+    pore_term = Constant(1.0) - Constant(OXIDATION_RANDOM_PORE_PSI) * Log(
+        remaining + Constant(OXIDATION_REMAINING_EPS)
+    )
+    return remaining * Sqrt(pore_term)
+
+def _o2_availability_value(o2_gas_conc_molm3: float) -> float:
+    return o2_gas_conc_molm3 / (o2_gas_conc_molm3 + OXIDATION_O2_HALF_SATURATION_MOLM3)
+
+def _o2_availability_expr(o2_gas_conc_molm3):
+    return o2_gas_conc_molm3 / (
+        o2_gas_conc_molm3 + Constant(OXIDATION_O2_HALF_SATURATION_MOLM3)
+    )
 
 def _pade_value(x: float):
     numer = PADE_NUMER[0] + PADE_NUMER[1]*x + PADE_NUMER[2]*x*x
@@ -190,12 +219,20 @@ def _h2_effective_rate_constant_expr(*, temperature_k, h2_gas_conc_molm3):
     )
     return k_rxn / (Constant(1.0) + k_rxn / Constant(K_MT["H2"]))
 
-def _oxidation_rate(*, Fe_conc_molm3, Fe2O3_conc_molm3, o2_gas_conc_molm3, constant, rational_power, conc_gate):
+def _oxidation_rate(
+    *,
+    Fe_conc_molm3,
+    Fe2O3_conc_molm3,
+    o2_gas_conc_molm3,
+    constant,
+    oxidation_solid_term,
+    o2_availability,
+):
     total_sites = Fe2O3_conc_molm3 + constant(0.5) * Fe_conc_molm3
     x_ox = Fe2O3_conc_molm3 / total_sites
-    solid_term = rational_power(SOLID_REACTION_ORDER["O2"], constant(1.0) - x_ox)
-    gas_term = conc_gate(o2_gas_conc_molm3)
-    return constant(2.0) * total_sites * constant(K_MT["O2"]) * solid_term * gas_term
+    solid_term = oxidation_solid_term(x_ox)
+    gas_term = o2_availability(o2_gas_conc_molm3)
+    return constant(2.0) * total_sites * constant(OXIDATION_RATE_CONSTANT_S_INV) * solid_term * gas_term
 
 def _reduction_rate(
     *,
@@ -250,8 +287,8 @@ def fe_waste_oxidation_value(
         Fe2O3_conc_molm3=Fe2O3_conc_molm3,
         o2_gas_conc_molm3=o2_gas_conc_molm3,
         constant=lambda value: value,
-        rational_power=rational_power_value,
-        conc_gate=_conc_gate_value,
+        oxidation_solid_term=_random_pore_oxidation_solid_term_value,
+        o2_availability=_o2_availability_value,
     )
 
 @register_kinetics_hook("fe_waste_oxidation")
@@ -262,8 +299,8 @@ def fe_waste_oxidation_expr(context: KineticsContext):
         Fe2O3_conc_molm3=terms.Fe2O3_conc_molm3,
         o2_gas_conc_molm3=terms.o2_gas_conc_molm3,
         constant=Constant,
-        rational_power=_rational_power_expr,
-        conc_gate=_conc_gate_expr,
+        oxidation_solid_term=_random_pore_oxidation_solid_term_expr,
+        o2_availability=_o2_availability_expr,
     )
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
