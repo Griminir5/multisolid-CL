@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -110,27 +109,12 @@ def _concentration_expression(conc) -> Any:
     return conc / Constant(1.0 * mol / m**3)
 
 
-def _available_value(x: float) -> float:
-    return max(0.0, x)
-
-
 def _available_expr(x):
     return Max(x, Constant(0.0))
 
 
-def _bounded_fraction_value(x: float) -> float:
-    return min(1.0, max(0.0, x))
-
-
 def _bounded_fraction_expr(x):
     return Min(Constant(1.0), Max(x, Constant(0.0)))
-
-
-def _availability_gate_value(x: float, gate: float) -> float:
-    available = _available_value(x)
-    if available <= 0.0:
-        return 0.0
-    return available / (available + gate)
 
 
 def _availability_gate_expr(x, gate: float):
@@ -161,34 +145,6 @@ def _medrano_terms(context: KineticsContext, gas_species_id: str) -> MedranoANTe
     )
 
 
-def medrano_reaction_state_value(
-    comp_key: str,
-    *,
-    ni_concentration_molm3: float,
-    nio_concentration_molm3: float,
-) -> MedranoANReactionState:
-    ni_available = _available_value(ni_concentration_molm3)
-    nio_available = _available_value(nio_concentration_molm3)
-    total_solid_inventory = ni_available + nio_available
-    denominator = total_solid_inventory + POS_EPS
-    frac_reduced = ni_available / denominator
-    frac_oxidised = nio_available / denominator
-
-    if comp_key == "O2":
-        return MedranoANReactionState(
-            conversion=frac_oxidised,
-            unreacted_fraction=frac_reduced,
-            total_solid_inventory_molm3=total_solid_inventory,
-        )
-    if comp_key in {"H2", "CO"}:
-        return MedranoANReactionState(
-            conversion=frac_reduced,
-            unreacted_fraction=frac_oxidised,
-            total_solid_inventory_molm3=total_solid_inventory,
-        )
-    raise KeyError(f"Unsupported Medrano AN component key: {comp_key}")
-
-
 def _medrano_reaction_state_expr(comp_key: str, terms: MedranoANTerms) -> MedranoANReactionState:
     if comp_key == "O2":
         return MedranoANReactionState(
@@ -205,13 +161,6 @@ def _medrano_reaction_state_expr(comp_key: str, terms: MedranoANTerms) -> Medran
     raise KeyError(f"Unsupported Medrano AN component key: {comp_key}")
 
 
-def rational_power_value(power: float, x: float) -> float:
-    a, b, c, d = RATIONAL_POWER_COEFFICIENTS[power]
-    raw_value = a * x / (1.0 + b * abs(x)) + c * x / (1.0 + d * abs(x))
-    raw_value_at_one = a / (1.0 + b) + c / (1.0 + d)
-    return raw_value / raw_value_at_one
-
-
 def _rational_power_expr(power: float, x):
     a, b, c, d = RATIONAL_POWER_COEFFICIENTS[power]
     raw_value = (
@@ -222,32 +171,10 @@ def _rational_power_expr(power: float, x):
     return raw_value / Constant(raw_value_at_one)
 
 
-def gas_concentration_power_value(
-    *,
-    total_gas_concentration_molm3: float,
-    gas_mole_fraction: float,
-    power: float,
-) -> float:
-    return total_gas_concentration_molm3**power * rational_power_value(
-        power,
-        _available_value(gas_mole_fraction),
-    )
-
-
 def _gas_concentration_power_expr(*, total_gas_concentration_molm3, gas_mole_fraction, power: float):
     return total_gas_concentration_molm3**power * _rational_power_expr(
         power,
         _available_expr(gas_mole_fraction),
-    )
-
-
-def k_value(
-    comp_key: str,
-    *,
-    temperature_k: float,
-) -> float:
-    return K0_M_PER_S[comp_key] * math.exp(
-        -ACTIVATION_ENERGY_J_PER_MOL[comp_key] / (GAS_CONSTANT_J_PER_MOL_K * temperature_k)
     )
 
 
@@ -259,20 +186,6 @@ def k_expr(
     return Constant(K0_M_PER_S[comp_key]) * Exp(
         -Constant(ACTIVATION_ENERGY_J_PER_MOL[comp_key] / GAS_CONSTANT_J_PER_MOL_K) / temperature_k
     )
-
-
-def D_value(
-    comp_key: str,
-    *,
-    temperature_k: float,
-    conversion: float,
-) -> float:
-    conversion_factor = KX[comp_key] * math.exp(
-        -KXE_J_PER_MOL[comp_key] / (GAS_CONSTANT_J_PER_MOL_K * temperature_k)
-    )
-    return D0_M2_PER_S[comp_key] * math.exp(
-        -ED_J_PER_MOL[comp_key] / (GAS_CONSTANT_J_PER_MOL_K * temperature_k)
-    ) * math.exp(-conversion_factor * conversion)
 
 
 def D_expr(
@@ -297,78 +210,8 @@ def D_expr(
     return diffusivity
 
 
-def denominator_safe_value(denominator: float) -> float:
-    return max(DENOMINATOR_FLOOR, denominator)
-
-
 def _denominator_safe_expr(denominator):
     return Max(denominator, Constant(DENOMINATOR_FLOOR))
-
-
-def medrano_conversion_rate_value(
-    comp_key: str,
-    *,
-    temperature_k: float,
-    total_gas_concentration_molm3: float,
-    gas_mole_fraction: float,
-    conversion: float,
-    unreacted_fraction: float,
-) -> float:
-    order = REACTION_ORDER[comp_key]
-    k_reaction = k_value(comp_key, temperature_k=temperature_k)
-    conversion_bounded = _bounded_fraction_value(conversion)
-    unreacted_available = _bounded_fraction_value(unreacted_fraction)
-    gas_fraction_available = _available_value(gas_mole_fraction)
-    diffusivity = D_value(comp_key, temperature_k=temperature_k, conversion=conversion_bounded)
-    c_power_kinetic = gas_concentration_power_value(
-        total_gas_concentration_molm3=total_gas_concentration_molm3,
-        gas_mole_fraction=gas_mole_fraction,
-        power=order,
-    )
-    c_power_diffusive = gas_concentration_power_value(
-        total_gas_concentration_molm3=total_gas_concentration_molm3,
-        gas_mole_fraction=gas_mole_fraction,
-        power=order,
-    )
-    f_one_third = rational_power_value(ONE_THIRD, unreacted_available)
-    f_two_thirds = rational_power_value(TWO_THIRDS, unreacted_available)
-    numerator = (
-        3.0
-        * B[comp_key]
-        * f_two_thirds
-        * k_reaction
-        * c_power_kinetic
-        * diffusivity
-        * c_power_diffusive
-        / (R0_M[comp_key] * CS_MOL_PER_M3[comp_key])
-    )
-    denominator = (
-        diffusivity * c_power_diffusive
-        + R0_M[comp_key] * k_reaction * c_power_kinetic * (f_one_third - f_two_thirds)
-    )
-    gas_gate = _availability_gate_value(gas_fraction_available, Y_GATE)
-    solid_gate = _availability_gate_value(unreacted_available, F_GATE)
-    return gas_gate * solid_gate * numerator / denominator_safe_value(denominator)
-
-
-def medrano_reaction_rate_value(
-    comp_key: str,
-    *,
-    temperature_k: float,
-    total_gas_concentration_molm3: float,
-    gas_mole_fraction: float,
-    conversion: float,
-    unreacted_fraction: float,
-    total_solid_inventory_molm3: float,
-) -> float:
-    return total_solid_inventory_molm3 * medrano_conversion_rate_value(
-        comp_key,
-        temperature_k=temperature_k,
-        total_gas_concentration_molm3=total_gas_concentration_molm3,
-        gas_mole_fraction=gas_mole_fraction,
-        conversion=conversion,
-        unreacted_fraction=unreacted_fraction,
-    )
 
 
 def _medrano_conversion_rate_expr(
@@ -522,33 +365,4 @@ FAMILY = ReactionFamily(
 )
 
 
-__all__ = [
-    "FAMILY",
-    "ACTIVATION_ENERGY_J_PER_MOL",
-    "B",
-    "CS_MOL_PER_M3",
-    "D0_M2_PER_S",
-    "DENOMINATOR_FLOOR",
-    "ED_J_PER_MOL",
-    "F_GATE",
-    "GAS_CONSTANT_J_PER_MOL_K",
-    "K0_M_PER_S",
-    "KX",
-    "KXE_J_PER_MOL",
-    "MedranoANReactionState",
-    "MedranoANTerms",
-    "ONE_THIRD",
-    "R0_M",
-    "RATIONAL_POWER_COEFFICIENTS",
-    "REACTION_ORDER",
-    "TWO_THIRDS",
-    "Y_GATE",
-    "D_value",
-    "denominator_safe_value",
-    "gas_concentration_power_value",
-    "k_value",
-    "medrano_reaction_state_value",
-    "medrano_conversion_rate_value",
-    "medrano_reaction_rate_value",
-    "rational_power_value",
-]
+__all__ = ("FAMILY",)

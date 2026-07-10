@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,114 +39,6 @@ class NumaguchiTerms:
     p_h2o_bar: Any
     p_h2o_bar_safe: Any
     catalyst_mass_density_kg_per_m3: Any
-
-
-def partial_pressure_value(total_pressure_pa: float, mole_fraction: float) -> float:
-    return total_pressure_pa * mole_fraction
-
-
-def pressure_bar_value(pressure_pa: float) -> float:
-    return pressure_pa / PRESSURE_PA_PER_BAR
-
-
-def partial_pressure_bar_value(total_pressure_pa: float, mole_fraction: float) -> float:
-    return pressure_bar_value(partial_pressure_value(total_pressure_pa, mole_fraction))
-
-
-def safe_steam_partial_pressure_bar_value(partial_pressure_bar: float) -> float:
-    return 0.5 * (
-        partial_pressure_bar
-        + math.sqrt(partial_pressure_bar**2 + (2.0 * MIN_STEAM_PARTIAL_PRESSURE_BAR) ** 2)
-    )
-
-
-def catalyst_mass_density_value(ni_concentration_mol_per_m3: float) -> float:
-    return max(0.0, ni_concentration_mol_per_m3) * NI_MW_KG_PER_MOL
-
-
-def rate_constant_value(
-    rate_key: str,
-    *,
-    catalyst_mass_density_kg_per_m3: float,
-    temperature_k: float,
-) -> float:
-    coefficient = NUMAGUCHI_RATE_COEFFICIENTS[rate_key]
-    activation_energy = NUMAGUCHI_ACTIVATION_ENERGIES_J_PER_MOL[rate_key]
-    return catalyst_mass_density_kg_per_m3 * coefficient * math.exp(
-        -activation_energy / (GAS_CONSTANT_J_PER_MOL_K * temperature_k)
-    )
-
-
-def _equilibrium_constant_value(intercept: float, temperature_term: float, temperature_k: float) -> float:
-    return math.exp(intercept + temperature_term / temperature_k)
-
-
-def equilibrium_constant_smr_value(temperature_k: float) -> float:
-    return _equilibrium_constant_value(
-        SMR_EQUILIBRIUM_INTERCEPT,
-        SMR_EQUILIBRIUM_TEMPERATURE_TERM,
-        temperature_k,
-    )
-
-
-def equilibrium_constant_wgs_value(temperature_k: float) -> float:
-    return _equilibrium_constant_value(
-        WGS_EQUILIBRIUM_INTERCEPT,
-        WGS_EQUILIBRIUM_TEMPERATURE_TERM,
-        temperature_k,
-    )
-
-
-
-def smr_rate_value(
-    *,
-    temperature_k: float,
-    p_ch4_pa: float,
-    p_h2o_pa: float,
-    p_co_pa: float,
-    p_h2_pa: float,
-    catalyst_mass_density_kg_per_m3: float,
-) -> float:
-    p_ch4_bar = pressure_bar_value(p_ch4_pa)
-    p_h2o_bar = pressure_bar_value(p_h2o_pa)
-    p_co_bar = pressure_bar_value(p_co_pa)
-    p_h2_bar = pressure_bar_value(p_h2_pa)
-    driving_force = p_ch4_bar * p_h2o_bar - (p_h2_bar**3 * p_co_bar) / equilibrium_constant_smr_value(temperature_k)
-    return (
-        rate_constant_value(
-            "smr",
-            catalyst_mass_density_kg_per_m3=catalyst_mass_density_kg_per_m3,
-            temperature_k=temperature_k,
-        )
-        * driving_force
-        / safe_steam_partial_pressure_bar_value(p_h2o_bar) ** STEAM_REFORMING_H2O_ORDER
-    )
-
-
-def wgs_rate_value(
-    *,
-    temperature_k: float,
-    p_co_pa: float,
-    p_h2o_pa: float,
-    p_co2_pa: float,
-    p_h2_pa: float,
-    p_ch4_pa: float = 0.0,
-    catalyst_mass_density_kg_per_m3: float,
-) -> float:
-    p_co_bar = pressure_bar_value(p_co_pa)
-    p_h2o_bar = pressure_bar_value(p_h2o_pa)
-    p_co2_bar = pressure_bar_value(p_co2_pa)
-    p_h2_bar = pressure_bar_value(p_h2_pa)
-    driving_force = p_co_bar * p_h2o_bar - (p_h2_bar * p_co2_bar) / equilibrium_constant_wgs_value(temperature_k)
-    return (
-        rate_constant_value(
-            "wgs",
-            catalyst_mass_density_kg_per_m3=catalyst_mass_density_kg_per_m3,
-            temperature_k=temperature_k,
-        )
-        * driving_force
-        / safe_steam_partial_pressure_bar_value(p_h2o_bar)
-    )
 
 
 def _temperature_k_expression(temperature) -> Any:
@@ -282,18 +173,4 @@ FAMILY = ReactionFamily(
 )
 
 
-__all__ = [
-    "FAMILY",
-    "NUMAGUCHI_ACTIVATION_ENERGIES_J_PER_MOL",
-    "NUMAGUCHI_RATE_COEFFICIENTS",
-    "catalyst_mass_density_value",
-    "equilibrium_constant_smr_value",
-    "equilibrium_constant_wgs_value",
-    "safe_steam_partial_pressure_bar_value",
-    "partial_pressure_value",
-    "partial_pressure_bar_value",
-    "pressure_bar_value",
-    "rate_constant_value",
-    "smr_rate_value",
-    "wgs_rate_value",
-]
+__all__ = ("FAMILY",)

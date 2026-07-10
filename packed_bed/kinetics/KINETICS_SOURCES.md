@@ -1,24 +1,50 @@
-# This is meant as a place to store references for gas-solid and gas-gas reaction kinetics, with a short description
+# Bundled kinetics families
 
-# Gas-solid
-## Copper
-### San Pio CuO/SiO2 and CuO/Al2O3 (copper_redox.py)
-San Pio (https://doi.org/10.1016/j.ces.2017.09.044) has very nice equations for oxidation and reduction of Cu on SiO2 (essentialy no interaction with support) and Cu on Al2O3, where spinels form. Equations are presented both for true shrinking core models as well as pseudohomogeneous reaction rates. Unfortunately only hydrogen is used as reducing gas, no CO. Additionaly, an availability term of the form $C_{H2}/(C_{H2} + eps)$ has to be included, since pseudohomogeneous reactions are order 0 wrt to H2.
+Each module owns one swappable family: its reaction definitions, symbolic
+DAETools hooks, component requirements, and local regularization constants.
+The family name and Git commit recorded in a run manifest identify the selected
+implementation; there is no separate kinetics version system.
 
-## Nickel
+These references document provenance. They do not assert that a family is
+appropriate for a particular material or experiment.
 
-### Medrano NiO/CaAl2O4 - Andrew Wright (medrano.py)
-Source (https://doi.org/10.1016/j.apenergy.2015.08.078; Technical Report: Chemical Looping Reactor Modelling – 2D) follows the idea of Medrano kinetics from the original paper, but the implementation of the expression is slightly different.
+## Copper — San Pio et al.
 
-Original paper regressed kinetics from data on HiFUEL® R110 from Johnson Matthey. Nominally there is no support interaction, but they may be doing some secret fuckery with it, which may render kinetics regressed in this work less valid for other Ni-based catalysts, especially
-if the support material is different. Regardless, the equation form is very nice and can be used to regress another set of parameters.
+Source: M. A. San Pio et al., *Chemical Engineering Science* 175 (2018),
+56–71, [doi:10.1016/j.ces.2017.09.044](https://doi.org/10.1016/j.ces.2017.09.044).
 
-Some of the terms are rearranged, rational approximations to fractional power functions are used. Overall this set of equations is preferred vs the original Medrano implementation due to them being better behaved for the solver.
+- `copper_sio2_san_pio` (`copper_sio2.py`) contains the two
+  pseudo-homogeneous CuO → Cu2O → Cu hydrogen-reduction steps. SiO2 is treated
+  as an inert support, so the family requires no aluminium or spinel species.
+- `copper_al2o3_san_pio` (`copper_al2o3.py`) contains those support-independent
+  reductions plus the Al2O3-specific spinel reduction and oxidation steps.
 
-# Gas-gas
-## Nickel-catalysed
-### Xu-Froment Reforming (xu_froment.py)
-Source (Technical Report: Chemical Looping Reactor Modelling – 2D;  https://doi.org/10.1002/aic.690350109) is an implementation of the Xu and Froment reforming reactions, which include a water gas shift reaction from carbon monoxide to carbon dioxide, reforming from methane to carbon monoxide, and an overall reaction directly from methano to carbon dioxide. All reactions are reversible and use partial pressure as the driving force.
+The source states that CuO-to-Cu reduction is independent of the support and
+extends that base model with CuAl2O4/CuAlO2 chemistry for the Al2O3 carrier.
+The zero-order hydrogen reductions retain a local smooth gas-availability gate.
 
-### Numaguchi and Kikuchi Reforming (numaguchi.py)
-Follows the source (Technical Report: Chemical Looping Reactor Modelling – 2D;  https://doi.org/10.1002/aic.690350109) in the implementation of two reactions, reforming and water-gas shift. In the original technical report hydrogen is used as an inhibitory term, this has been corrected to water in the code used here. The equilibrium constant is also implemented differently. 
+## Nickel redox — Medrano form
+
+`nickel_medrano` (`nickel_medrano.py`) follows the Medrano-style form documented
+in Andrew Wright, *Chemical Looping Reactor Modelling – 2D*, with context from
+[doi:10.1016/j.apenergy.2015.08.078](https://doi.org/10.1016/j.apenergy.2015.08.078).
+The rational, solver-oriented implementation is canonical; the older duplicate
+form is not retained.
+
+## Nickel-catalysed reforming
+
+- `reforming_xu_froment` (`reforming_xu_froment.py`) implements the three
+  Xu–Froment reactions from
+  [doi:10.1002/aic.690350109](https://doi.org/10.1002/aic.690350109).
+- `reforming_numaguchi` (`reforming_numaguchi.py`) implements the alternative
+  Numaguchi–Kikuchi reforming and water-gas-shift form documented in Andrew
+  Wright's technical report.
+
+These are alternative published mechanisms, not compatibility aliases.
+
+## Iron redox — He et al.
+
+`iron_he` (`iron_he.py`) contains the He et al. reduction and oxidation family
+from *Energy Conversion and Management* 293 (2023), 117525. Phase 6 only
+removed the unused duplicate numeric transcription; the symbolic runtime
+expressions and their local constants were left unchanged.

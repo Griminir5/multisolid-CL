@@ -182,6 +182,12 @@ reaction_ids:
   - ni_oxidation_o2_medrano
 ```
 
+Bundled families are `nickel_medrano`, `reforming_xu_froment`,
+`reforming_numaguchi`, `copper_sio2_san_pio`, `copper_al2o3_san_pio`, and
+`iron_he`. The two copper families are intentionally support-specific: the
+SiO2 family does not require aluminium or spinel components. See
+`packed_bed/kinetics/KINETICS_SOURCES.md` for provenance and reaction scope.
+
 `program.yaml` defines scalar channels and the inlet composition channel. Every
 composition mapping must contain exactly the configured gas species, and mole
 fractions must sum to `1.0`.

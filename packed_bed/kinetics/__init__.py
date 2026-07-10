@@ -25,18 +25,20 @@ class KineticsContext:
         return self.reaction_index[reaction_id]
 
 
-from .coper_redox import FAMILY as COPPER_SAN_PIO_FAMILY  # noqa: E402
-from .fe_redox import FAMILY as IRON_HE_FAMILY  # noqa: E402
-from .medrano import FAMILY as NICKEL_MEDRANO_FAMILY  # noqa: E402
-from .numaguchi import FAMILY as REFORMING_NUMAGUCHI_FAMILY  # noqa: E402
-from .xu_froment import FAMILY as REFORMING_XU_FROMENT_FAMILY  # noqa: E402
+from .copper_al2o3 import FAMILY as COPPER_AL2O3_SAN_PIO_FAMILY  # noqa: E402
+from .copper_sio2 import FAMILY as COPPER_SIO2_SAN_PIO_FAMILY  # noqa: E402
+from .iron_he import FAMILY as IRON_HE_FAMILY  # noqa: E402
+from .nickel_medrano import FAMILY as NICKEL_MEDRANO_FAMILY  # noqa: E402
+from .reforming_numaguchi import FAMILY as REFORMING_NUMAGUCHI_FAMILY  # noqa: E402
+from .reforming_xu_froment import FAMILY as REFORMING_XU_FROMENT_FAMILY  # noqa: E402
 
 
 FAMILY_REGISTRY: Mapping[str, ReactionFamily] = MappingProxyType({
     NICKEL_MEDRANO_FAMILY.name: NICKEL_MEDRANO_FAMILY,
     REFORMING_XU_FROMENT_FAMILY.name: REFORMING_XU_FROMENT_FAMILY,
     REFORMING_NUMAGUCHI_FAMILY.name: REFORMING_NUMAGUCHI_FAMILY,
-    COPPER_SAN_PIO_FAMILY.name: COPPER_SAN_PIO_FAMILY,
+    COPPER_SIO2_SAN_PIO_FAMILY.name: COPPER_SIO2_SAN_PIO_FAMILY,
+    COPPER_AL2O3_SAN_PIO_FAMILY.name: COPPER_AL2O3_SAN_PIO_FAMILY,
     IRON_HE_FAMILY.name: IRON_HE_FAMILY,
 })
 

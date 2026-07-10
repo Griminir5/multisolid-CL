@@ -13,6 +13,8 @@ from packed_bed.reactions import build_reaction_network, reaction_catalog
 
 NICKEL_FAMILY = FAMILY_REGISTRY["nickel_medrano"]
 REFORMING_FAMILY = FAMILY_REGISTRY["reforming_xu_froment"]
+COPPER_SIO2_FAMILY = FAMILY_REGISTRY["copper_sio2_san_pio"]
+COPPER_AL2O3_FAMILY = FAMILY_REGISTRY["copper_al2o3_san_pio"]
 
 
 def test_explicit_family_registry_is_import_safe() -> None:
@@ -30,7 +32,8 @@ assert tuple(FAMILY_REGISTRY) == (
     'nickel_medrano',
     'reforming_xu_froment',
     'reforming_numaguchi',
-    'copper_san_pio',
+    'copper_sio2_san_pio',
+    'copper_al2o3_san_pio',
     'iron_he',
 )
 """
@@ -54,6 +57,35 @@ def test_family_requirements_are_local_to_the_mechanism() -> None:
     assert NICKEL_FAMILY.required_solid_species == ("Ni", "NiO")
     assert REFORMING_FAMILY.required_solid_species == ("Ni",)
     assert not ({"Al2O3", "CuAl2O4", "CuAlO2"} & set(NICKEL_FAMILY.required_solid_species))
+    assert COPPER_SIO2_FAMILY.required_gas_species == ("H2", "H2O")
+    assert COPPER_SIO2_FAMILY.required_solid_species == ("Cu", "Cu2O", "CuO")
+    assert not {
+        "Al2O3",
+        "CuAl2O4",
+        "CuAlO2",
+    } & set(COPPER_SIO2_FAMILY.required_solid_species)
+    assert {"Al2O3", "CuAl2O4", "CuAlO2"} <= set(
+        COPPER_AL2O3_FAMILY.required_solid_species
+    )
+
+
+def test_copper_support_families_have_distinct_reaction_ids() -> None:
+    assert not (
+        set(COPPER_SIO2_FAMILY.reaction_ids)
+        & set(COPPER_AL2O3_FAMILY.reaction_ids)
+    )
+    assert all(
+        not ({"Al2O3", "CuAl2O4", "CuAlO2"} & set(reaction.all_species))
+        for reaction in COPPER_SIO2_FAMILY.reactions
+    )
+
+    network = build_reaction_network(
+        COPPER_SIO2_FAMILY.reaction_ids,
+        ("H2", "H2O"),
+        ("Cu", "Cu2O", "CuO"),
+        families=(COPPER_SIO2_FAMILY,),
+    )
+    assert network.reaction_ids == COPPER_SIO2_FAMILY.reaction_ids
 
 
 def test_catalog_contains_only_selected_families() -> None:
