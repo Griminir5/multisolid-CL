@@ -96,10 +96,10 @@ def test_tiny_inert_case_preserves_equation_order_and_executes(tmp_path: Path) -
 
 @pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
 def test_ordinary_run_writes_one_dataset_and_manifest(tmp_path: Path) -> None:
-    from packed_bed.cli import run_simulation
+    from packed_bed.simulation import run_case
 
     case = load_case(_write_inert_case(tmp_path))
-    result = run_simulation(case, property_registry=PROPERTY_REGISTRY)
+    result = run_case(case, property_registry=PROPERTY_REGISTRY)
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
 
     assert result.status == "success"

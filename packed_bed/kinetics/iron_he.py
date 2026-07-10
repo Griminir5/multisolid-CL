@@ -144,11 +144,6 @@ def _equilibrium_constant_expression(a: float, b: float, temperature_k) -> Any:
     return Exp(Constant(a) + Constant(b) / temperature_k)
 
 
-def _solid_concentration_expression(context: KineticsContext, species_id: str):
-    species_idx = context.solid_index(species_id)
-    return context.model.c_sol(species_idx, context.idx_cell) / Constant(1.0 * mol / m**3)
-
-
 def _optional_solid_concentration_expression(context: KineticsContext, species_id: str):
     try:
         species_idx = context.solid_index(species_id)
@@ -506,7 +501,7 @@ FAMILY = ReactionFamily(
             required_species=("FeO", "Fe", "CO", "CO2"),
             source_reference="He et al., Energy Conversion and Management 293 (2023) 117525",
             reversible=True,
-            notes="Third-stage Fe reduction by CO using the random pore model. This reaction entry is correct, but it will only run if the kinetics hook is completed with symbolic logarithm support.",
+            notes="Third-stage Fe reduction by CO using the random pore model.",
         ),
         ReactionDefinition(
             id="fe2o3_ch4_reduction_he_2023",

@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import replace
 import math
-from pathlib import Path
 import sys
-from time import perf_counter
-import traceback
 from typing import TYPE_CHECKING
 
 from .batch import BatchResult, run_batch_file
-from .config import Case, PackedBedValidationError, load_case
+from .config import PackedBedValidationError, load_case
 
 if TYPE_CHECKING:
     from .reports import RunResult
@@ -24,32 +20,6 @@ def _positive_float(raw_value: str) -> float:
     if not math.isfinite(value) or value <= 0.0:
         raise argparse.ArgumentTypeError("must be a finite number greater than zero.")
     return value
-
-
-def generate_artifacts(case: Case) -> dict[str, Path]:
-    """Generate explicitly requested pre-run visual and graph artifacts."""
-
-    from .properties import PROPERTY_REGISTRY
-    from .visualization import (
-        build_system_graph,
-        is_pygraphviz_available,
-        render_initial_solid_profile,
-        render_operating_program,
-        render_system_graph,
-    )
-
-    output_directory = case.output_directory
-    artifacts_directory = case.artifacts_directory
-    output_directory.mkdir(parents=True, exist_ok=True)
-    artifacts_directory.mkdir(parents=True, exist_ok=True)
-
-    artifact_paths: dict[str, Path] = {}
-    if is_pygraphviz_available():
-        system_graph = build_system_graph(case, property_registry=PROPERTY_REGISTRY)
-        artifact_paths.update(render_system_graph(system_graph, artifacts_directory))
-    artifact_paths.update(render_operating_program(case, artifacts_directory))
-    artifact_paths.update(render_initial_solid_profile(case, artifacts_directory))
-    return artifact_paths
 
 
 def launch_daetools_plotter(run_result: RunResult) -> int:
@@ -85,110 +55,6 @@ def launch_daetools_plotter(run_result: RunResult) -> int:
     return app.exec()
 
 
-def run_simulation(
-    case: Case,
-    property_registry=None,
-    artifact_paths: dict[str, Path] | None = None,
-    *,
-    render_plots: bool = False,
-) -> RunResult:
-    """Run one already-resolved case through the ordinary execution path."""
-
-    from .incidence_matrix import write_solver_incidence_artifacts
-    from .properties import PROPERTY_REGISTRY
-    from .reports import (
-        RunResult,
-        compute_balance_errors,
-        create_dataset_reporter,
-        write_run_manifest,
-    )
-    from .simulation import PackedBedSimulation, execute_simulation
-
-    if property_registry is None:
-        property_registry = PROPERTY_REGISTRY
-
-    output_directory = case.output_directory
-    output_directory.mkdir(parents=True, exist_ok=True)
-    solver_artifact_paths: dict[str, Path] = {}
-
-    stage = "model construction"
-    started_at = perf_counter()
-    dataset_reporter = None
-    run_result = None
-    try:
-        simulation = PackedBedSimulation(case, property_registry)
-        dataset_reporter = create_dataset_reporter(
-            case,
-            smooth_ramp_width_s=simulation.smooth_ramp_width_s,
-        )
-        after_initialize = None
-        if case.run.outputs.solver_incidence_matrix:
-            artifacts_directory = case.artifacts_directory
-
-            def after_initialize(simulation, solver):
-                solver_artifact_paths.update(
-                    write_solver_incidence_artifacts(
-                        model=simulation.model,
-                        solver=solver,
-                        output_dir=artifacts_directory,
-                    )
-                )
-
-        stage = "solver execution"
-        reporter = execute_simulation(
-            simulation,
-            include_plot_variables=render_plots,
-            data_reporter=dataset_reporter,
-            after_initialize=after_initialize,
-        )
-
-        run_result = RunResult(
-            case=case,
-            output_directory=output_directory,
-            results_path=dataset_reporter.results_path,
-            runtime_s=perf_counter() - started_at,
-            dataset=dataset_reporter.dataset,
-            artifact_paths={
-                **dict(artifact_paths or {}),
-                **solver_artifact_paths,
-            },
-            reporter=reporter,
-            balance_errors=compute_balance_errors(dataset_reporter.dataset),
-        )
-        if render_plots:
-            stage = "plotting"
-            from .plots import render_run_result_plots
-
-            plot_paths = render_run_result_plots(run_result)
-            run_result = replace(
-                run_result,
-                artifact_paths={**run_result.artifact_paths, **plot_paths},
-            )
-        stage = "manifest writing"
-        manifest_path = write_run_manifest(run_result)
-        return replace(run_result, manifest_path=manifest_path)
-    except Exception as exc:
-        if stage != "manifest writing":
-            failed_result = replace(run_result, status="failed") if run_result else RunResult(
-                case=case,
-                output_directory=output_directory,
-                status="failed",
-                runtime_s=perf_counter() - started_at,
-                results_path=getattr(dataset_reporter, "results_path", None),
-                dataset=getattr(dataset_reporter, "dataset", None),
-                artifact_paths={**dict(artifact_paths or {}), **solver_artifact_paths},
-            )
-            try:
-                write_run_manifest(
-                    failed_result,
-                    failure_stage=stage,
-                    traceback_text=traceback.format_exc(),
-                )
-            except Exception as manifest_error:
-                exc.add_note(f"Could not write failure manifest: {manifest_error}")
-        raise
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run a packed-bed simulation from YAML input files."
@@ -211,7 +77,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--dae-plotter",
-        "--plotter",
         dest="launch_dae_plotter",
         action="store_true",
         help="Open the DAETools plotter GUI after the run using the captured simulation results.",
@@ -282,8 +147,14 @@ def _run_cli(argv: list[str]) -> int:
         print(f"Validation passed: {case.run_path}")
         return 0
 
-    artifact_paths = generate_artifacts(case) if args.artifacts else {}
-    run_result = run_simulation(
+    artifact_paths = {}
+    if args.artifacts:
+        from .plots import generate_artifacts
+
+        artifact_paths = generate_artifacts(case)
+    from .simulation import run_case
+
+    run_result = run_case(
         case,
         artifact_paths=artifact_paths,
         render_plots=args.plots or args.launch_dae_plotter,

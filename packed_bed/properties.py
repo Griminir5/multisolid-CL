@@ -219,23 +219,12 @@ class PropertyRegistry:
     def has_species(self, species_id: str) -> bool:
         return species_id in self.records
 
-    def species_ids(self, phase: str | None = None) -> tuple[str, ...]:
-        if phase is None:
-            return tuple(self.records.keys())
-        return tuple(species_id for species_id, record in self.records.items() if record.phase == phase)
-
     def get_record(self, species_id: str) -> SpeciesProperties:
         try:
             return self.records[species_id]
         except KeyError as exc:
             available = ", ".join(self.records.keys())
             raise KeyError(f"Unknown species '{species_id}'. Available species: {available}") from exc
-
-    def require_species(self, species_id: str, phase: str | None = None) -> SpeciesProperties:
-        record = self.get_record(species_id)
-        if phase is not None and record.phase != phase:
-            raise KeyError(f"Species '{species_id}' is phase '{record.phase}', expected '{phase}'.")
-        return record
 
     def enthalpy_expression(self, species_id: str, temperature):
         record = self.get_record(species_id)
@@ -371,5 +360,3 @@ PROPERTY_REGISTRY = PropertyRegistry(
         ),
     }
 )
-
-DEFAULT_PROPERTY_REGISTRY = PROPERTY_REGISTRY

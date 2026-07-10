@@ -10,7 +10,7 @@ import numpy as np
 import xarray as xr
 
 from packed_bed.config import load_case
-from packed_bed.plots import render_run_result_plots
+from packed_bed.plots import generate_artifacts, render_run_result_plots
 from packed_bed.reports import (
     RunResult,
     compute_balance_errors,
@@ -185,6 +185,22 @@ def test_netcdf_round_trip_plots_manifest_and_ml_conversion(tmp_path: Path) -> N
         text=True,
     )
     assert matrix_path.is_file()
+
+
+def test_pre_run_artifacts_use_the_resolved_case(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    case, _process = _synthetic_case_and_process(tmp_path)
+    monkeypatch.setattr("packed_bed.plots.find_spec", lambda _name: None)
+
+    artifacts = generate_artifacts(case)
+
+    assert set(artifacts) == {
+        "initial_solid_profile_svg",
+        "operating_program_svg",
+    }
+    assert all(path.is_file() for path in artifacts.values())
 
 
 def test_solid_mole_fraction_reports_concentration_without_changing_the_model() -> None:

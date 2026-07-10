@@ -13,17 +13,12 @@ class KineticsContext:
     idx_cell: Any
     gas_species_index: Mapping[str, int]
     solid_species_index: Mapping[str, int]
-    reaction_index: Mapping[str, int]
 
     def gas_index(self, species_id: str) -> int:
         return self.gas_species_index[species_id]
 
     def solid_index(self, species_id: str) -> int:
         return self.solid_species_index[species_id]
-
-    def reaction_lookup(self, reaction_id: str) -> int:
-        return self.reaction_index[reaction_id]
-
 
 from .copper_al2o3 import FAMILY as COPPER_AL2O3_SAN_PIO_FAMILY  # noqa: E402
 from .copper_sio2 import FAMILY as COPPER_SIO2_SAN_PIO_FAMILY  # noqa: E402

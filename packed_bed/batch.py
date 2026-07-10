@@ -225,7 +225,6 @@ class BatchCaseRecord:
 class BatchResult:
     batch_path: Path
     output_directory: Path
-    manifest_path: Path | None
     summary_path: Path | None
     records: tuple[BatchCaseRecord, ...]
 
@@ -438,11 +437,11 @@ def _write_case_files(cases: tuple[ExpandedBatchCase, ...]) -> None:
 def _check_output_collisions(
     document: BatchDocument,
     cases: tuple[ExpandedBatchCase, ...],
-    manifest_path: Path,
     summary_path: Path,
 ) -> None:
     existing = [case.case_directory for case in cases if case.case_directory.exists()]
-    existing.extend(path for path in (manifest_path, summary_path) if path.exists())
+    if summary_path.exists():
+        existing.append(summary_path)
     if document.output_directory.exists() and not document.output_directory.is_dir():
         existing.append(document.output_directory)
     if existing:
@@ -454,33 +453,7 @@ def _check_output_collisions(
     for case in cases:
         output = case.case_directory / "output"
         _contained_path(case.case_directory, output, f"case '{case.case_id}' output")
-    _contained_path(document.output_directory, manifest_path, "batch manifest")
     _contained_path(document.output_directory, summary_path, "batch summary")
-
-
-def _record_columns(axis_ids: tuple[str, ...], *, include_runtime: bool) -> list[str]:
-    columns = [
-        "case_id",
-        *(f"axis_{axis_id}" for axis_id in axis_ids),
-        "status",
-        "error",
-        "case_directory",
-        "run_yaml",
-    ]
-    if include_runtime:
-        columns.extend(
-            (
-                "runtime_s",
-                "output_directory",
-                "heat_balance_max_abs_error",
-                "heat_balance_time_s",
-                "heat_balance_unit",
-                "mass_balance_max_abs_error",
-                "mass_balance_time_s",
-                "mass_balance_unit",
-            )
-        )
-    return columns
 
 
 def _balance_field(record: BatchCaseRecord, key: str, attribute: str) -> str | float:
@@ -488,67 +461,72 @@ def _balance_field(record: BatchCaseRecord, key: str, attribute: str) -> str | f
     return "" if error is None else getattr(error, attribute)
 
 
-def _record_row(
-    record: BatchCaseRecord,
-    axis_ids: tuple[str, ...],
-    *,
-    include_runtime: bool,
-) -> dict[str, Any]:
-    row: dict[str, Any] = {
-        "case_id": record.case_id,
-        "status": record.status,
-        "error": record.error,
-        "case_directory": str(record.case_directory),
-        "run_yaml": str(record.run_yaml_path),
-        **{f"axis_{axis}": record.selections.get(axis, "") for axis in axis_ids},
-    }
-    if include_runtime:
-        row.update(
-            runtime_s="" if record.runtime_s is None else record.runtime_s,
-            output_directory=(
-                "" if record.output_directory is None else str(record.output_directory)
-            ),
-            heat_balance_max_abs_error=_balance_field(record, "heat", "max_abs_error"),
-            heat_balance_time_s=_balance_field(record, "heat", "time_s"),
-            heat_balance_unit=_balance_field(record, "heat", "unit"),
-            mass_balance_max_abs_error=_balance_field(record, "mass", "max_abs_error"),
-            mass_balance_time_s=_balance_field(record, "mass", "time_s"),
-            mass_balance_unit=_balance_field(record, "mass", "unit"),
-        )
-    return row
-
-
 def _write_records_csv(
     path: Path,
     records: tuple[BatchCaseRecord, ...],
     axis_ids: tuple[str, ...],
-    *,
-    include_runtime: bool,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    columns = _record_columns(axis_ids, include_runtime=include_runtime)
+    columns = [
+        "case_id",
+        *(f"axis_{axis_id}" for axis_id in axis_ids),
+        "status",
+        "error",
+        "case_directory",
+        "run_yaml",
+        "runtime_s",
+        "output_directory",
+        "heat_balance_max_abs_error",
+        "heat_balance_time_s",
+        "heat_balance_unit",
+        "mass_balance_max_abs_error",
+        "mass_balance_time_s",
+        "mass_balance_unit",
+    ]
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()
         for record in records:
-            writer.writerow(_record_row(record, axis_ids, include_runtime=include_runtime))
-
-
-def _default_batch_functions():
-    from .cli import generate_artifacts, run_simulation
-
-    return generate_artifacts, run_simulation
+            writer.writerow(
+                {
+                    "case_id": record.case_id,
+                    "status": record.status,
+                    "error": record.error,
+                    "case_directory": str(record.case_directory),
+                    "run_yaml": str(record.run_yaml_path),
+                    **{
+                        f"axis_{axis}": record.selections.get(axis, "")
+                        for axis in axis_ids
+                    },
+                    "runtime_s": "" if record.runtime_s is None else record.runtime_s,
+                    "output_directory": (
+                        ""
+                        if record.output_directory is None
+                        else str(record.output_directory)
+                    ),
+                    "heat_balance_max_abs_error": _balance_field(
+                        record, "heat", "max_abs_error"
+                    ),
+                    "heat_balance_time_s": _balance_field(record, "heat", "time_s"),
+                    "heat_balance_unit": _balance_field(record, "heat", "unit"),
+                    "mass_balance_max_abs_error": _balance_field(
+                        record, "mass", "max_abs_error"
+                    ),
+                    "mass_balance_time_s": _balance_field(record, "mass", "time_s"),
+                    "mass_balance_unit": _balance_field(record, "mass", "unit"),
+                }
+            )
 
 
 def _run_case_direct(
     case: Case,
     generate_artifacts_fn: Callable[[Case], dict[str, Path]] | None,
-    run_simulation_fn: Callable[..., RunResult],
+    run_case_fn: Callable[..., RunResult],
     *,
     render_plots: bool,
 ) -> tuple[Path, dict[str, Any]]:
     artifact_paths = generate_artifacts_fn(case) if generate_artifacts_fn is not None else {}
-    result = run_simulation_fn(
+    result = run_case_fn(
         case,
         artifact_paths=artifact_paths,
         render_plots=render_plots,
@@ -559,7 +537,7 @@ def _run_case_direct(
 def _run_case_worker(
     case: Case,
     generate_artifacts_fn,
-    run_simulation_fn,
+    run_case_fn,
     render_plots: bool,
     result_queue,
 ) -> None:
@@ -567,7 +545,7 @@ def _run_case_worker(
         output_directory, balance_errors = _run_case_direct(
             case,
             generate_artifacts_fn,
-            run_simulation_fn,
+            run_case_fn,
             render_plots=render_plots,
         )
         result_queue.put(
@@ -584,7 +562,7 @@ def _run_case_worker(
 def _run_case_with_timeout(
     case: Case,
     generate_artifacts_fn,
-    run_simulation_fn,
+    run_case_fn,
     timeout_s: float,
     *,
     render_plots: bool,
@@ -594,7 +572,7 @@ def _run_case_with_timeout(
     result_queue = context.Queue(maxsize=1)
     process = context.Process(
         target=_run_case_worker,
-        args=(case, generate_artifacts_fn, run_simulation_fn, render_plots, result_queue),
+        args=(case, generate_artifacts_fn, run_case_fn, render_plots, result_queue),
     )
     try:
         process.start()
@@ -635,7 +613,7 @@ def run_batch_file(
     validate_only: bool = False,
     case_timeout_s: float | None = None,
     generate_artifacts_fn: Callable[[Case], dict[str, Path]] | None = None,
-    run_simulation_fn: Callable[..., RunResult] | None = None,
+    run_case_fn: Callable[..., RunResult] | None = None,
 ) -> BatchResult:
     document = load_batch_spec(batch_yaml_path)
     timeout_s = (
@@ -669,27 +647,27 @@ def run_batch_file(
     result_without_files = BatchResult(
         batch_path=document.batch_path,
         output_directory=document.output_directory,
-        manifest_path=None,
         summary_path=None,
         records=records,
     )
     if validate_only or any(case is None for case in resolved_cases):
         return result_without_files
 
-    manifest_path = document.output_directory / "manifest.csv"
     summary_path = document.output_directory / "summary.csv"
-    _check_output_collisions(document, expanded_cases, manifest_path, summary_path)
+    _check_output_collisions(document, expanded_cases, summary_path)
     _write_case_files(expanded_cases)
 
-    if generate_artifacts_fn is None or run_simulation_fn is None:
-        default_artifacts, default_simulation = _default_batch_functions()
-        if generate_artifacts_fn is None and document.spec.artifacts:
-            generate_artifacts_fn = default_artifacts
-        if run_simulation_fn is None:
-            run_simulation_fn = default_simulation
+    if generate_artifacts_fn is None and document.spec.artifacts:
+        from .plots import generate_artifacts
+
+        generate_artifacts_fn = generate_artifacts
+    if run_case_fn is None:
+        from .simulation import run_case
+
+        run_case_fn = run_case
 
     for case, record in zip(resolved_cases, records):
-        assert case is not None and run_simulation_fn is not None
+        assert case is not None and run_case_fn is not None
         record.status = "running"
         start = perf_counter()
         try:
@@ -697,14 +675,14 @@ def run_batch_file(
                 output_directory, balance_errors = _run_case_direct(
                     case,
                     generate_artifacts_fn,
-                    run_simulation_fn,
+                    run_case_fn,
                     render_plots=document.spec.plots,
                 )
             else:
                 output_directory, balance_errors = _run_case_with_timeout(
                     case,
                     generate_artifacts_fn,
-                    run_simulation_fn,
+                    run_case_fn,
                     timeout_s,
                     render_plots=document.spec.plots,
                 )
@@ -721,12 +699,10 @@ def run_batch_file(
             record.runtime_s = perf_counter() - start
 
     axis_ids = tuple(axis.id for axis in document.spec.axes)
-    _write_records_csv(manifest_path, records, axis_ids, include_runtime=False)
-    _write_records_csv(summary_path, records, axis_ids, include_runtime=True)
+    _write_records_csv(summary_path, records, axis_ids)
     return BatchResult(
         batch_path=document.batch_path,
         output_directory=document.output_directory,
-        manifest_path=manifest_path,
         summary_path=summary_path,
         records=records,
     )

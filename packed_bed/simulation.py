@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from importlib import import_module
 import os
+from pathlib import Path
+from time import perf_counter
+import traceback
 
 from daetools.pyDAE import (
     daeGetConfig,
@@ -18,8 +22,15 @@ from .initialization import apply_initial_state, calculate_initial_state, config
 from .kinetics import resolve_kinetics_hooks
 from .model import PackedBedModel
 from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S
+from .properties import PROPERTY_REGISTRY
 from .reactions import build_reaction_network
-from .reports import reporting_targets
+from .reports import (
+    RunResult,
+    compute_balance_errors,
+    create_dataset_reporter,
+    reporting_targets,
+    write_run_manifest,
+)
 
 
 _SOLVER_REGISTRY = {
@@ -220,9 +231,105 @@ def execute_simulation(
     return reporter
 
 
+def run_case(
+    case: Case,
+    property_registry=None,
+    artifact_paths: dict[str, Path] | None = None,
+    *,
+    render_plots: bool = False,
+) -> RunResult:
+    """Run one resolved case and write its dataset and manifest."""
+
+    if property_registry is None:
+        property_registry = PROPERTY_REGISTRY
+
+    case.output_directory.mkdir(parents=True, exist_ok=True)
+    solver_artifacts: dict[str, Path] = {}
+    stage = "model construction"
+    started_at = perf_counter()
+    dataset_reporter = None
+    result = None
+    try:
+        simulation = PackedBedSimulation(case, property_registry)
+        dataset_reporter = create_dataset_reporter(
+            case,
+            smooth_ramp_width_s=simulation.smooth_ramp_width_s,
+        )
+        after_initialize = None
+        if case.run.outputs.solver_incidence_matrix:
+            from .incidence_matrix import write_solver_incidence_artifacts
+
+            def after_initialize(initialized_simulation, _solver):
+                solver_artifacts.update(
+                    write_solver_incidence_artifacts(
+                        model=initialized_simulation.model,
+                        output_dir=case.artifacts_directory,
+                    )
+                )
+
+        stage = "solver execution"
+        reporter = execute_simulation(
+            simulation,
+            include_plot_variables=render_plots,
+            data_reporter=dataset_reporter,
+            after_initialize=after_initialize,
+        )
+        result = RunResult(
+            case=case,
+            output_directory=case.output_directory,
+            results_path=dataset_reporter.results_path,
+            runtime_s=perf_counter() - started_at,
+            dataset=dataset_reporter.dataset,
+            artifact_paths={**dict(artifact_paths or {}), **solver_artifacts},
+            reporter=reporter,
+            balance_errors=compute_balance_errors(dataset_reporter.dataset),
+        )
+        if render_plots:
+            stage = "plotting"
+            from .plots import render_run_result_plots
+
+            result = replace(
+                result,
+                artifact_paths={
+                    **result.artifact_paths,
+                    **render_run_result_plots(result),
+                },
+            )
+        stage = "manifest writing"
+        return replace(result, manifest_path=write_run_manifest(result))
+    except Exception as exc:
+        if stage != "manifest writing":
+            failed_result = (
+                replace(result, status="failed")
+                if result
+                else RunResult(
+                    case=case,
+                    output_directory=case.output_directory,
+                    status="failed",
+                    runtime_s=perf_counter() - started_at,
+                    results_path=getattr(dataset_reporter, "results_path", None),
+                    dataset=getattr(dataset_reporter, "dataset", None),
+                    artifact_paths={
+                        **dict(artifact_paths or {}),
+                        **solver_artifacts,
+                    },
+                )
+            )
+            try:
+                write_run_manifest(
+                    failed_result,
+                    failure_stage=stage,
+                    traceback_text=traceback.format_exc(),
+                )
+            except Exception as manifest_error:
+                exc.add_note(f"Could not write failure manifest: {manifest_error}")
+        raise
+
+
 __all__ = (
     "PackedBedSimulation",
     "configure_threads",
     "create_linear_solver",
     "execute_simulation",
+    "run_case",
 )

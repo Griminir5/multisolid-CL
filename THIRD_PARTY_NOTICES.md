@@ -21,9 +21,6 @@ those projects.
 - matplotlib: matplotlib license and bundled third-party notices.
 - pydantic: MIT.
 - PyYAML: MIT.
-- lxml: BSD-style license and bundled third-party notices.
-- openpyxl: MIT.
-- SALib: MIT.
 
 ## Optional Tools
 
@@ -31,4 +28,3 @@ those projects.
   under separate licenses.
 - Graphviz: Eclipse Public License 2.0 for current Graphviz distributions.
 - VTK: BSD-3-Clause.
-- pymoo: Apache-2.0.

@@ -6,6 +6,9 @@ and configurable operating programs. Runs are driven by YAML files that describe
 the selected gas species, solid species, reactions, inlet program, geometry,
 solver tolerances, and requested outputs.
 
+For the runtime flow and supported extension points, see
+[`docs/architecture.md`](docs/architecture.md).
+
 The current source tree is intended to be run from a checkout. There is no
 project packaging metadata in this repository yet, so install the runtime
 dependencies into your Python environment and run commands from the repository
@@ -51,31 +54,17 @@ python -m pip install pygraphviz
 `pygraphviz` also needs the Graphviz system libraries and executables available
 to the build and runtime environment.
 
-## Running a case
+## Quick start
 
-The package entry point is:
-
-```powershell
-python -m packed_bed packed_bed\examples\medrano_case\run.yaml
-```
-
-Pre-run diagrams and post-run result plots are explicit options:
+From the repository root, validate the bundled example configuration:
 
 ```powershell
-python -m packed_bed packed_bed\examples\medrano_case\run.yaml --artifacts --plots
+python -m packed_bed packed_bed/examples/default_case/run.yaml --validate-only
 ```
 
-Validate a case without integrating it:
-
-```powershell
-python -m packed_bed packed_bed\examples\medrano_case\run.yaml --validate-only
-```
-
-Open the DAETools plotter after a successful run:
-
-```powershell
-python -m packed_bed packed_bed\examples\medrano_case\run.yaml --dae-plotter
-```
+Remove `--validate-only` to integrate the case. Optional flags are `--artifacts`
+for pre-run diagrams, `--plots` for standard result plots, and `--dae-plotter`
+for the DAETools GUI after a successful run.
 
 ## Running a batch
 
@@ -131,6 +120,9 @@ axes:
 Set top-level `artifacts: true` or `plots: true` in `batch.yaml` when those
 outputs are wanted. They default to false.
 
+A completed batch writes one `summary.csv` containing each case selection,
+status, runtime, output path, and requested balance-error summaries.
+
 The top-level `run.yaml` points to three sibling input files:
 
 - `chemistry.yaml`: selected gas species, reaction families, and reaction IDs.
@@ -163,7 +155,15 @@ For an explicitly selected downstream ML matrix, use
 `tools/to_ml_matrix.py`; core extraction does not impose a permanent feature
 list. The xarray adoption spike is recorded in `docs/xarray-spike.md`.
 
-## Input file shape
+`tools/generate_clr_programs.py` is the retained, deterministic CLI for
+generating stratified GHSV operating programs for sampling studies; run it with
+`--help` to see its output, count, seed, and channel-probability options.
+
+## Configuration example
+
+The complete tracked example is
+[`packed_bed/examples/default_case`](packed_bed/examples/default_case). A case
+uses the following four-file shape.
 
 `chemistry.yaml` selects species and reactions:
 
@@ -262,8 +262,8 @@ add a solver variable. With an empty report list, `results.nc` contains only
 the scheduled time coordinate and operating-program values.
 
 Set `outputs.solver_incidence_matrix: true` to write solver sparsity artifacts
-after DAETools initializes the model. The run writes the raw DAETools XPM plus a
-labelled HTML incidence matrix and a CSV edge list under `artifacts_directory`.
+after DAETools initializes the model. The run writes a labelled CSV edge list
+and a static PNG under `artifacts_directory`.
 
 ## Adding new components
 
@@ -434,7 +434,6 @@ def my_reaction_rate(context: KineticsContext):
 - `idx_cell`: the distributed axial cell index for the current equation.
 - `gas_index(species_id)`: index lookup for gas species variables.
 - `solid_index(species_id)`: index lookup for solid species variables.
-- `reaction_lookup(reaction_id)`: index lookup for selected reactions.
 
 Frequently used model variables in kinetics hooks include:
 
@@ -477,5 +476,5 @@ This project is licensed under the GNU General Public License version 3 only
 
 Third-party software is not relicensed by this project. DAETools, OpenCS, PyQt,
 Graphviz, VTK, NumPy, xarray, SciPy, matplotlib, pydantic, PyYAML, pygraphviz,
-pymoo, and other dependencies retain their own license terms and should be
-installed or obtained separately.
+and other dependencies retain their own license terms and should be installed
+or obtained separately.

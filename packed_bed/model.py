@@ -78,10 +78,6 @@ class PackedBedModel(daeModel):
         self.initial_inlet_composition = np.asarray(case.inlet_composition_program.initial_value)
         self.gas_species_index = {species_id: idx for idx, species_id in enumerate(self.gas_species)}
         self.solid_species_index = {species_id: idx for idx, species_id in enumerate(self.solid_species)}
-        self.reaction_index = {
-            reaction.id: idx for idx, reaction in enumerate(self.reaction_network.reactions)
-        }
-
         if self.reaction_network.has_reactions and len(self.reaction_rate_hooks) != self.reaction_network.reaction_count:
             raise ValueError("Reaction rate hooks must align one-to-one with the selected reaction network.")
         if not self.reaction_network.has_reactions and self.reaction_rate_hooks:
@@ -459,7 +455,6 @@ class PackedBedModel(daeModel):
                     idx_cell=idx_cell,
                     gas_species_index=self.gas_species_index,
                     solid_species_index=self.solid_species_index,
-                    reaction_index=self.reaction_index,
                 )
                 eq.Residual = self.R_rxn(reaction_idx, idx_cell) - self.reaction_rate_hooks[reaction_idx](
                     kinetics_context

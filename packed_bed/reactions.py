@@ -6,7 +6,6 @@ from typing import Any, Callable, Literal, Mapping
 
 
 ReactionPhase = Literal["gas_gas", "gas_solid", "solid_solid"]
-ReactionRateBasis = Literal["bed_volume", "gas_volume", "solid_volume", "catalyst_volume"]
 KineticsHook = Callable[[Any], Any]
 
 
@@ -24,7 +23,6 @@ class ReactionDefinition:
     source_reference: str
     reversible: bool = False
     catalyst_species: tuple[str, ...] = ()
-    rate_basis: ReactionRateBasis = "bed_volume"
     notes: str = ""
 
     def __post_init__(self) -> None:
@@ -78,27 +76,8 @@ class ReactionDefinition:
     def all_species(self) -> tuple[str, ...]:
         return _unique_ordered(self.required_species + self.catalyst_species)
 
-    @property
-    def reactants(self) -> Mapping[str, float]:
-        return {
-            species_id: -coefficient
-            for species_id, coefficient in self.stoichiometry.items()
-            if coefficient < 0.0
-        }
-
-    @property
-    def products(self) -> Mapping[str, float]:
-        return {
-            species_id: coefficient
-            for species_id, coefficient in self.stoichiometry.items()
-            if coefficient > 0.0
-        }
-
     def source_coefficient(self, species_id: str) -> float:
         return float(self.stoichiometry.get(species_id, 0.0))
-
-    def has_catalyst(self, species_id: str) -> bool:
-        return species_id in self.catalyst_species
 
 
 @dataclass(frozen=True)
@@ -193,13 +172,6 @@ class ReactionNetwork:
     @property
     def has_reactions(self) -> bool:
         return bool(self.reactions)
-
-    def gas_coefficients(self, gas_species_id: str) -> tuple[float, ...]:
-        return self.gas_source_matrix[self.gas_species.index(gas_species_id)]
-
-    def solid_coefficients(self, solid_species_id: str) -> tuple[float, ...]:
-        return self.solid_source_matrix[self.solid_species.index(solid_species_id)]
-
 
 def reaction_catalog(families: tuple[ReactionFamily, ...]) -> dict[str, ReactionDefinition]:
     catalog: dict[str, ReactionDefinition] = {}

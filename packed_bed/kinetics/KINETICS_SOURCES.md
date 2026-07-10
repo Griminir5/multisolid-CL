@@ -45,6 +45,5 @@ These are alternative published mechanisms, not compatibility aliases.
 ## Iron redox — He et al.
 
 `iron_he` (`iron_he.py`) contains the He et al. reduction and oxidation family
-from *Energy Conversion and Management* 293 (2023), 117525. Phase 6 only
-removed the unused duplicate numeric transcription; the symbolic runtime
-expressions and their local constants were left unchanged.
+from *Energy Conversion and Management* 293 (2023), 117525. Its symbolic
+runtime expressions and local constants are the canonical implementation.

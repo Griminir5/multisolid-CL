@@ -216,7 +216,6 @@ def test_batch_validate_only_is_side_effect_free(tmp_path: Path) -> None:
 
     result = run_batch_file(batch_path, validate_only=True)
 
-    assert result.manifest_path is None
     assert result.summary_path is None
     assert [record.status for record in result.records] == ["validation_passed"]
     assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == paths_before
@@ -241,14 +240,14 @@ def test_all_cases_are_validated_before_any_case_is_written_or_run(tmp_path: Pat
         calls.append(case)
         return RunResult(case=case, output_directory=case.output_directory)
 
-    result = run_batch_file(batch_path, run_simulation_fn=fake_run)
+    result = run_batch_file(batch_path, run_case_fn=fake_run)
 
     assert calls == []
     assert [record.status for record in result.records] == [
         "validation_passed",
         "validation_failed",
     ]
-    assert result.manifest_path is None
+    assert result.summary_path is None
     assert not (tmp_path / "output").exists()
 
 
@@ -272,7 +271,7 @@ def test_existing_case_output_is_rejected_before_a_run(tmp_path: Path) -> None:
         return RunResult(case=case, output_directory=case.output_directory)
 
     with pytest.raises(BatchValidationError, match="refusing to overwrite"):
-        run_batch_file(batch_path, run_simulation_fn=fake_run)
+        run_batch_file(batch_path, run_case_fn=fake_run)
 
     assert calls == []
 
@@ -305,13 +304,12 @@ def test_batch_execution_uses_resolved_cases_and_explicit_render_options(tmp_pat
     result = run_batch_file(
         batch_path,
         generate_artifacts_fn=fake_artifacts,
-        run_simulation_fn=fake_run,
+        run_case_fn=fake_run,
     )
 
     assert len(artifact_calls) == 1
     assert run_calls == [(artifact_calls[0], {}, True)]
     assert result.records[0].status == "success"
-    assert result.manifest_path == (tmp_path / "output" / "manifest.csv").resolve()
     assert result.summary_path == (tmp_path / "output" / "summary.csv").resolve()
-    assert result.manifest_path.is_file()
     assert result.summary_path.is_file()
+    assert not (tmp_path / "output" / "manifest.csv").exists()

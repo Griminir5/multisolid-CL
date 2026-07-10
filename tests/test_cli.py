@@ -28,17 +28,10 @@ def _copy_case(tmp_path: Path) -> Path:
 
 def test_single_case_validate_only_creates_nothing_and_skips_runtime(
     tmp_path: Path,
-    monkeypatch,
     capsys,
 ) -> None:
     run_path = _copy_case(tmp_path)
     paths_before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
-
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("runtime function called during validation")
-
-    monkeypatch.setattr(cli, "generate_artifacts", forbidden)
-    monkeypatch.setattr(cli, "run_simulation", forbidden)
 
     exit_code = cli.main([str(run_path), "--validate-only", "--artifacts", "--plots"])
 

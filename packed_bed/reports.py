@@ -25,32 +25,25 @@ FLOW_ATOL = 1.0e-12
 
 @dataclass(frozen=True)
 class ReportSpec:
-    description: str
     model_variables: tuple[str, ...]
     requires_reactions: bool = False
 
 
 REPORT_SPECS = {
-    "temperature": ReportSpec("Bed temperature by cell.", ("temp_bed",)),
-    "pressure": ReportSpec("Bed pressure by cell.", ("pres_bed",)),
-    "velocity": ReportSpec("Superficial velocity by face.", ("u_s",)),
-    "gas_concentration": ReportSpec("Gas concentration by species and cell.", ("c_gas",)),
-    "gas_mole_fraction": ReportSpec("Gas mole fraction by species and cell.", ("y_gas",)),
-    "solid_concentration": ReportSpec("Solid concentration by species and cell.", ("c_sol",)),
-    "solid_mole_fraction": ReportSpec("Derived solid mole fraction.", ("c_sol",)),
-    "gas_flux": ReportSpec("Gas molar flux by species and face.", ("N_gas_face",)),
-    "reaction_rate": ReportSpec(
-        "Reaction rate by reaction and cell.",
-        ("R_rxn",),
-        requires_reactions=True,
-    ),
-    "gas_enthalpy_flux": ReportSpec("Gas enthalpy flux by species and face.", ("J_gas_face",)),
+    "temperature": ReportSpec(("temp_bed",)),
+    "pressure": ReportSpec(("pres_bed",)),
+    "velocity": ReportSpec(("u_s",)),
+    "gas_concentration": ReportSpec(("c_gas",)),
+    "gas_mole_fraction": ReportSpec(("y_gas",)),
+    "solid_concentration": ReportSpec(("c_sol",)),
+    "solid_mole_fraction": ReportSpec(("c_sol",)),
+    "gas_flux": ReportSpec(("N_gas_face",)),
+    "reaction_rate": ReportSpec(("R_rxn",), requires_reactions=True),
+    "gas_enthalpy_flux": ReportSpec(("J_gas_face",)),
     "heat_balance": ReportSpec(
-        "Integral heat balance.",
         ("heat_in_total", "heat_out_total", "heat_loss_total", "heat_bed_total"),
     ),
     "mass_balance": ReportSpec(
-        "Integral mass balance.",
         ("mass_in_total", "mass_out_total", "mass_bed_total"),
     ),
 }
