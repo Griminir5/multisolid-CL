@@ -5,10 +5,13 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import yaml
 
 from packed_bed import cli
+from packed_bed.config import load_case
+from packed_bed.reports import RunResult
 
 
 BASE_CASE_DIRECTORY = (
@@ -33,7 +36,7 @@ def test_single_case_validate_only_creates_nothing_and_skips_runtime(
     run_path = _copy_case(tmp_path)
     paths_before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
 
-    exit_code = cli.main([str(run_path), "--validate-only", "--artifacts", "--plots"])
+    exit_code = cli.main([str(run_path), "--validate-only", "--artifacts"])
 
     assert exit_code == 0
     assert "Validation passed:" in capsys.readouterr().out
@@ -92,6 +95,7 @@ assert main([sys.argv[1], '--validate-only']) == 0
 assert not any(name == 'daetools' or name.startswith('daetools.') for name in sys.modules)
 assert 'pyUnits' not in sys.modules
 assert 'xarray' not in sys.modules
+assert 'matplotlib' not in sys.modules
 """
     environment = dict(os.environ, PYTHONPATH=str(Path(__file__).parents[1]))
 
@@ -105,6 +109,59 @@ assert 'xarray' not in sys.modules
     )
 
     assert "Validation passed:" in completed.stdout
+
+
+def test_plot_failure_returns_nonzero_without_changing_simulation_status(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    run_path = _copy_case(tmp_path)
+    case = load_case(run_path)
+    result = RunResult(
+        case=case,
+        output_directory=case.output_directory,
+        status="success",
+        runtime_s=0.1,
+        plot_errors={"axial_profiles": "synthetic failure"},
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "packed_bed.simulation",
+        SimpleNamespace(run_case=lambda *_args, **_kwargs: result),
+    )
+
+    exit_code = cli.main([str(run_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert result.status == "success"
+    assert "plot 'axial_profiles' failed: synthetic failure" in captured.err
+
+
+def test_dae_plotter_only_requests_reporter_retention(tmp_path: Path, monkeypatch) -> None:
+    run_path = _copy_case(tmp_path)
+    case = load_case(run_path)
+    calls = []
+
+    def fake_run(resolved_case, **kwargs):
+        calls.append(kwargs)
+        return RunResult(
+            case=resolved_case,
+            output_directory=resolved_case.output_directory,
+            runtime_s=0.1,
+            reporter=object(),
+        )
+
+    monkeypatch.setitem(
+        sys.modules,
+        "packed_bed.simulation",
+        SimpleNamespace(run_case=fake_run),
+    )
+    monkeypatch.setattr(cli, "launch_daetools_plotter", lambda _result: 0)
+
+    assert cli.main([str(run_path), "--dae-plotter"]) == 0
+    assert calls == [{"artifact_paths": {}, "retain_reporter": True}]
 
 
 def test_validation_errors_are_concise_and_use_a_distinct_exit_code(

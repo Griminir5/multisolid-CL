@@ -62,9 +62,10 @@ From the repository root, validate the bundled example configuration:
 python -m packed_bed packed_bed/examples/default_case/run.yaml --validate-only
 ```
 
-Remove `--validate-only` to integrate the case. Optional flags are `--artifacts`
-for pre-run diagrams, `--plots` for standard result plots, and `--dae-plotter`
-for the DAETools GUI after a successful run.
+Remove `--validate-only` to integrate the case. `--artifacts` creates the
+configuration-only system, operating-program, and initial-profile diagrams
+before the run. `--dae-plotter` retains the existing DAETools process for its
+GUI; it does not change what is reported to `results.nc`.
 
 ## Running a batch
 
@@ -117,8 +118,10 @@ axes:
               initial: 973.15
 ```
 
-Set top-level `artifacts: true` or `plots: true` in `batch.yaml` when those
-outputs are wanted. They default to false.
+Set top-level `artifacts: true` in `batch.yaml` when pre-run diagrams are
+wanted. Post-run plots are ordinary case configuration, so batch axes inherit
+or patch `run.outputs.requested_plots` in the same way as any other `run.yaml`
+value.
 
 A completed batch writes one `summary.csv` containing each case selection,
 status, runtime, output path, and requested balance-error summaries.
@@ -135,10 +138,16 @@ Artifacts are written under `outputs.artifacts_directory`.
 
 Each run writes:
 
-- `results.nc`: one labelled xarray dataset containing the requested solver
-  variables, program values, derived boundaries, and requested balances.
+- `results.nc`: one labelled xarray dataset containing exactly the selected
+  reports, their model-sourced boundaries, and their derived public outputs.
 - `manifest.json`: configuration, Git and package versions, hashes, dataset
-  dimensions/units, runtime and balance summaries, or failure stage/traceback.
+  dimensions/units, runtime, simulation and plot status, balance summaries, or
+  failure stage/traceback.
+
+`results.nc` is finalized before any registered plot starts. Each configured
+plot consumes that file read-only, and plot selection is recorded only in the
+manifest. Consequently, changing `requested_plots` cannot change simulation
+reporting targets or NetCDF contents.
 
 The dataset uses separate labelled dimensions including `time`, `x_cell`,
 `x_face`, `gas_species`, `solid_species`, and `reaction`. Solid mole fractions
@@ -261,9 +270,60 @@ enables two-sided flux splitting at interior faces, so local species and
 advective-enthalpy transport can select either reconstructed state, but it does
 not make the boundary conditions reversible.
 
+The solver block exposes the IDAS controls used by the bundled performance
+profile:
+
+```yaml
+solver:
+  name: superlu
+  threads: 0
+  relative_tolerance: 1.0e-3
+  suppress_algebraic_errors: true
+  max_nonlinear_iterations: 12
+  nonlinear_convergence_coefficient: 1.0
+```
+
+When omitted, the last three controls retain DAETools' defaults: `false`, `4`,
+and `0.33`. Algebraic-error suppression removes algebraic variables from the
+local time-integration error norm; IDAS still solves their equations at every
+step. It is appropriate for this index-1 formulation, but tolerance changes
+should always be checked against a stricter reference for a new case. The full
+default-case benchmark and error comparison are recorded in
+[`docs/performance.md`](docs/performance.md).
+
 Common report IDs include `temperature`, `pressure`, `velocity`, `gas_concentration`,
 `gas_mole_fraction`, `solid_concentration`, `solid_mole_fraction`, `gas_flux`,
 `reaction_rate`, `gas_enthalpy_flux`, `heat_balance`, and `mass_balance`.
+
+Report and automatic plot selection are explicit and independent:
+
+```yaml
+outputs:
+  directory: output
+  artifacts_directory: output/artifacts
+  solver_incidence_matrix: false
+  requested_reports:
+    - temperature
+    - pressure
+    - gas_mole_fraction
+    - gas_flux
+  requested_plots:
+    - outlet_composition
+    - outlet_conditions
+    - axial_profiles
+```
+
+`outlet_composition` requires `gas_mole_fraction`; `outlet_conditions`
+requires `temperature`, `pressure`, and `gas_flux`; and `axial_profiles`
+requires `temperature` and `pressure`. Validation reports unknown IDs and all
+missing report dependencies before model construction or output creation. An
+empty `requested_plots` list disables automatic plots.
+
+The `gas_mole_fraction` report records `y_in` and `y_gas`. Its outlet
+composition is derived from the last-face `N_gas_face` species fluxes; when
+the absolute total flux is below the flow tolerance it falls back to the final
+cell of `y_gas`. That face flux is an internal reporting dependency and does
+not expose `gas_flux` in NetCDF unless `gas_flux` is explicitly requested.
 
 Most reports only control recording of variables required by the physical
 model. The mass and heat balances are optional solver-integrated diagnostics:
@@ -271,7 +331,7 @@ their three and four accounting variables/equations, respectively, exist only
 when those reports are requested. `reaction_rate` requires at least one
 selected reaction. Solid mole fraction remains a derived output and does not
 add a solver variable. With an empty report list, `results.nc` contains only
-the scheduled time coordinate and operating-program values.
+the scheduled time coordinate and run metadata.
 
 Set `outputs.solver_incidence_matrix: true` to write solver sparsity artifacts
 after DAETools initializes the model. The run writes a labelled CSV edge list
@@ -476,6 +536,7 @@ things:
 - unknown reaction IDs,
 - reactions that require unselected species,
 - unknown report IDs,
+- unknown plot IDs and missing plot report dependencies,
 - missing or unknown kinetics hooks during simulation assembly.
 
 Use `--validate-only` after editing inputs or adding new model components.

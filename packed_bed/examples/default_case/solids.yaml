@@ -9,7 +9,7 @@ initial_profile:
       x_end_m: 6.0
       e_b: 0.5
       e_p: 0.5
-      d_p: 0.0012
+      d_p: 0.012
       values:
         Ni: 1613.73
         NiO: 0.0

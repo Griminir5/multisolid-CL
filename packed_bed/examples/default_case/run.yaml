@@ -18,13 +18,20 @@ model:
   ambient_temperature_k: 873.15
   heat_transfer_coefficient_w_per_m2_k: 0.0
 solver:
-  name: trilinos_klu
+  name: superlu
   threads: 0
-  relative_tolerance: 1.0e-5
+  relative_tolerance: 1.0e-3
+  suppress_algebraic_errors: true
+  max_nonlinear_iterations: 12
+  nonlinear_convergence_coefficient: 1.0
 outputs:
   directory: output
   artifacts_directory: output/artifacts
-  solver_incidence_matrix: true
+  solver_incidence_matrix: false
+  requested_plots:
+    - axial_profiles
+    - outlet_composition
+    - outlet_conditions
   requested_reports:
     - temperature
     - pressure

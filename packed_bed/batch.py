@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 import hashlib
 import itertools
+import json
 import math
 import multiprocessing as mp
 from pathlib import Path
@@ -134,7 +135,6 @@ class BatchSpec(BatchConfigModel):
     output_directory: ConfigString
     case_timeout_s: float | None = None
     artifacts: bool = False
-    plots: bool = False
     programs: dict[ConfigString, ConfigString] = Field(default_factory=dict)
     geometries: dict[ConfigString, GeometryPreset] = Field(default_factory=dict)
     axes: tuple[BatchAxis, ...]
@@ -219,6 +219,8 @@ class BatchCaseRecord:
     runtime_s: float | None = None
     output_directory: Path | None = None
     balance_errors: dict[str, Any] = field(default_factory=dict)
+    plot_status: str = "not_requested"
+    plot_errors: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -235,6 +237,10 @@ class BatchResult:
     @property
     def failed_count(self) -> int:
         return sum(1 for record in self.records if record.status.endswith("_failed"))
+
+    @property
+    def plot_failed_count(self) -> int:
+        return sum(1 for record in self.records if record.plot_errors)
 
 
 def load_batch_spec(batch_yaml_path: str | Path) -> BatchDocument:
@@ -476,6 +482,8 @@ def _write_records_csv(
         "run_yaml",
         "runtime_s",
         "output_directory",
+        "plot_status",
+        "plot_errors",
         "heat_balance_max_abs_error",
         "heat_balance_time_s",
         "heat_balance_unit",
@@ -504,6 +512,8 @@ def _write_records_csv(
                         if record.output_directory is None
                         else str(record.output_directory)
                     ),
+                    "plot_status": record.plot_status,
+                    "plot_errors": json.dumps(record.plot_errors, sort_keys=True),
                     "heat_balance_max_abs_error": _balance_field(
                         record, "heat", "max_abs_error"
                     ),
@@ -522,37 +532,39 @@ def _run_case_direct(
     case: Case,
     generate_artifacts_fn: Callable[[Case], dict[str, Path]] | None,
     run_case_fn: Callable[..., RunResult],
-    *,
-    render_plots: bool,
-) -> tuple[Path, dict[str, Any]]:
+) -> tuple[Path, dict[str, Any], str, dict[str, str]]:
     artifact_paths = generate_artifacts_fn(case) if generate_artifacts_fn is not None else {}
     result = run_case_fn(
         case,
         artifact_paths=artifact_paths,
-        render_plots=render_plots,
     )
-    return result.output_directory, dict(result.balance_errors)
+    return (
+        result.output_directory,
+        dict(result.balance_errors),
+        result.plot_status,
+        dict(result.plot_errors),
+    )
 
 
 def _run_case_worker(
     case: Case,
     generate_artifacts_fn,
     run_case_fn,
-    render_plots: bool,
     result_queue,
 ) -> None:
     try:
-        output_directory, balance_errors = _run_case_direct(
+        output_directory, balance_errors, plot_status, plot_errors = _run_case_direct(
             case,
             generate_artifacts_fn,
             run_case_fn,
-            render_plots=render_plots,
         )
         result_queue.put(
             {
                 "ok": True,
                 "output_directory": output_directory,
                 "balance_errors": balance_errors,
+                "plot_status": plot_status,
+                "plot_errors": plot_errors,
             }
         )
     except Exception as exc:
@@ -564,15 +576,13 @@ def _run_case_with_timeout(
     generate_artifacts_fn,
     run_case_fn,
     timeout_s: float,
-    *,
-    render_plots: bool,
-) -> tuple[Path, dict[str, Any]]:
+) -> tuple[Path, dict[str, Any], str, dict[str, str]]:
     timeout_s = _coerce_case_timeout_s(timeout_s) or 0.0
     context = mp.get_context()
     result_queue = context.Queue(maxsize=1)
     process = context.Process(
         target=_run_case_worker,
-        args=(case, generate_artifacts_fn, run_case_fn, render_plots, result_queue),
+        args=(case, generate_artifacts_fn, run_case_fn, result_queue),
     )
     try:
         process.start()
@@ -603,7 +613,12 @@ def _run_case_with_timeout(
         result_queue.close()
 
     if payload.get("ok"):
-        return Path(payload["output_directory"]), dict(payload["balance_errors"])
+        return (
+            Path(payload["output_directory"]),
+            dict(payload["balance_errors"]),
+            str(payload["plot_status"]),
+            dict(payload["plot_errors"]),
+        )
     raise BatchCaseWorkerError(str(payload.get("error", "Batch case worker failed.")))
 
 
@@ -658,7 +673,7 @@ def run_batch_file(
     _write_case_files(expanded_cases)
 
     if generate_artifacts_fn is None and document.spec.artifacts:
-        from .plots import generate_artifacts
+        from .artifacts import generate_artifacts
 
         generate_artifacts_fn = generate_artifacts
     if run_case_fn is None:
@@ -672,22 +687,22 @@ def run_batch_file(
         start = perf_counter()
         try:
             if timeout_s is None:
-                output_directory, balance_errors = _run_case_direct(
+                output_directory, balance_errors, plot_status, plot_errors = _run_case_direct(
                     case,
                     generate_artifacts_fn,
                     run_case_fn,
-                    render_plots=document.spec.plots,
                 )
             else:
-                output_directory, balance_errors = _run_case_with_timeout(
+                output_directory, balance_errors, plot_status, plot_errors = _run_case_with_timeout(
                     case,
                     generate_artifacts_fn,
                     run_case_fn,
                     timeout_s,
-                    render_plots=document.spec.plots,
                 )
             record.output_directory = output_directory
             record.balance_errors = balance_errors
+            record.plot_status = plot_status
+            record.plot_errors = plot_errors
             record.status = "success"
         except BatchCaseTimeoutError as exc:
             record.status = "timeout_failed"

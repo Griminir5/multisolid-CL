@@ -59,6 +59,7 @@ def _case_documents(
             "outputs": {
                 "directory": "output",
                 "artifacts_directory": "output/artifacts",
+                "requested_plots": [],
                 "requested_reports": [],
             },
         },
@@ -134,6 +135,45 @@ def test_interior_flow_mode_defaults_to_forward_only_and_accepts_reversible(
 
     assert default_case.run.simulation.interior_flow_mode == "forward_only"
     assert reversible_case.run.simulation.interior_flow_mode == "reversible"
+
+
+def test_solver_controls_default_to_daetools_values_and_accept_tuning(
+    tmp_path: Path,
+) -> None:
+    default_directory = tmp_path / "default"
+    default_directory.mkdir()
+    default_case = load_case(_write_case(default_directory, _case_documents()))
+
+    assert default_case.run.solver.model_dump() == {
+        "name": "trilinos_klu",
+        "threads": 0,
+        "relative_tolerance": 1.0e-5,
+        "suppress_algebraic_errors": False,
+        "max_nonlinear_iterations": 4,
+        "nonlinear_convergence_coefficient": 0.33,
+    }
+
+    documents = _case_documents()
+    documents["run.yaml"]["solver"].update(
+        name="superlu",
+        threads=2,
+        relative_tolerance=1.0e-3,
+        suppress_algebraic_errors=True,
+        max_nonlinear_iterations=12,
+        nonlinear_convergence_coefficient=1.0,
+    )
+    tuned_directory = tmp_path / "tuned"
+    tuned_directory.mkdir()
+    tuned_case = load_case(_write_case(tuned_directory, documents))
+
+    assert tuned_case.run.solver.model_dump() == {
+        "name": "superlu",
+        "threads": 2,
+        "relative_tolerance": 1.0e-3,
+        "suppress_algebraic_errors": True,
+        "max_nonlinear_iterations": 12,
+        "nonlinear_convergence_coefficient": 1.0,
+    }
 
 
 def test_load_case_is_side_effect_free(tmp_path: Path) -> None:
@@ -258,6 +298,10 @@ def test_component_reaction_and_report_references_are_aggregated(tmp_path: Path)
     }
     documents["program.yaml"]["inlet_composition"]["initial"] = {"MysteryGas": 1.0}
     documents["run.yaml"]["outputs"]["requested_reports"] = ["mystery_report"]
+    documents["run.yaml"]["outputs"]["requested_plots"] = [
+        "mystery_plot",
+        "outlet_conditions",
+    ]
     run_path = _write_case(tmp_path, documents)
 
     with pytest.raises(PackedBedValidationError) as caught:
@@ -267,6 +311,8 @@ def test_component_reaction_and_report_references_are_aggregated(tmp_path: Path)
     assert "Unknown gas species 'MysteryGas'" in message
     assert "chemistry.reaction_ids contains unknown id 'mystery_reaction'" in message
     assert "run.outputs.requested_reports contains unknown ids: mystery_report" in message
+    assert "run.outputs.requested_plots contains unknown ids: mystery_plot" in message
+    assert "'outlet_conditions' requires requested_reports: gas_flux, pressure, temperature" in message
 
 
 def test_reaction_rate_report_requires_a_selected_reaction(tmp_path: Path) -> None:
@@ -275,6 +321,26 @@ def test_reaction_rate_report_requires_a_selected_reaction(tmp_path: Path) -> No
 
     with pytest.raises(PackedBedValidationError, match="requires at least one selected reaction"):
         load_case(_write_case(tmp_path, documents))
+
+
+def test_requested_plots_is_required_and_unique(tmp_path: Path) -> None:
+    missing = _case_documents()
+    missing["run.yaml"]["outputs"].pop("requested_plots")
+    missing_directory = tmp_path / "missing"
+    missing_directory.mkdir()
+    with pytest.raises(PackedBedValidationError, match="run.outputs.requested_plots"):
+        load_case(_write_case(missing_directory, missing))
+
+    duplicate = _case_documents()
+    duplicate["run.yaml"]["outputs"]["requested_plots"] = [
+        "axial_profiles",
+        "axial_profiles",
+    ]
+    duplicate["run.yaml"]["outputs"]["requested_reports"] = ["temperature", "pressure"]
+    duplicate_directory = tmp_path / "duplicate"
+    duplicate_directory.mkdir()
+    with pytest.raises(PackedBedValidationError, match="contains duplicates: axial_profiles"):
+        load_case(_write_case(duplicate_directory, duplicate))
 
 
 def test_unknown_reaction_family_uses_configuration_path(tmp_path: Path) -> None:

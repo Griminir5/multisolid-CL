@@ -1,4 +1,4 @@
-"""Result selection, labelled extraction, durable output, balances, and provenance."""
+"""Selected result extraction, NetCDF output, summaries, and provenance."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ import json
 from pathlib import Path
 import platform
 import subprocess
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Callable, Mapping
 
 import numpy as np
 
 from .config import Case
-from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S
 
 
 RESULTS_FILENAME = "results.nc"
@@ -24,54 +24,207 @@ FLOW_ATOL = 1.0e-12
 
 
 @dataclass(frozen=True)
+class ModelField:
+    source: str
+    output: str
+    dimensions: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class OutputField:
+    name: str
+    dimensions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ReportSpec:
-    model_variables: tuple[str, ...]
+    description: str
+    fields: tuple[ModelField, ...] = ()
+    support: tuple[ModelField, ...] = ()
+    derived: tuple[OutputField, ...] = ()
+    derive: Callable[[Any, Mapping[str, Any], Case], None] | None = None
     requires_reactions: bool = False
 
+    @property
+    def model_variables(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(field.source for field in (*self.fields, *self.support)))
 
-REPORT_SPECS = {
-    "temperature": ReportSpec(("temp_bed",)),
-    "pressure": ReportSpec(("pres_bed",)),
-    "velocity": ReportSpec(("u_s",)),
-    "gas_concentration": ReportSpec(("c_gas",)),
-    "gas_mole_fraction": ReportSpec(("y_gas",)),
-    "solid_concentration": ReportSpec(("c_sol",)),
-    "solid_mole_fraction": ReportSpec(("c_sol",)),
-    "gas_flux": ReportSpec(("N_gas_face",)),
-    "reaction_rate": ReportSpec(("R_rxn",), requires_reactions=True),
-    "gas_enthalpy_flux": ReportSpec(("J_gas_face",)),
+    @property
+    def outputs(self) -> tuple[OutputField, ...]:
+        direct = tuple(
+            OutputField(field.output, ("time", *field.dimensions))
+            for field in self.fields
+        )
+        return (*direct, *self.derived)
+
+
+def _derive_temperature(dataset, _raw, _case) -> None:
+    dataset["outlet_temperature"] = dataset.temperature.isel(x_cell=-1, drop=True)
+    dataset.outlet_temperature.attrs = {
+        "units": dataset.temperature.attrs.get("units", "K"),
+        "derived_from": "temperature[x_cell=-1]",
+    }
+
+
+def _derive_pressure(dataset, _raw, _case) -> None:
+    dataset["pressure_drop"] = dataset.inlet_pressure - dataset.outlet_pressure
+    dataset.pressure_drop.attrs = {
+        "units": "Pa",
+        "derived_from": "inlet_pressure - outlet_pressure",
+    }
+
+
+def _derive_outlet_composition(dataset, raw, _case) -> None:
+    outlet_flux = raw["N_gas_face"].isel(x_face=-1, drop=True)
+    total_flux = outlet_flux.sum("gas_species")
+    fallback = dataset.gas_mole_fraction.isel(x_cell=-1, drop=True)
+    flowing = abs(total_flux) > FLOW_ATOL
+    fraction = outlet_flux / total_flux.where(flowing, 1.0)
+    dataset["outlet_composition"] = fraction.where(flowing, fallback)
+    dataset.outlet_composition.attrs = {
+        "units": "1",
+        "derived_from": "outlet gas flux; final-cell mole fraction at zero flow",
+    }
+
+
+def _derive_solid_mole_fraction(dataset, raw, _case) -> None:
+    concentration = raw["c_sol"]
+    total = concentration.sum("solid_species")
+    present = total > 0.0
+    fraction = concentration / total.where(present, 1.0)
+    dataset["solid_mole_fraction"] = fraction.where(present, 0.0)
+    dataset.solid_mole_fraction.attrs = {
+        "units": "1",
+        "derived_from": "c_sol",
+    }
+
+
+def _derive_gas_flux(dataset, _raw, case) -> None:
+    area = np.pi * case.run.model.bed_radius_m**2
+    dataset["outlet_species_flow"] = area * dataset.gas_flux.isel(x_face=-1, drop=True)
+    dataset.outlet_species_flow.attrs = {
+        "units": "mol/s",
+        "derived_from": "gas_flux[x_face=-1]",
+    }
+    dataset["outlet_flow"] = dataset.outlet_species_flow.sum("gas_species")
+    dataset.outlet_flow.attrs = {
+        "units": "mol/s",
+        "derived_from": "outlet_species_flow",
+    }
+
+
+def _derive_heat_balance(dataset, _raw, _case) -> None:
+    dataset["heat_balance_error"] = (
+        dataset.heat_bed_total
+        - dataset.heat_bed_total.isel(time=0)
+        - dataset.heat_in_total
+        + dataset.heat_out_total
+        + dataset.heat_loss_total
+    )
+    dataset.heat_balance_error.attrs = {"units": "J", "derived_from": "heat totals"}
+
+
+def _derive_mass_balance(dataset, _raw, _case) -> None:
+    dataset["mass_balance_error"] = (
+        dataset.mass_bed_total
+        - dataset.mass_bed_total.isel(time=0)
+        - dataset.mass_in_total
+        + dataset.mass_out_total
+    )
+    dataset.mass_balance_error.attrs = {"units": "kg", "derived_from": "mass totals"}
+
+
+def _field(source: str, output: str, *dimensions: str) -> ModelField:
+    return ModelField(source, output, dimensions)
+
+
+def _output(name: str, *dimensions: str) -> OutputField:
+    return OutputField(name, ("time", *dimensions))
+
+
+REPORT_REGISTRY: Mapping[str, ReportSpec] = MappingProxyType({
+    "temperature": ReportSpec(
+        "Inlet, cell-centre, and outlet temperature.",
+        (_field("T_in", "inlet_temperature"), _field("temp_bed", "temperature", "x_cell")),
+        derived=(_output("outlet_temperature"),),
+        derive=_derive_temperature,
+    ),
+    "pressure": ReportSpec(
+        "Inlet, cell-centre, outlet, and drop pressure.",
+        (
+            _field("P_in", "inlet_pressure"),
+            _field("pres_bed", "pressure", "x_cell"),
+            _field("P_out", "outlet_pressure"),
+        ),
+        derived=(_output("pressure_drop"),),
+        derive=_derive_pressure,
+    ),
+    "velocity": ReportSpec(
+        "Face superficial velocity.",
+        (_field("u_s", "velocity", "x_face"),),
+    ),
+    "gas_concentration": ReportSpec(
+        "Gas concentration by species and cell.",
+        (_field("c_gas", "gas_concentration", "gas_species", "x_cell"),),
+    ),
+    "gas_mole_fraction": ReportSpec(
+        "Inlet, cell-centre, and outlet gas mole fraction.",
+        (
+            _field("y_in", "inlet_composition", "gas_species"),
+            _field("y_gas", "gas_mole_fraction", "gas_species", "x_cell"),
+        ),
+        support=(_field("N_gas_face", "", "gas_species", "x_face"),),
+        derived=(_output("outlet_composition", "gas_species"),),
+        derive=_derive_outlet_composition,
+    ),
+    "solid_concentration": ReportSpec(
+        "Solid concentration by species and cell.",
+        (_field("c_sol", "solid_concentration", "solid_species", "x_cell"),),
+    ),
+    "solid_mole_fraction": ReportSpec(
+        "Derived solid mole fraction by species and cell.",
+        support=(_field("c_sol", "", "solid_species", "x_cell"),),
+        derived=(_output("solid_mole_fraction", "solid_species", "x_cell"),),
+        derive=_derive_solid_mole_fraction,
+    ),
+    "gas_flux": ReportSpec(
+        "Inlet flow and face gas flux with outlet flows.",
+        (
+            _field("F_in", "inlet_flow"),
+            _field("N_gas_face", "gas_flux", "gas_species", "x_face"),
+        ),
+        derived=(
+            _output("outlet_species_flow", "gas_species"),
+            _output("outlet_flow"),
+        ),
+        derive=_derive_gas_flux,
+    ),
+    "reaction_rate": ReportSpec(
+        "Reaction rate by reaction and cell.",
+        (_field("R_rxn", "reaction_rate", "reaction", "x_cell"),),
+        requires_reactions=True,
+    ),
+    "gas_enthalpy_flux": ReportSpec(
+        "Gas enthalpy flux by species and face.",
+        (_field("J_gas_face", "gas_enthalpy_flux", "gas_species", "x_face"),),
+    ),
     "heat_balance": ReportSpec(
-        ("heat_in_total", "heat_out_total", "heat_loss_total", "heat_bed_total"),
+        "Integral heat totals and balance error.",
+        tuple(_field(name, name) for name in (
+            "heat_in_total", "heat_out_total", "heat_loss_total", "heat_bed_total"
+        )),
+        derived=(_output("heat_balance_error"),),
+        derive=_derive_heat_balance,
     ),
     "mass_balance": ReportSpec(
-        ("mass_in_total", "mass_out_total", "mass_bed_total"),
+        "Integral mass totals and balance error.",
+        tuple(_field(name, name) for name in (
+            "mass_in_total", "mass_out_total", "mass_bed_total"
+        )),
+        derived=(_output("mass_balance_error"),),
+        derive=_derive_mass_balance,
     ),
-}
-
-PLOT_REPORT_IDS = ("temperature", "pressure", "gas_mole_fraction", "gas_flux")
-PLOT_EXTRA_VARIABLES = ("P_in", "P_out")
-
-# model variable: (dataset variable, non-time dimensions)
-MODEL_VARIABLES = {
-    "temp_bed": ("temperature", ("x_cell",)),
-    "pres_bed": ("pressure", ("x_cell",)),
-    "u_s": ("velocity", ("x_face",)),
-    "c_gas": ("gas_concentration", ("gas_species", "x_cell")),
-    "y_gas": ("gas_mole_fraction", ("gas_species", "x_cell")),
-    "c_sol": ("solid_concentration", ("solid_species", "x_cell")),
-    "N_gas_face": ("gas_flux", ("gas_species", "x_face")),
-    "R_rxn": ("reaction_rate", ("reaction", "x_cell")),
-    "J_gas_face": ("gas_enthalpy_flux", ("gas_species", "x_face")),
-    "heat_in_total": ("heat_in_total", ()),
-    "heat_out_total": ("heat_out_total", ()),
-    "heat_loss_total": ("heat_loss_total", ()),
-    "heat_bed_total": ("heat_bed_total", ()),
-    "mass_in_total": ("mass_in_total", ()),
-    "mass_out_total": ("mass_out_total", ()),
-    "mass_bed_total": ("mass_bed_total", ()),
-    "P_in": ("inlet_pressure", ()),
-    "P_out": ("outlet_pressure", ()),
-}
+})
 
 
 @dataclass(frozen=True)
@@ -89,43 +242,50 @@ class RunResult:
     results_path: Path | None = None
     manifest_path: Path | None = None
     runtime_s: float | None = None
-    dataset: Any | None = None
     balance_errors: dict[str, BalanceError] = field(default_factory=dict)
     artifact_paths: dict[str, Path] = field(default_factory=dict)
+    plot_errors: dict[str, str] = field(default_factory=dict)
     reporter: Any | None = None
 
+    @property
+    def plot_status(self) -> str:
+        requested = self.case.run.outputs.requested_plots
+        if not requested:
+            return "not_requested"
+        succeeded = sum(plot_id in self.artifact_paths for plot_id in requested)
+        if not self.plot_errors:
+            return "success"
+        return "partial_failure" if succeeded else "failed"
 
-def reporting_targets(
-    report_ids,
-    *,
-    include_plot_variables: bool = False,
-) -> tuple[str, ...]:
-    selected = [*report_ids, *(PLOT_REPORT_IDS if include_plot_variables else ())]
-    variables = [
+
+def _selected_specs(case: Case) -> tuple[ReportSpec, ...]:
+    return tuple(REPORT_REGISTRY[report_id] for report_id in case.run.outputs.requested_reports)
+
+
+def reporting_targets(report_ids) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(
         variable
-        for report_id in selected
-        for variable in REPORT_SPECS[report_id].model_variables
-    ]
-    if include_plot_variables:
-        variables.extend(PLOT_EXTRA_VARIABLES)
-    return tuple(dict.fromkeys(variables))
+        for report_id in report_ids
+        for variable in REPORT_REGISTRY[report_id].model_variables
+    ))
 
 
-def _find_variable(process, variable_name: str):
+def _find_variable(process, name: str):
     matches = [
         variable
-        for name, variable in process.dictVariables.items()
-        if name == variable_name or name.endswith(f".{variable_name}")
+        for qualified_name, variable in process.dictVariables.items()
+        if qualified_name == name or qualified_name.endswith(f".{name}")
     ]
-    if len(matches) > 1:
-        raise ValueError(f"Reporter contains multiple variables named '{variable_name}'.")
-    return matches[0] if matches else None
+    if len(matches) != 1:
+        qualifier = "no" if not matches else "multiple"
+        raise ValueError(f"Reporter contains {qualifier} variables named '{name}'.")
+    return matches[0]
 
 
 def _time_and_values(variable, label: str) -> tuple[np.ndarray, np.ndarray]:
     time = np.asarray(variable.TimeValues, dtype=float).reshape(-1)
     values = np.asarray(variable.Values, dtype=float)
-    if values.shape[0] != time.size:
+    if values.ndim == 0 or values.shape[0] != time.size:
         raise ValueError(f"{label} values do not align with their time coordinate.")
     if np.any(np.diff(time) < -TIME_ATOL):
         raise ValueError(f"{label} time coordinates must be non-decreasing.")
@@ -135,174 +295,97 @@ def _time_and_values(variable, label: str) -> tuple[np.ndarray, np.ndarray]:
     return time[keep], values[keep]
 
 
-def _dimension_coordinate(case: Case, variable, dimension: str, index: int, size: int):
-    if dimension == "gas_species":
-        values = case.chemistry.gas_species
-    elif dimension == "solid_species":
-        values = case.solids.solid_species
-    elif dimension == "reaction":
-        values = case.chemistry.reaction_ids
+def _coordinate(case: Case, variable, dimension: str, index: int, size: int):
+    configured = {
+        "gas_species": case.chemistry.gas_species,
+        "solid_species": case.solids.solid_species,
+        "reaction": case.chemistry.reaction_ids,
+    }
+    if dimension in configured:
+        values = configured[dimension]
     else:
         domains = getattr(variable, "Domains", ())
         values = () if index >= len(domains) else getattr(domains[index], "Points", ())
     if len(values) != size:
         raise ValueError(
-            f"Reporter dimension '{dimension}' has size {size}, but {len(values)} labels were resolved."
+            f"Reporter dimension '{dimension}' has size {size}, "
+            f"but {len(values)} labels were resolved."
         )
     return np.asarray(values)
 
 
-def _sample_program(program, time: np.ndarray, smooth_ramp_width_s: float) -> np.ndarray:
-    return np.asarray([
-        program.value_at(float(value), smooth_ramp_width_s=smooth_ramp_width_s)
-        for value in time
-    ])
+def _scheduled_time(case: Case) -> np.ndarray:
+    interval = case.run.simulation.reporting_interval_s
+    horizon = case.run.simulation.time_horizon_s
+    time = interval * np.arange(int(np.floor(horizon / interval)) + 1)
+    if np.isclose(time[-1], horizon, rtol=0.0, atol=TIME_ATOL):
+        time[-1] = horizon
+    else:
+        time = np.append(time, horizon)
+    return time
 
 
-def extract_dataset(
-    process,
-    case: Case,
-    *,
-    smooth_ramp_width_s: float = DEFAULT_SMOOTH_RAMP_WIDTH_S,
-):
-    """Extract every known reported variable into one labelled xarray Dataset."""
+def extract_dataset(process, case: Case):
+    """Build exactly the requested labelled reports from a DAETools process."""
 
     import xarray as xr
 
-    data_vars: dict[str, Any] = {}
+    specs = _selected_specs(case)
+    fields: dict[str, ModelField] = {}
+    for field_spec in (field for spec in specs for field in (*spec.fields, *spec.support)):
+        previous = fields.setdefault(field_spec.source, field_spec)
+        if previous.dimensions != field_spec.dimensions:
+            raise RuntimeError(f"Conflicting dimensions declared for '{field_spec.source}'.")
+
+    raw: dict[str, Any] = {}
+    reference_time = None
     coordinates: dict[str, Any] = {}
-    reference_time: np.ndarray | None = None
-    for model_name, (dataset_name, dimensions) in MODEL_VARIABLES.items():
-        variable = _find_variable(process, model_name)
-        if variable is None:
-            continue
-        time, values = _time_and_values(variable, model_name)
+    for source, field_spec in fields.items():
+        variable = _find_variable(process, source)
+        time, values = _time_and_values(variable, source)
         if reference_time is None:
             reference_time = time
             coordinates["time"] = ("time", time, {"units": "s"})
         elif time.shape != reference_time.shape or not np.allclose(
             time, reference_time, rtol=0.0, atol=TIME_ATOL
         ):
-            raise ValueError(f"Reporter variable '{model_name}' has a different time coordinate.")
-        if values.ndim != len(dimensions) + 1:
+            raise ValueError(f"Reporter variable '{source}' has a different time coordinate.")
+        if values.ndim != len(field_spec.dimensions) + 1:
             raise ValueError(
-                f"Reporter variable '{model_name}' has shape {values.shape}; expected time plus {dimensions}."
+                f"Reporter variable '{source}' has shape {values.shape}; "
+                f"expected time plus {field_spec.dimensions}."
             )
-        for index, (dimension, size) in enumerate(zip(dimensions, values.shape[1:])):
-            resolved = _dimension_coordinate(case, variable, dimension, index, size)
+        variable_coords = {"time": time}
+        for index, (dimension, size) in enumerate(zip(field_spec.dimensions, values.shape[1:])):
+            resolved = _coordinate(case, variable, dimension, index, size)
             if dimension in coordinates and not np.array_equal(coordinates[dimension][1], resolved):
                 raise ValueError(f"Reporter variables disagree on coordinate '{dimension}'.")
             attributes = {"units": "m"} if dimension in {"x_cell", "x_face"} else {}
             coordinates[dimension] = (dimension, resolved, attributes)
-        units = str(getattr(variable, "Units", ""))
-        data_vars[dataset_name] = (
-            ("time", *dimensions),
+            variable_coords[dimension] = resolved
+        raw[source] = xr.DataArray(
             values,
-            {"units": units, "source_variable": model_name},
+            dims=("time", *field_spec.dimensions),
+            coords=variable_coords,
+            attrs={"units": str(getattr(variable, "Units", "")), "source_variable": source},
         )
 
     if reference_time is None:
-        interval = case.run.simulation.reporting_interval_s
-        horizon = case.run.simulation.time_horizon_s
-        reference_time = interval * np.arange(int(np.floor(horizon / interval)) + 1)
-        if np.isclose(reference_time[-1], horizon, rtol=0.0, atol=TIME_ATOL):
-            reference_time[-1] = horizon
-        else:
-            reference_time = np.append(reference_time, horizon)
+        reference_time = _scheduled_time(case)
         coordinates["time"] = ("time", reference_time, {"units": "s"})
-    coordinates.setdefault(
-        "gas_species",
-        ("gas_species", np.asarray(case.chemistry.gas_species)),
-    )
     dataset = xr.Dataset(
-        data_vars=data_vars,
-        coords=coordinates,
+        coords={"time": coordinates["time"]},
         attrs={
             "system_name": case.run.simulation.system_name,
             "selected_reports": ",".join(case.run.outputs.requested_reports),
         },
     )
-
-    requested_reports = set(case.run.outputs.requested_reports)
-    if "solid_concentration" in dataset and "solid_mole_fraction" in requested_reports:
-        total = dataset.solid_concentration.sum("solid_species")
-        dataset["solid_mole_fraction"] = xr.where(
-            total > 0.0,
-            dataset.solid_concentration / total,
-            0.0,
-        )
-        dataset.solid_mole_fraction.attrs = {"units": "1", "derived": "true"}
-    if "solid_concentration" in dataset and "solid_concentration" not in requested_reports:
-        dataset = dataset.drop_vars("solid_concentration")
-
-    time = dataset.time.values
-    dataset["inlet_flow"] = (
-        "time",
-        _sample_program(case.inlet_flow_program, time, smooth_ramp_width_s),
-        {"units": "mol/s", "derived": "program"},
-    )
-    dataset["inlet_temperature"] = (
-        "time",
-        _sample_program(case.inlet_temperature_program, time, smooth_ramp_width_s),
-        {"units": "K", "derived": "program"},
-    )
-    dataset["programmed_outlet_pressure"] = (
-        "time",
-        _sample_program(case.outlet_pressure_program, time, smooth_ramp_width_s),
-        {"units": "Pa", "derived": "program"},
-    )
-    dataset["inlet_composition"] = (
-        ("time", "gas_species"),
-        _sample_program(case.inlet_composition_program, time, smooth_ramp_width_s),
-        {"units": "1", "derived": "program"},
-    )
-
-    if "temperature" in dataset:
-        dataset["outlet_temperature"] = dataset.temperature.isel(x_cell=-1)
-    if "pressure" in dataset:
-        if "inlet_pressure" not in dataset:
-            dataset["inlet_pressure"] = dataset.pressure.isel(x_cell=0)
-        if "outlet_pressure" not in dataset:
-            dataset["outlet_pressure"] = dataset.programmed_outlet_pressure
-        dataset["pressure_drop"] = dataset.inlet_pressure - dataset.outlet_pressure
-        for name in ("inlet_pressure", "outlet_pressure", "pressure_drop"):
-            dataset[name].attrs = {"units": "Pa", "derived": "true"}
-    if "gas_flux" in dataset:
-        area = np.pi * case.run.model.bed_radius_m**2
-        dataset["outlet_species_flow"] = area * dataset.gas_flux.isel(x_face=-1)
-        dataset.outlet_species_flow.attrs = {"units": "mol/s", "derived": "true"}
-        dataset["outlet_flow"] = dataset.outlet_species_flow.sum("gas_species")
-        dataset.outlet_flow.attrs = {"units": "mol/s", "derived": "true"}
-        if "gas_mole_fraction" in dataset:
-            fallback = dataset.gas_mole_fraction.isel(x_cell=-1)
-            dataset["outlet_composition"] = xr.where(
-                abs(dataset.outlet_flow) > FLOW_ATOL,
-                dataset.outlet_species_flow / dataset.outlet_flow,
-                fallback,
-            )
-            dataset.outlet_composition.attrs = {"units": "1", "derived": "true"}
-
-    _add_balance_variables(dataset)
+    for spec in specs:
+        for field_spec in spec.fields:
+            dataset[field_spec.output] = raw[field_spec.source]
+        if spec.derive is not None:
+            spec.derive(dataset, raw, case)
     return dataset
-
-
-def _add_balance_variables(dataset) -> None:
-    if all(name in dataset for name in (
-        "heat_in_total", "heat_out_total", "heat_loss_total", "heat_bed_total"
-    )):
-        dataset["heat_balance_error"] = (
-            dataset.heat_bed_total - dataset.heat_bed_total.isel(time=0)
-            - dataset.heat_in_total + dataset.heat_out_total + dataset.heat_loss_total
-        )
-        dataset.heat_balance_error.attrs = {"units": "J", "derived": "true"}
-    if all(name in dataset for name in (
-        "mass_in_total", "mass_out_total", "mass_bed_total"
-    )):
-        dataset["mass_balance_error"] = (
-            dataset.mass_bed_total - dataset.mass_bed_total.isel(time=0)
-            - dataset.mass_in_total + dataset.mass_out_total
-        )
-        dataset.mass_balance_error.attrs = {"units": "kg", "derived": "true"}
 
 
 def write_dataset(dataset, path: str | Path) -> Path:
@@ -320,12 +403,8 @@ def load_dataset(path: str | Path):
     return xr.load_dataset(path, engine="scipy")
 
 
-def create_dataset_reporter(
-    case: Case,
-    *,
-    smooth_ramp_width_s: float = DEFAULT_SMOOTH_RAMP_WIDTH_S,
-):
-    """Create the DAETools adapter lazily so pure report metadata stays solver-free."""
+def create_dataset_reporter(case: Case):
+    """Create the lazy DAETools-to-NetCDF adapter."""
 
     from daetools.pyDAE import daeDataReporterLocal
 
@@ -335,7 +414,6 @@ def create_dataset_reporter(
             self.ProcessName = ""
             self.ConnectString = ""
             self.output_directory = Path(case.output_directory)
-            self.dataset = None
             self.results_path = None
             self.write_error = None
             self._connected = False
@@ -368,13 +446,8 @@ def create_dataset_reporter(
             return self._connected
 
         def write_outputs(self):
-            self.dataset = extract_dataset(
-                self.Process,
-                case,
-                smooth_ramp_width_s=smooth_ramp_width_s,
-            )
             self.results_path = write_dataset(
-                self.dataset,
+                extract_dataset(self.Process, case),
                 self.output_directory / RESULTS_FILENAME,
             )
             self._written = True
@@ -383,7 +456,12 @@ def create_dataset_reporter(
     return PackedBedDatasetReporter()
 
 
-def compute_balance_errors(dataset) -> dict[str, BalanceError]:
+def compute_balance_errors(dataset_or_path) -> dict[str, BalanceError]:
+    dataset = (
+        load_dataset(dataset_or_path)
+        if isinstance(dataset_or_path, (str, Path))
+        else dataset_or_path
+    )
     errors = {}
     for key, variable_name, unit in (
         ("heat", "heat_balance_error", "J"),
@@ -404,15 +482,12 @@ def compute_balance_errors(dataset) -> dict[str, BalanceError]:
 
 
 def format_balance_error_lines(balance_errors) -> tuple[str, ...]:
-    lines = []
-    for key in ("heat", "mass"):
-        error = balance_errors.get(key)
-        if error is not None:
-            lines.append(
-                f"largest {key} balance error: {error.max_abs_error:.6g} "
-                f"{error.unit} at t={error.time_s:.6g} s"
-            )
-    return tuple(lines)
+    return tuple(
+        f"largest {key} balance error: {error.max_abs_error:.6g} "
+        f"{error.unit} at t={error.time_s:.6g} s"
+        for key in ("heat", "mass")
+        if (error := balance_errors.get(key)) is not None
+    )
 
 
 def _sha256(path: Path) -> str:
@@ -444,31 +519,45 @@ def _git_state(path: Path) -> dict[str, Any]:
 
 def _package_versions() -> dict[str, str | None]:
     versions = {}
-    for name, distribution in (
-        ("xarray", "xarray"),
-        ("scipy", "scipy"),
-        ("daetools", "daetools"),
-    ):
+    for name in ("numpy", "xarray", "scipy", "matplotlib", "pydantic", "daetools"):
         try:
-            versions[name] = version(distribution)
+            versions[name] = version(name)
         except PackageNotFoundError:
             versions[name] = None
     return versions
 
 
-def _dataset_inventory(dataset) -> dict[str, Any]:
-    if dataset is None:
+def _dataset_inventory(path: Path | None) -> dict[str, Any]:
+    if path is None or not path.is_file():
         return {}
+    dataset = load_dataset(path)
     return {
         "dimensions": {name: int(size) for name, size in dataset.sizes.items()},
         "variables": {
-            name: {
-                "dimensions": list(variable.dims),
-                "units": variable.attrs.get("units", ""),
-            }
+            name: {"dimensions": list(variable.dims), "units": variable.attrs.get("units", "")}
             for name, variable in dataset.data_vars.items()
         },
     }
+
+
+def _compiled_programs(case: Case) -> dict[str, Any]:
+    return {
+        name: asdict(program)
+        for name, program in (
+            ("inlet_flow", case.inlet_flow_program),
+            ("inlet_composition", case.inlet_composition_program),
+            ("inlet_temperature", case.inlet_temperature_program),
+            ("outlet_pressure", case.outlet_pressure_program),
+        )
+    }
+
+
+def _normalized_program(case: Case) -> dict[str, Any]:
+    from .config.load import read_yaml_mapping
+    from .config.models import ProgramConfig
+
+    values = read_yaml_mapping(case.program_path, "program")
+    return ProgramConfig.model_validate(values).model_dump(mode="json")
 
 
 def write_run_manifest(
@@ -477,14 +566,23 @@ def write_run_manifest(
     failure_stage: str | None = None,
     traceback_text: str | None = None,
 ) -> Path:
-    """Write compact infrastructure provenance and an output inventory."""
+    """Write resolved provenance, output inventory, and post-processing status."""
 
     case = result.case
-    input_paths = (case.run_path, case.chemistry_path, case.program_path, case.solids_path)
-    outputs = {
-        "results": result.results_path,
-        **result.artifact_paths,
+    inputs = {
+        "run": case.run_path,
+        "chemistry": case.chemistry_path,
+        "program": case.program_path,
+        "solids": case.solids_path,
     }
+    outputs = {"results": result.results_path, **result.artifact_paths}
+    output_records = {
+        name: {"status": "success", "path": str(path), "sha256": _sha256(path)}
+        for name, path in outputs.items() if path is not None and path.is_file()
+    }
+    output_records.update(
+        {name: {"status": "failed", "error": error} for name, error in result.plot_errors.items()}
+    )
     manifest = {
         "status": result.status,
         "runtime_s": result.runtime_s,
@@ -495,35 +593,27 @@ def write_run_manifest(
             "git": _git_state(case.run_path.parent),
         },
         "configuration": {
-            "system_name": case.run.simulation.system_name,
-            "reaction_families": [family.name for family in case.reaction_families],
-            "reactions": list(case.chemistry.reaction_ids),
-            "gas_species": list(case.chemistry.gas_species),
-            "solid_species": list(case.solids.solid_species),
-            "mass_scheme": case.run.simulation.mass_scheme,
-            "heat_scheme": case.run.simulation.heat_scheme,
-            "axial_cells": case.run.model.axial_cells,
-            "solver": case.run.solver.name,
-            "threads": case.run.solver.threads,
-            "relative_tolerance": case.run.solver.relative_tolerance,
-            "requested_reports": list(case.run.outputs.requested_reports),
+            "run": case.run.model_dump(mode="json"),
+            "chemistry": case.chemistry.model_dump(mode="json"),
+            "program": _normalized_program(case),
+            "solids": case.solids.model_dump(mode="json"),
+            "compiled_programs": _compiled_programs(case),
         },
         "inputs": {
-            path.name: {"path": str(path), "sha256": _sha256(path)}
-            for path in input_paths if path.is_file()
-        },
-        "outputs": {
             name: {"path": str(path), "sha256": _sha256(path)}
-            for name, path in outputs.items() if path is not None and path.is_file()
+            for name, path in inputs.items() if path.is_file()
         },
-        "dataset": _dataset_inventory(result.dataset),
+        "outputs": output_records,
+        "dataset": _dataset_inventory(result.results_path),
         "balances": {name: asdict(error) for name, error in result.balance_errors.items()},
+        "plots": {
+            "requested": list(case.run.outputs.requested_plots),
+            "status": result.plot_status,
+            "errors": result.plot_errors,
+        },
     }
     if failure_stage is not None or traceback_text is not None:
-        manifest["failure"] = {
-            "stage": failure_stage,
-            "traceback": traceback_text,
-        }
+        manifest["failure"] = {"stage": failure_stage, "traceback": traceback_text}
     path = result.output_directory / MANIFEST_FILENAME
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -532,17 +622,9 @@ def write_run_manifest(
 
 
 __all__ = (
-    "BalanceError",
-    "MANIFEST_FILENAME",
-    "REPORT_SPECS",
-    "RESULTS_FILENAME",
-    "RunResult",
-    "compute_balance_errors",
-    "create_dataset_reporter",
-    "extract_dataset",
-    "format_balance_error_lines",
-    "load_dataset",
-    "reporting_targets",
-    "write_dataset",
-    "write_run_manifest",
+    "BalanceError", "ReportSpec", "RunResult",
+    "MANIFEST_FILENAME", "REPORT_REGISTRY", "RESULTS_FILENAME",
+    "compute_balance_errors", "format_balance_error_lines",
+    "create_dataset_reporter", "extract_dataset", "load_dataset",
+    "reporting_targets", "write_dataset", "write_run_manifest",
 )

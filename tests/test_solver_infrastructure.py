@@ -4,6 +4,7 @@ from dataclasses import replace
 from importlib.util import find_spec
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -64,14 +65,51 @@ def _with_reports(case, reports):
     return replace(case, run=case.run.model_copy(update={"outputs": outputs}))
 
 
+def _with_plots(case, plots):
+    outputs = case.run.outputs.model_copy(update={"requested_plots": tuple(plots)})
+    return replace(case, run=case.run.model_copy(update={"outputs": outputs}))
+
+
 def _with_interior_flow_mode(case, mode):
     simulation = case.run.simulation.model_copy(update={"interior_flow_mode": mode})
     return replace(case, run=case.run.model_copy(update={"simulation": simulation}))
 
 
 @pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
+def test_configure_idas_maps_every_per_case_control(monkeypatch) -> None:
+    import packed_bed.simulation as simulation_module
+
+    observed = {}
+
+    class RecordingConfig:
+        def SetBoolean(self, name, value):
+            observed[name] = value
+
+        def SetInteger(self, name, value):
+            observed[name] = value
+
+        def SetFloat(self, name, value):
+            observed[name] = value
+
+    monkeypatch.setattr(simulation_module, "daeGetConfig", RecordingConfig)
+    simulation_module.configure_idas(
+        SimpleNamespace(
+            suppress_algebraic_errors=True,
+            max_nonlinear_iterations=12,
+            nonlinear_convergence_coefficient=1.0,
+        )
+    )
+
+    assert observed == {
+        "daetools.IDAS.SuppressAlg": True,
+        "daetools.IDAS.MaxNonlinIters": 12,
+        "daetools.IDAS.NonlinConvCoef": 1.0,
+    }
+
+
+@pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
 def test_tiny_inert_case_preserves_equation_order_and_executes(tmp_path: Path) -> None:
-    from packed_bed.reports import create_dataset_reporter
+    from packed_bed.reports import create_dataset_reporter, load_dataset
     from packed_bed.simulation import PackedBedSimulation, execute_simulation
 
     case = _with_reports(
@@ -95,12 +133,13 @@ def test_tiny_inert_case_preserves_equation_order_and_executes(tmp_path: Path) -
     )
 
     assert reporter.results_path.is_file()
-    assert "solid_mole_fraction" in reporter.dataset
+    assert "solid_mole_fraction" in load_dataset(reporter.results_path)
     assert equation_names == EXPECTED_INERT_EQUATIONS
 
 
 @pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
 def test_ordinary_run_writes_one_dataset_and_manifest(tmp_path: Path) -> None:
+    from packed_bed.reports import load_dataset
     from packed_bed.simulation import run_case
 
     case = load_case(_write_inert_case(tmp_path))
@@ -109,16 +148,79 @@ def test_ordinary_run_writes_one_dataset_and_manifest(tmp_path: Path) -> None:
 
     assert result.status == "success"
     assert result.results_path.is_file()
-    assert result.dataset.gas_species.values.tolist() == ["N2"]
-    assert set(result.dataset.data_vars) == {
-        "inlet_flow",
-        "inlet_temperature",
-        "programmed_outlet_pressure",
-        "inlet_composition",
-    }
+    assert not hasattr(result, "dataset")
+    assert set(load_dataset(result.results_path).coords) == {"time"}
+    assert not load_dataset(result.results_path).data_vars
     assert result.balance_errors == {}
     assert manifest["status"] == "success"
     assert manifest["outputs"]["results"]["path"] == str(result.results_path)
+
+
+@pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
+def test_dae_plotter_retention_cannot_change_reports_or_netcdf(tmp_path: Path) -> None:
+    from packed_bed.reports import load_dataset
+    from packed_bed.simulation import run_case
+
+    ordinary_dir = tmp_path / "ordinary"
+    retained_dir = tmp_path / "retained"
+    ordinary_dir.mkdir()
+    retained_dir.mkdir()
+    ordinary_case = _with_reports(
+        load_case(_write_inert_case(ordinary_dir)),
+        ("gas_mole_fraction",),
+    )
+    retained_case = _with_reports(
+        load_case(_write_inert_case(retained_dir)),
+        ("gas_mole_fraction",),
+    )
+
+    ordinary = run_case(ordinary_case, property_registry=PROPERTY_REGISTRY)
+    retained = run_case(
+        retained_case,
+        property_registry=PROPERTY_REGISTRY,
+        retain_reporter=True,
+    )
+
+    assert ordinary.reporter is None
+    assert retained.reporter is not None
+    assert load_dataset(ordinary.results_path).identical(load_dataset(retained.results_path))
+
+
+@pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
+def test_plot_failure_preserves_successful_simulation_and_netcdf(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import packed_bed.plotting as plotting
+    from packed_bed.reports import load_dataset
+    from packed_bed.simulation import run_case
+
+    case = _with_plots(
+        _with_reports(load_case(_write_inert_case(tmp_path)), ("temperature", "pressure")),
+        ("axial_profiles",),
+    )
+
+    def fail(_dataset, _path):
+        raise RuntimeError("synthetic plot failure")
+
+    registry = dict(plotting.PLOT_REGISTRY)
+    registry["axial_profiles"] = replace(registry["axial_profiles"], render=fail)
+    monkeypatch.setattr(plotting, "PLOT_REGISTRY", registry)
+
+    result = run_case(case, property_registry=PROPERTY_REGISTRY)
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+
+    assert result.status == "success"
+    assert result.results_path.is_file()
+    assert {"temperature", "pressure"} <= set(load_dataset(result.results_path))
+    assert result.plot_status == "failed"
+    assert result.plot_errors == {"axial_profiles": "synthetic plot failure"}
+    assert manifest["status"] == "success"
+    assert manifest["plots"]["status"] == "failed"
+    assert manifest["outputs"]["axial_profiles"] == {
+        "status": "failed",
+        "error": "synthetic plot failure",
+    }
 
 
 @pytest.mark.parametrize(
@@ -155,7 +257,7 @@ def test_requested_balances_control_accounting_dae_size(
     accounting_equations,
 ) -> None:
     from packed_bed.incidence_matrix import collect_solver_incidence_matrix
-    from packed_bed.reports import create_dataset_reporter
+    from packed_bed.reports import create_dataset_reporter, load_dataset
     from packed_bed.simulation import PackedBedSimulation, execute_simulation
 
     case = _with_reports(load_case(_write_inert_case(tmp_path)), reports)
@@ -193,8 +295,9 @@ def test_requested_balances_control_accounting_dae_size(
         "mass_variables": "mass_balance" in reports,
         "heat_variables": "heat_balance" in reports,
     }
-    assert ("mass_balance_error" in reporter.dataset) == ("mass_balance" in reports)
-    assert ("heat_balance_error" in reporter.dataset) == ("heat_balance" in reports)
+    dataset = load_dataset(reporter.results_path)
+    assert ("mass_balance_error" in dataset) == ("mass_balance" in reports)
+    assert ("heat_balance_error" in dataset) == ("heat_balance" in reports)
 
 
 @pytest.mark.parametrize(

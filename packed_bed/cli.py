@@ -71,11 +71,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate the system, program, and initial-profile artifacts before the run.",
     )
     parser.add_argument(
-        "--plots",
-        action="store_true",
-        help="Capture plot variables and render the standard result plots after the run.",
-    )
-    parser.add_argument(
         "--dae-plotter",
         dest="launch_dae_plotter",
         action="store_true",
@@ -108,6 +103,8 @@ def _print_failed_batch_records(batch_result: BatchResult) -> None:
     for record in batch_result.records:
         if record.status.endswith("_failed"):
             print(f"{record.case_id}: {record.error}", file=sys.stderr)
+        for plot_id, error in record.plot_errors.items():
+            print(f"{record.case_id} plot '{plot_id}': {error}", file=sys.stderr)
 
 
 def _run_cli(argv: list[str]) -> int:
@@ -139,7 +136,7 @@ def _run_cli(argv: list[str]) -> int:
             f"Summary: {batch_result.summary_path}"
         )
         _print_failed_batch_records(batch_result)
-        return 1 if batch_result.failed_count else 0
+        return 1 if batch_result.failed_count or batch_result.plot_failed_count else 0
 
     args = build_parser().parse_args(argv)
     case = load_case(args.run_yaml)
@@ -149,7 +146,7 @@ def _run_cli(argv: list[str]) -> int:
 
     artifact_paths = {}
     if args.artifacts:
-        from .plots import generate_artifacts
+        from .artifacts import generate_artifacts
 
         artifact_paths = generate_artifacts(case)
     from .simulation import run_case
@@ -157,7 +154,7 @@ def _run_cli(argv: list[str]) -> int:
     run_result = run_case(
         case,
         artifact_paths=artifact_paths,
-        render_plots=args.plots or args.launch_dae_plotter,
+        retain_reporter=args.launch_dae_plotter,
     )
     print(f"Simulation took {run_result.runtime_s:.3f} seconds.")
 
@@ -165,10 +162,13 @@ def _run_cli(argv: list[str]) -> int:
 
     for line in format_balance_error_lines(run_result.balance_errors):
         print(line)
+    for plot_id, error in run_result.plot_errors.items():
+        print(f"plot '{plot_id}' failed: {error}", file=sys.stderr)
+    exit_code = 1 if run_result.plot_errors else 0
     if args.launch_dae_plotter:
         print("Opening DAETools plotter. Close the plotter window to exit.")
-        return launch_daetools_plotter(run_result)
-    return 0
+        return launch_daetools_plotter(run_result) or exit_code
+    return exit_code
 
 
 def main(argv=None) -> int:

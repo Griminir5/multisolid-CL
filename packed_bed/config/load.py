@@ -201,18 +201,23 @@ def validate_case(
     case: Case,
     *,
     property_registry=None,
-    report_variable_registry=None,
+    report_registry=None,
+    plot_registry=None,
 ) -> Case:
-    """Validate resolved component, reaction, property, and report references."""
+    """Validate resolved component, reaction, property, report, and plot references."""
 
     if property_registry is None:
         from packed_bed.properties import PROPERTY_REGISTRY
 
         property_registry = PROPERTY_REGISTRY
-    if report_variable_registry is None:
-        from packed_bed.reports import REPORT_SPECS
+    if report_registry is None:
+        from packed_bed.reports import REPORT_REGISTRY
 
-        report_variable_registry = REPORT_SPECS
+        report_registry = REPORT_REGISTRY
+    if plot_registry is None:
+        from packed_bed.plotting import PLOT_REGISTRY
+
+        plot_registry = PLOT_REGISTRY
 
     from packed_bed.reactions import build_reaction_network, reaction_catalog
 
@@ -264,7 +269,7 @@ def validate_case(
     unknown_reports = sorted(
         report_id
         for report_id in case.run.outputs.requested_reports
-        if report_id not in report_variable_registry
+        if report_id not in report_registry
     )
     if unknown_reports:
         errors.append(
@@ -274,8 +279,8 @@ def validate_case(
     unavailable_reports = sorted(
         report_id
         for report_id in case.run.outputs.requested_reports
-        if report_id in report_variable_registry
-        and getattr(report_variable_registry[report_id], "requires_reactions", False)
+        if report_id in report_registry
+        and report_registry[report_id].requires_reactions
         and not case.chemistry.reaction_ids
     )
     if unavailable_reports:
@@ -283,6 +288,27 @@ def validate_case(
             "run.outputs.requested_reports requires at least one selected reaction for: "
             f"{', '.join(unavailable_reports)}."
         )
+
+    requested_reports = set(case.run.outputs.requested_reports)
+    unknown_plots = sorted(
+        plot_id
+        for plot_id in case.run.outputs.requested_plots
+        if plot_id not in plot_registry
+    )
+    if unknown_plots:
+        errors.append(
+            "run.outputs.requested_plots contains unknown ids: "
+            f"{', '.join(unknown_plots)}."
+        )
+    for plot_id in case.run.outputs.requested_plots:
+        if plot_id not in plot_registry:
+            continue
+        missing = sorted(set(plot_registry[plot_id].required_reports) - requested_reports)
+        if missing:
+            errors.append(
+                f"run.outputs.requested_plots '{plot_id}' requires requested_reports: "
+                f"{', '.join(missing)}."
+            )
 
     if errors:
         raise PackedBedValidationError("\n".join(errors))

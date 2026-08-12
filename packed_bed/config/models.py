@@ -164,12 +164,16 @@ class SolverConfig(ConfigModel):
     ] = "trilinos_klu"
     threads: int = Field(default=0, ge=0)
     relative_tolerance: PositiveFloat
+    suppress_algebraic_errors: bool = False
+    max_nonlinear_iterations: int = Field(default=4, ge=1)
+    nonlinear_convergence_coefficient: PositiveFloat = 0.33
 
 
 class OutputConfig(ConfigModel):
     directory: ConfigString
     artifacts_directory: ConfigString
     requested_reports: UniqueStringTuple
+    requested_plots: UniqueStringTuple
     solver_incidence_matrix: bool = False
 
 

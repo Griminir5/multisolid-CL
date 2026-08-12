@@ -118,6 +118,24 @@ def configure_threads(threads: int) -> None:
     )
 
 
+def configure_idas(solver_config) -> None:
+    """Apply per-case IDAS nonlinear and algebraic-error controls."""
+
+    daetools_config = daeGetConfig()
+    daetools_config.SetBoolean(
+        "daetools.IDAS.SuppressAlg",
+        solver_config.suppress_algebraic_errors,
+    )
+    daetools_config.SetInteger(
+        "daetools.IDAS.MaxNonlinIters",
+        solver_config.max_nonlinear_iterations,
+    )
+    daetools_config.SetFloat(
+        "daetools.IDAS.NonlinConvCoef",
+        solver_config.nonlinear_convergence_coefficient,
+    )
+
+
 def _configure_aztecoo_ifpack(linear_solver):
     from daetools.solvers.aztecoo_options import daeAztecOptions
 
@@ -153,13 +171,8 @@ def create_linear_solver(name: str):
 
 def _configure_reporting(
     simulation: PackedBedSimulation,
-    *,
-    include_plot_variables: bool,
 ) -> None:
-    variable_names = reporting_targets(
-        simulation.case.run.outputs.requested_reports,
-        include_plot_variables=include_plot_variables,
-    )
+    variable_names = reporting_targets(simulation.case.run.outputs.requested_reports)
     simulation.model.SetReportingOn(False)
     missing = [name for name in variable_names if name not in simulation.model.dictVariables]
     if missing:
@@ -175,7 +188,6 @@ def _configure_reporting(
 def execute_simulation(
     simulation: PackedBedSimulation,
     *,
-    include_plot_variables: bool = False,
     data_reporter=None,
     after_initialize=None,
 ):
@@ -183,10 +195,8 @@ def execute_simulation(
 
     case = simulation.case
     configure_threads(case.run.solver.threads)
-    _configure_reporting(
-        simulation,
-        include_plot_variables=include_plot_variables,
-    )
+    configure_idas(case.run.solver)
+    _configure_reporting(simulation)
     simulation.ReportTimeDerivatives = case.run.simulation.report_time_derivatives
     simulation.ReportingInterval = case.run.simulation.reporting_interval_s
     simulation.TimeHorizon = case.run.simulation.time_horizon_s
@@ -236,7 +246,7 @@ def run_case(
     property_registry=None,
     artifact_paths: dict[str, Path] | None = None,
     *,
-    render_plots: bool = False,
+    retain_reporter: bool = False,
 ) -> RunResult:
     """Run one resolved case and write its dataset and manifest."""
 
@@ -251,10 +261,7 @@ def run_case(
     result = None
     try:
         simulation = PackedBedSimulation(case, property_registry)
-        dataset_reporter = create_dataset_reporter(
-            case,
-            smooth_ramp_width_s=simulation.smooth_ramp_width_s,
-        )
+        dataset_reporter = create_dataset_reporter(case)
         after_initialize = None
         if case.run.outputs.solver_incidence_matrix:
             from .incidence_matrix import write_solver_incidence_artifacts
@@ -270,7 +277,6 @@ def run_case(
         stage = "solver execution"
         reporter = execute_simulation(
             simulation,
-            include_plot_variables=render_plots,
             data_reporter=dataset_reporter,
             after_initialize=after_initialize,
         )
@@ -279,21 +285,31 @@ def run_case(
             output_directory=case.output_directory,
             results_path=dataset_reporter.results_path,
             runtime_s=perf_counter() - started_at,
-            dataset=dataset_reporter.dataset,
             artifact_paths={**dict(artifact_paths or {}), **solver_artifacts},
-            reporter=reporter,
-            balance_errors=compute_balance_errors(dataset_reporter.dataset),
+            reporter=reporter if retain_reporter else None,
+            balance_errors=compute_balance_errors(dataset_reporter.results_path),
         )
-        if render_plots:
-            stage = "plotting"
-            from .plots import render_run_result_plots
+        if case.run.outputs.requested_plots:
+            from .plotting import _render_requested_plots
 
+            try:
+                plot_result = _render_requested_plots(
+                    dataset_reporter.results_path,
+                    case.run.outputs.requested_plots,
+                    case.artifacts_directory,
+                )
+            except Exception as exc:
+                plot_paths = {}
+                plot_errors = {
+                    plot_id: str(exc) for plot_id in case.run.outputs.requested_plots
+                }
+            else:
+                plot_paths = plot_result.paths
+                plot_errors = plot_result.errors
             result = replace(
                 result,
-                artifact_paths={
-                    **result.artifact_paths,
-                    **render_run_result_plots(result),
-                },
+                artifact_paths={**result.artifact_paths, **plot_paths},
+                plot_errors=plot_errors,
             )
         stage = "manifest writing"
         return replace(result, manifest_path=write_run_manifest(result))
@@ -308,7 +324,6 @@ def run_case(
                     status="failed",
                     runtime_s=perf_counter() - started_at,
                     results_path=getattr(dataset_reporter, "results_path", None),
-                    dataset=getattr(dataset_reporter, "dataset", None),
                     artifact_paths={
                         **dict(artifact_paths or {}),
                         **solver_artifacts,
@@ -328,6 +343,7 @@ def run_case(
 
 __all__ = (
     "PackedBedSimulation",
+    "configure_idas",
     "configure_threads",
     "create_linear_solver",
     "execute_simulation",

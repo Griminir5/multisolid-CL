@@ -276,19 +276,32 @@ def test_existing_case_output_is_rejected_before_a_run(tmp_path: Path) -> None:
     assert calls == []
 
 
-def test_batch_execution_uses_resolved_cases_and_explicit_render_options(tmp_path: Path) -> None:
+def test_batch_execution_uses_resolved_case_plot_selection_and_artifacts(tmp_path: Path) -> None:
     batch_path = _write_batch(
         tmp_path,
         [
             {
                 "id": "condition",
                 "values": [
-                    _patch_value("run", {"run": {"model": {"axial_cells": 4}}})
+                    _patch_value(
+                        "run",
+                        {
+                            "run": {
+                                "model": {"axial_cells": 4},
+                                "outputs": {
+                                    "requested_reports": [
+                                        "temperature",
+                                        "pressure",
+                                    ],
+                                    "requested_plots": ["axial_profiles"],
+                                },
+                            }
+                        },
+                    )
                 ],
             }
         ],
         artifacts=True,
-        plots=True,
     )
     artifact_calls = []
     run_calls = []
@@ -297,9 +310,13 @@ def test_batch_execution_uses_resolved_cases_and_explicit_render_options(tmp_pat
         artifact_calls.append(case)
         return {}
 
-    def fake_run(case, *, artifact_paths, render_plots):
-        run_calls.append((case, artifact_paths, render_plots))
-        return RunResult(case=case, output_directory=case.output_directory)
+    def fake_run(case, *, artifact_paths):
+        run_calls.append((case, artifact_paths))
+        return RunResult(
+            case=case,
+            output_directory=case.output_directory,
+            plot_errors={"axial_profiles": "synthetic plot failure"},
+        )
 
     result = run_batch_file(
         batch_path,
@@ -308,8 +325,12 @@ def test_batch_execution_uses_resolved_cases_and_explicit_render_options(tmp_pat
     )
 
     assert len(artifact_calls) == 1
-    assert run_calls == [(artifact_calls[0], {}, True)]
+    assert run_calls == [(artifact_calls[0], {})]
+    assert run_calls[0][0].run.outputs.requested_plots == ("axial_profiles",)
     assert result.records[0].status == "success"
+    assert result.records[0].plot_status == "failed"
+    assert result.plot_failed_count == 1
+    assert "synthetic plot failure" in result.summary_path.read_text()
     assert result.summary_path == (tmp_path / "output" / "summary.csv").resolve()
     assert result.summary_path.is_file()
     assert not (tmp_path / "output" / "manifest.csv").exists()
