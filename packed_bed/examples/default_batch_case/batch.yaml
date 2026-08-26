@@ -1,5 +1,6 @@
 base_case: base_case/run.yaml
 output_directory: output
+workers: 32
 
 programs:
   high_flow_cycle: programs/high_flow.yaml

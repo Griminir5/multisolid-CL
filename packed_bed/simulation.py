@@ -100,8 +100,12 @@ def configure_threads(threads: int) -> None:
     if threads > 0:
         value = str(threads)
         os.environ.update(
+            BLIS_NUM_THREADS=value,
             MKL_NUM_THREADS=value,
+            NUMEXPR_NUM_THREADS=value,
             OMP_NUM_THREADS=value,
+            OPENBLAS_NUM_THREADS=value,
+            VECLIB_MAXIMUM_THREADS=value,
             MKL_DYNAMIC="FALSE",
             OMP_DYNAMIC="FALSE",
         )

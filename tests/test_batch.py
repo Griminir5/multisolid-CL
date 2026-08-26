@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
+from time import perf_counter, sleep
 
 import pytest
 import yaml
@@ -23,6 +26,39 @@ BASE_CASE = (
     / "base_case"
     / "run.yaml"
 ).resolve()
+
+
+def _parallel_fake_run(case, **_kwargs):
+    started_at = perf_counter()
+    sleep(0.5)
+    case.output_directory.mkdir(parents=True, exist_ok=True)
+    (case.output_directory / "worker.json").write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "started_at": started_at,
+                "finished_at": perf_counter(),
+                "thread_limits": {
+                    name: os.environ.get(name)
+                    for name in (
+                        "BLIS_NUM_THREADS",
+                        "MKL_NUM_THREADS",
+                        "NUMEXPR_NUM_THREADS",
+                        "OMP_NUM_THREADS",
+                        "OPENBLAS_NUM_THREADS",
+                        "VECLIB_MAXIMUM_THREADS",
+                    )
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return RunResult(case=case, output_directory=case.output_directory)
+
+
+def _slow_fake_run(case, **_kwargs):
+    sleep(10.0)
+    return RunResult(case=case, output_directory=case.output_directory)
 
 
 def _write_batch(tmp_path: Path, axes: list[dict], **values) -> Path:
@@ -80,6 +116,9 @@ def test_structured_patches_merge_recursively_in_axis_order(tmp_path: Path) -> N
     assert expanded.run["model"]["axial_cells"] == 7
     assert expanded.run["model"]["ambient_temperature_k"] == 450.0
     assert expanded.run["model"]["bed_length_m"] == 6.0
+    assert expanded.run["simulation"]["system_name"] == (
+        "condition_unsafe_flow_high__refinement_fine"
+    )
     assert expanded.program["inlet_temperature"]["initial"] == 310.0
     assert expanded.program["inlet_temperature"]["steps"]
     assert expanded.case_directory.parent == (tmp_path / "output" / "cases").resolve()
@@ -156,6 +195,24 @@ def test_dotted_set_overrides_are_rejected(tmp_path: Path) -> None:
 
     assert "axes.0.values.0.set" in str(caught.value)
     assert "Extra inputs are not permitted" in str(caught.value)
+
+
+def test_workers_must_be_a_positive_integer(tmp_path: Path) -> None:
+    batch_path = _write_batch(
+        tmp_path,
+        [
+            {
+                "id": "condition",
+                "values": [
+                    _patch_value("value", {"run": {"model": {"axial_cells": 4}}})
+                ],
+            }
+        ],
+        workers=0,
+    )
+
+    with pytest.raises(BatchValidationError, match="workers.*positive integer"):
+        load_batch_spec(batch_path)
 
 
 def test_slug_collisions_are_rejected_before_materialization(tmp_path: Path) -> None:
@@ -334,3 +391,70 @@ def test_batch_execution_uses_resolved_case_plot_selection_and_artifacts(tmp_pat
     assert result.summary_path == (tmp_path / "output" / "summary.csv").resolve()
     assert result.summary_path.is_file()
     assert not (tmp_path / "output" / "manifest.csv").exists()
+
+
+def test_parallel_batch_runs_single_threaded_cases_in_overlapping_processes(
+    tmp_path: Path,
+) -> None:
+    batch_path = _write_batch(
+        tmp_path,
+        [
+            {
+                "id": "condition",
+                "values": [
+                    _patch_value("first", {"run": {"model": {"axial_cells": 4}}}),
+                    _patch_value("second", {"run": {"model": {"axial_cells": 5}}}),
+                ],
+            }
+        ],
+        workers=2,
+    )
+
+    result = run_batch_file(batch_path, run_case_fn=_parallel_fake_run)
+
+    assert result.workers == 2
+    assert [record.status for record in result.records] == ["success", "success"]
+    worker_details = [
+        json.loads((record.output_directory / "worker.json").read_text(encoding="utf-8"))
+        for record in result.records
+    ]
+    assert len({details["pid"] for details in worker_details}) == 2
+    assert all(
+        value == "1"
+        for details in worker_details
+        for value in details["thread_limits"].values()
+    )
+    assert max(details["started_at"] for details in worker_details) < min(
+        details["finished_at"] for details in worker_details
+    )
+    for record in result.records:
+        materialized_run = yaml.safe_load(record.run_yaml_path.read_text(encoding="utf-8"))
+        assert materialized_run["solver"]["threads"] == 1
+
+
+def test_parallel_case_timeouts_kill_each_worker_and_continue(tmp_path: Path) -> None:
+    batch_path = _write_batch(
+        tmp_path,
+        [
+            {
+                "id": "condition",
+                "values": [
+                    _patch_value("first", {"run": {"model": {"axial_cells": 4}}}),
+                    _patch_value("second", {"run": {"model": {"axial_cells": 5}}}),
+                ],
+            }
+        ],
+        workers=2,
+        case_timeout_s=0.1,
+    )
+
+    result = run_batch_file(batch_path, run_case_fn=_slow_fake_run)
+
+    assert [record.status for record in result.records] == [
+        "timeout_failed",
+        "timeout_failed",
+    ]
+    assert all("Timed out after 0.1 seconds" in record.error for record in result.records)
+    assert result.summary_path is not None
+    summary = result.summary_path.read_text(encoding="utf-8")
+    assert summary.count("timeout_failed") == 2

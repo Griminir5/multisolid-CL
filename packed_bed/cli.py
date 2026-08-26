@@ -22,6 +22,16 @@ def _positive_float(raw_value: str) -> float:
     return value
 
 
+def _positive_int(raw_value: str) -> int:
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer.") from exc
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be greater than zero.")
+    return value
+
+
 def launch_daetools_plotter(run_result: RunResult) -> int:
     reporter = run_result.reporter
     if reporter is None or not hasattr(reporter, "Process"):
@@ -96,6 +106,15 @@ def build_batch_parser() -> argparse.ArgumentParser:
         default=None,
         help="Kill an individual batch case if it runs longer than this many seconds.",
     )
+    parser.add_argument(
+        "--workers",
+        type=_positive_int,
+        default=None,
+        help=(
+            "Run up to this many simulations concurrently in single-threaded worker "
+            "processes; overrides batch.yaml."
+        ),
+    )
     return parser
 
 
@@ -114,6 +133,7 @@ def _run_cli(argv: list[str]) -> int:
             args.batch_yaml,
             validate_only=args.validate_only,
             case_timeout_s=args.case_timeout_s,
+            workers=args.workers,
         )
         passed = batch_result.total_count - batch_result.failed_count
         if args.validate_only:
@@ -133,7 +153,7 @@ def _run_cli(argv: list[str]) -> int:
         succeeded = sum(1 for record in batch_result.records if record.status == "success")
         print(
             f"Batch complete: {succeeded}/{batch_result.total_count} cases succeeded. "
-            f"Summary: {batch_result.summary_path}"
+            f"Workers: {batch_result.workers}. Summary: {batch_result.summary_path}"
         )
         _print_failed_batch_records(batch_result)
         return 1 if batch_result.failed_count or batch_result.plot_failed_count else 0

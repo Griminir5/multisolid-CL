@@ -78,6 +78,24 @@ single-case validation and execution path.
 python -m packed_bed batch packed_bed\examples\default_batch_case\batch.yaml
 ```
 
+Run independent simulations concurrently, with one single-threaded worker
+process per active case:
+
+```powershell
+python -m packed_bed batch packed_bed\examples\default_batch_case\batch.yaml --workers 8
+```
+
+The same setting can be stored as top-level `workers: 8` in `batch.yaml`; the
+CLI option overrides it. If omitted, the default is `1` (the bundled example
+sets it to `4`). When more than one worker is requested, every generated case
+is materialized with `solver.threads: 1`, and the worker also limits OpenMP,
+MKL, OpenBLAS, NumExpr, BLIS, and Accelerate to one thread before importing the
+numerical runtime. `workers` is capped at the number of cases, but is not capped
+at the machine's logical CPU count; choose a value no larger than the available
+CPUs and reduce it if solver memory becomes the limiting resource. Processes
+are not pinned to particular CPU IDs—the OS scheduler assigns each
+single-threaded simulation to a core.
+
 Expand and validate every generated case without creating directories,
 manifests, plots, or other files:
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
 import hashlib
@@ -8,6 +9,7 @@ import itertools
 import json
 import math
 import multiprocessing as mp
+import os
 from pathlib import Path
 from queue import Empty
 import re
@@ -25,7 +27,18 @@ from .reports import RunResult
 
 
 _PROCESS_TERMINATE_GRACE_S = 5.0
+_PROCESS_POLL_INTERVAL_S = 0.05
 _SLUG_UNSAFE_RE = re.compile(r"[^a-z0-9]+")
+_SINGLE_THREAD_ENVIRONMENT = {
+    "BLIS_NUM_THREADS": "1",
+    "MKL_DYNAMIC": "FALSE",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "OMP_DYNAMIC": "FALSE",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1",
+}
 
 
 class BatchValidationError(PackedBedValidationError):
@@ -73,6 +86,12 @@ def _coerce_case_timeout_s(value: Any, label: str = "case_timeout_s") -> float |
     if not math.isfinite(timeout_s) or timeout_s <= 0.0:
         raise ValueError(f"{label} must be a finite positive number of seconds.")
     return timeout_s
+
+
+def _coerce_workers(value: Any, label: str = "workers") -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{label} must be a positive integer.")
+    return value
 
 
 class BatchPatch(BatchConfigModel):
@@ -134,6 +153,7 @@ class BatchSpec(BatchConfigModel):
     base_case: ConfigString
     output_directory: ConfigString
     case_timeout_s: float | None = None
+    workers: int = 1
     artifacts: bool = False
     programs: dict[ConfigString, ConfigString] = Field(default_factory=dict)
     geometries: dict[ConfigString, GeometryPreset] = Field(default_factory=dict)
@@ -143,6 +163,11 @@ class BatchSpec(BatchConfigModel):
     @classmethod
     def validate_case_timeout_s(cls, value: Any) -> float | None:
         return _coerce_case_timeout_s(value)
+
+    @field_validator("workers", mode="before")
+    @classmethod
+    def validate_workers(cls, value: Any) -> int:
+        return _coerce_workers(value)
 
     @field_validator("axes", mode="before")
     @classmethod
@@ -229,6 +254,7 @@ class BatchResult:
     output_directory: Path
     summary_path: Path | None
     records: tuple[BatchCaseRecord, ...]
+    workers: int = 1
 
     @property
     def total_count(self) -> int:
@@ -327,7 +353,10 @@ def _force_case_run_fields(run: dict[str, Any], case_id: str) -> None:
         solids_file="solids.yaml",
     )
     simulation = _require_mapping(run.setdefault("simulation", {}), "run.simulation")
-    simulation["system_name"] = case_id
+    system_name = case_id.replace("-", "_")
+    if not system_name[0].isalpha():
+        system_name = f"case_{system_name}"
+    simulation["system_name"] = system_name
     outputs = _require_mapping(run.setdefault("outputs", {}), "run.outputs")
     outputs.update(directory="output", artifacts_directory="output/artifacts")
 
@@ -440,6 +469,12 @@ def _write_case_files(cases: tuple[ExpandedBatchCase, ...]) -> None:
         _write_yaml(case.case_directory / "solids.yaml", case.solids)
 
 
+def _force_single_threaded_cases(cases: tuple[ExpandedBatchCase, ...]) -> None:
+    for case in cases:
+        solver = _require_mapping(case.run.get("solver"), "run.solver")
+        solver["threads"] = 1
+
+
 def _check_output_collisions(
     document: BatchDocument,
     cases: tuple[ExpandedBatchCase, ...],
@@ -531,8 +566,12 @@ def _write_records_csv(
 def _run_case_direct(
     case: Case,
     generate_artifacts_fn: Callable[[Case], dict[str, Path]] | None,
-    run_case_fn: Callable[..., RunResult],
+    run_case_fn: Callable[..., RunResult] | None,
 ) -> tuple[Path, dict[str, Any], str, dict[str, str]]:
+    if run_case_fn is None:
+        from .simulation import run_case
+
+        run_case_fn = run_case
     artifact_paths = generate_artifacts_fn(case) if generate_artifacts_fn is not None else {}
     result = run_case_fn(
         case,
@@ -547,12 +586,19 @@ def _run_case_direct(
 
 
 def _run_case_worker(
-    case: Case,
+    run_yaml_path: Path,
+    single_threaded: bool,
     generate_artifacts_fn,
     run_case_fn,
     result_queue,
 ) -> None:
+    if single_threaded:
+        os.environ.update(_SINGLE_THREAD_ENVIRONMENT)
+        os.environ.setdefault("MKL_THREADING_LAYER", "GNU")
     try:
+        from .config import load_case
+
+        case = load_case(run_yaml_path)
         output_directory, balance_errors, plot_status, plot_errors = _run_case_direct(
             case,
             generate_artifacts_fn,
@@ -571,55 +617,174 @@ def _run_case_worker(
         result_queue.put({"ok": False, "error": str(exc)})
 
 
-def _run_case_with_timeout(
-    case: Case,
-    generate_artifacts_fn,
-    run_case_fn,
-    timeout_s: float,
-) -> tuple[Path, dict[str, Any], str, dict[str, str]]:
-    timeout_s = _coerce_case_timeout_s(timeout_s) or 0.0
-    context = mp.get_context()
-    result_queue = context.Queue(maxsize=1)
-    process = context.Process(
-        target=_run_case_worker,
-        args=(case, generate_artifacts_fn, run_case_fn, result_queue),
-    )
+@contextmanager
+def _single_threaded_worker_environment():
+    previous = {name: os.environ.get(name) for name in _SINGLE_THREAD_ENVIRONMENT}
+    threading_layer = os.environ.get("MKL_THREADING_LAYER")
+    os.environ.update(_SINGLE_THREAD_ENVIRONMENT)
+    os.environ.setdefault("MKL_THREADING_LAYER", "GNU")
     try:
-        process.start()
-        process.join(timeout_s)
-        if process.is_alive():
-            process.terminate()
-            process.join(_PROCESS_TERMINATE_GRACE_S)
-            if process.is_alive() and getattr(process, "kill", None) is not None:
-                process.kill()
-                process.join()
-            raise BatchCaseTimeoutError(f"Timed out after {timeout_s:g} seconds.")
-        try:
-            payload = result_queue.get(timeout=1.0)
-        except Empty as exc:
-            message = (
-                "Batch case worker finished without returning a result."
-                if process.exitcode == 0
-                else f"Batch case worker exited with code {process.exitcode}."
-            )
-            raise BatchCaseWorkerError(message) from exc
-    except (BatchCaseTimeoutError, BatchCaseWorkerError):
-        raise
-    except Exception as exc:
-        raise BatchCaseWorkerError(
-            "Could not start the batch case worker; custom functions must be picklable."
-        ) from exc
+        yield
     finally:
-        result_queue.close()
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        if threading_layer is None:
+            os.environ.pop("MKL_THREADING_LAYER", None)
+        else:
+            os.environ["MKL_THREADING_LAYER"] = threading_layer
 
-    if payload.get("ok"):
-        return (
-            Path(payload["output_directory"]),
-            dict(payload["balance_errors"]),
-            str(payload["plot_status"]),
-            dict(payload["plot_errors"]),
-        )
-    raise BatchCaseWorkerError(str(payload.get("error", "Batch case worker failed.")))
+
+@dataclass
+class _ActiveCaseWorker:
+    process: Any
+    result_queue: Any
+    record: BatchCaseRecord
+    started_at: float
+
+
+def _terminate_process(process) -> None:
+    if not process.is_alive():
+        process.join()
+        return
+    process.terminate()
+    process.join(_PROCESS_TERMINATE_GRACE_S)
+    if process.is_alive() and getattr(process, "kill", None) is not None:
+        process.kill()
+        process.join()
+
+
+def _close_worker(worker: _ActiveCaseWorker) -> None:
+    worker.result_queue.close()
+    close_process = getattr(worker.process, "close", None)
+    if close_process is not None:
+        close_process()
+
+
+def _apply_worker_payload(record: BatchCaseRecord, payload: dict[str, Any]) -> None:
+    if not payload.get("ok"):
+        raise BatchCaseWorkerError(str(payload.get("error", "Batch case worker failed.")))
+    record.output_directory = Path(payload["output_directory"])
+    record.balance_errors = dict(payload["balance_errors"])
+    record.plot_status = str(payload["plot_status"])
+    record.plot_errors = dict(payload["plot_errors"])
+    record.status = "success"
+
+
+def _run_cases_in_processes(
+    cases: tuple[Case, ...],
+    records: tuple[BatchCaseRecord, ...],
+    *,
+    workers: int,
+    timeout_s: float | None,
+    generate_artifacts_fn: Callable[[Case], dict[str, Path]] | None,
+    run_case_fn: Callable[..., RunResult] | None,
+) -> None:
+    context = mp.get_context("spawn")
+    pending = iter(zip(cases, records))
+    active: list[_ActiveCaseWorker] = []
+    exhausted = False
+    try:
+        while active or not exhausted:
+            while len(active) < workers and not exhausted:
+                try:
+                    case, record = next(pending)
+                except StopIteration:
+                    exhausted = True
+                    break
+
+                record.status = "running"
+                started_at = perf_counter()
+                single_threaded = case.run.solver.threads == 1
+                result_queue = context.Queue(maxsize=1)
+                process = context.Process(
+                    target=_run_case_worker,
+                    args=(
+                        case.run_path,
+                        single_threaded,
+                        generate_artifacts_fn,
+                        run_case_fn,
+                        result_queue,
+                    ),
+                )
+                try:
+                    # Apply limits before the child imports NumPy or DAETools.
+                    if single_threaded:
+                        with _single_threaded_worker_environment():
+                            process.start()
+                    else:
+                        process.start()
+                except Exception as exc:
+                    if getattr(process, "pid", None) is not None:
+                        _terminate_process(process)
+                        close_process = getattr(process, "close", None)
+                        if close_process is not None:
+                            close_process()
+                    result_queue.close()
+                    record.status = "simulation_failed"
+                    record.error = (
+                        "Could not start the batch case worker; custom functions must be "
+                        f"picklable. {exc}"
+                    )
+                    record.runtime_s = perf_counter() - started_at
+                    continue
+                active.append(
+                    _ActiveCaseWorker(
+                        process=process,
+                        result_queue=result_queue,
+                        record=record,
+                        started_at=started_at,
+                    )
+                )
+
+            made_progress = False
+            now = perf_counter()
+            for worker in tuple(active):
+                elapsed = now - worker.started_at
+                if (
+                    timeout_s is not None
+                    and elapsed >= timeout_s
+                    and worker.process.is_alive()
+                ):
+                    _terminate_process(worker.process)
+                    worker.record.status = "timeout_failed"
+                    worker.record.error = f"Timed out after {timeout_s:g} seconds."
+                elif worker.process.is_alive():
+                    continue
+                else:
+                    worker.process.join()
+                    try:
+                        payload = worker.result_queue.get(timeout=1.0)
+                        _apply_worker_payload(worker.record, payload)
+                    except Empty:
+                        worker.record.status = "simulation_failed"
+                        worker.record.error = (
+                            "Batch case worker finished without returning a result."
+                            if worker.process.exitcode == 0
+                            else (
+                                "Batch case worker exited with code "
+                                f"{worker.process.exitcode}."
+                            )
+                        )
+                    except Exception as exc:
+                        worker.record.status = "simulation_failed"
+                        worker.record.error = str(exc)
+
+                worker.record.runtime_s = perf_counter() - worker.started_at
+                _close_worker(worker)
+                active.remove(worker)
+                made_progress = True
+
+            if active and not made_progress:
+                active[0].process.join(_PROCESS_POLL_INTERVAL_S)
+    except BaseException:
+        for worker in active:
+            _terminate_process(worker.process)
+            worker.record.runtime_s = perf_counter() - worker.started_at
+            _close_worker(worker)
+        raise
 
 
 def run_batch_file(
@@ -627,16 +792,23 @@ def run_batch_file(
     *,
     validate_only: bool = False,
     case_timeout_s: float | None = None,
+    workers: int | None = None,
     generate_artifacts_fn: Callable[[Case], dict[str, Path]] | None = None,
     run_case_fn: Callable[..., RunResult] | None = None,
 ) -> BatchResult:
     document = load_batch_spec(batch_yaml_path)
+    requested_workers = (
+        _coerce_workers(workers) if workers is not None else document.spec.workers
+    )
     timeout_s = (
         _coerce_case_timeout_s(case_timeout_s)
         if case_timeout_s is not None
         else document.spec.case_timeout_s
     )
     expanded_cases = expand_batch_cases(document)
+    if requested_workers > 1:
+        _force_single_threaded_cases(expanded_cases)
+    effective_workers = min(requested_workers, len(expanded_cases))
     records = tuple(
         BatchCaseRecord(
             case_id=expanded.case_id,
@@ -664,6 +836,7 @@ def run_batch_file(
         output_directory=document.output_directory,
         summary_path=None,
         records=records,
+        workers=effective_workers,
     )
     if validate_only or any(case is None for case in resolved_cases):
         return result_without_files
@@ -676,42 +849,37 @@ def run_batch_file(
         from .artifacts import generate_artifacts
 
         generate_artifacts_fn = generate_artifacts
-    if run_case_fn is None:
-        from .simulation import run_case
 
-        run_case_fn = run_case
-
-    for case, record in zip(resolved_cases, records):
-        assert case is not None and run_case_fn is not None
-        record.status = "running"
-        start = perf_counter()
-        try:
-            if timeout_s is None:
+    cases = tuple(case for case in resolved_cases if case is not None)
+    if effective_workers > 1 or timeout_s is not None:
+        _run_cases_in_processes(
+            cases,
+            records,
+            workers=effective_workers,
+            timeout_s=timeout_s,
+            generate_artifacts_fn=generate_artifacts_fn,
+            run_case_fn=run_case_fn,
+        )
+    else:
+        for case, record in zip(cases, records):
+            record.status = "running"
+            start = perf_counter()
+            try:
                 output_directory, balance_errors, plot_status, plot_errors = _run_case_direct(
                     case,
                     generate_artifacts_fn,
                     run_case_fn,
                 )
-            else:
-                output_directory, balance_errors, plot_status, plot_errors = _run_case_with_timeout(
-                    case,
-                    generate_artifacts_fn,
-                    run_case_fn,
-                    timeout_s,
-                )
-            record.output_directory = output_directory
-            record.balance_errors = balance_errors
-            record.plot_status = plot_status
-            record.plot_errors = plot_errors
-            record.status = "success"
-        except BatchCaseTimeoutError as exc:
-            record.status = "timeout_failed"
-            record.error = str(exc)
-        except Exception as exc:
-            record.status = "simulation_failed"
-            record.error = str(exc)
-        finally:
-            record.runtime_s = perf_counter() - start
+                record.output_directory = output_directory
+                record.balance_errors = balance_errors
+                record.plot_status = plot_status
+                record.plot_errors = plot_errors
+                record.status = "success"
+            except Exception as exc:
+                record.status = "simulation_failed"
+                record.error = str(exc)
+            finally:
+                record.runtime_s = perf_counter() - start
 
     axis_ids = tuple(axis.id for axis in document.spec.axes)
     _write_records_csv(summary_path, records, axis_ids)
@@ -720,6 +888,7 @@ def run_batch_file(
         output_directory=document.output_directory,
         summary_path=summary_path,
         records=records,
+        workers=effective_workers,
     )
 
 
