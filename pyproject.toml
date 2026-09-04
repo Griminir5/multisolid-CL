@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multisolid-cl"
+version = "0.1.0"
+description = "DAETools packed-bed reactor simulation"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = {file = "LICENSE"}
+dependencies = ["numpy", "scipy", "xarray", "pydantic>=2", "PyYAML", "matplotlib", "PyQt6", "PyQt6-WebEngine"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+graph = ["pygraphviz"]
+
+[project.scripts]
+packed-bed = "packed_bed.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["packed_bed*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+packed_bed = [
+    "examples/default_case/*.yaml",
+    "examples/default_batch_case/batch.yaml",
+    "examples/default_batch_case/base_case/*.yaml",
+    "examples/default_batch_case/programs/*.yaml",
+    "examples/default_batch_case/geometries/*.yaml",
+    "kinetics/*.md",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

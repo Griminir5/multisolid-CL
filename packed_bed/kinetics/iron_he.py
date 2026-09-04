@@ -5,8 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..properties import PROPERTY_REGISTRY
-from ..reactions import ReactionDefinition, ReactionFamily
-from . import KineticsContext
+from ..reactions import KineticsContext, ReactionDefinition, ReactionFamily
 from .runtime import Constant, Exp, K, Log, Pa, Sqrt, m, mol, s
 
 

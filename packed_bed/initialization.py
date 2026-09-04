@@ -9,11 +9,9 @@ import numpy as np
 from .config import Case
 from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S, GAS_CONSTANT_J_PER_MOL_K
 from .solid_profiles import (
-    build_cell_scalar_profile,
+    build_cell_profiles,
     build_face_scalar_profile,
-    convert_solid_profile_to_bed_volume,
     gas_fraction_from_voidages,
-    solid_fraction_from_voidages,
 )
 
 
@@ -56,17 +54,11 @@ def calculate_initial_state(
     cell_count = case.run.model.axial_cells
     face_coordinates = np.linspace(0.0, case.run.model.bed_length_m, cell_count + 1)
     cell_coordinates = 0.5 * (face_coordinates[:-1] + face_coordinates[1:])
-    interparticle_voidage = build_cell_scalar_profile(case.solids, cell_coordinates, "e_b")
-    intraparticle_voidage = build_cell_scalar_profile(case.solids, cell_coordinates, "e_p")
+    interparticle_voidage, intraparticle_voidage, solid_concentration = build_cell_profiles(
+        case.solids, cell_coordinates
+    )
     particle_diameter = build_face_scalar_profile(case.solids, face_coordinates, "d_p")
     gas_fraction = gas_fraction_from_voidages(interparticle_voidage, intraparticle_voidage)
-    solid_fraction = solid_fraction_from_voidages(interparticle_voidage, intraparticle_voidage)
-    solid_concentration = convert_solid_profile_to_bed_volume(
-        case.solids,
-        cell_coordinates,
-        solid_fraction,
-        case.solids.solid_species,
-    )
 
     def value_at_start(program):
         return program.value_at(0.0, smooth_ramp_width_s=smooth_ramp_width_s)
@@ -130,7 +122,7 @@ def calculate_initial_state(
             inlet_pressure - inlet_half_cell_width * pressure_term / inlet_pressure
         ) / (1.0 + inlet_half_cell_width * density_term / inlet_pressure**2)
         if pressures[0] <= 0.0:
-            raise ValueError("Computed a non-positive first-cell pressure during initialization.")
+            return None
 
         for face_index in range(1, cell_count):
             left_index = face_index - 1
@@ -145,27 +137,28 @@ def calculate_initial_state(
                 left_pressure - face_width * (pressure_term + density_term) / left_pressure
             ) / (1.0 + face_width * density_term / left_pressure**2)
             if pressures[right_index] <= 0.0:
-                raise ValueError(
-                    "Computed a non-positive interior pressure during initialization."
-                )
+                return None
         return pressures
 
     def outlet_residual(inlet_pressure):
         pressures = pressure_profile(inlet_pressure)
+        if pressures is None:
+            return -np.inf  # An inadmissible trial is below the required inlet pressure.
         pressure_term, density_term = ergun_terms(interparticle_voidage[-1], particle_diameter[-1], 1.0)
         predicted_outlet = pressures[-1] - outlet_half_cell_width * (
             pressure_term + density_term
         ) / pressures[-1]
         return predicted_outlet - outlet_pressure
 
-    lower_inlet_pressure = outlet_pressure * (1.0 + 1.0e-8)
+    lower_inlet_pressure = outlet_pressure
     upper_inlet_pressure = max(lower_inlet_pressure * 1.05, lower_inlet_pressure + 100.0)
     for _ in range(80):
         upper_residual = outlet_residual(upper_inlet_pressure)
-        if not np.isfinite(upper_residual):
+        if np.isnan(upper_residual) or upper_residual == np.inf:
             raise ValueError("Unable to bracket the inlet pressure during initialization.")
-        if upper_residual > 0.0:
+        if upper_residual >= 0.0:
             break
+        lower_inlet_pressure = upper_inlet_pressure
         upper_inlet_pressure *= 1.5
     else:
         raise ValueError("Unable to bracket the inlet pressure during initialization.")
@@ -173,14 +166,18 @@ def calculate_initial_state(
     for _ in range(80):
         midpoint = 0.5 * (lower_inlet_pressure + upper_inlet_pressure)
         midpoint_residual = outlet_residual(midpoint)
-        if not np.isfinite(midpoint_residual):
+        if np.isnan(midpoint_residual) or midpoint_residual == np.inf:
             raise ValueError("Unable to solve for the inlet pressure during initialization.")
-        if midpoint_residual > 0.0:
+        if midpoint_residual >= 0.0:
             upper_inlet_pressure = midpoint
         else:
             lower_inlet_pressure = midpoint
+        if np.isclose(lower_inlet_pressure, upper_inlet_pressure, rtol=1e-12, atol=1e-8):
+            break
+    else:
+        raise ValueError("Unable to converge the inlet pressure during initialization.")
 
-    inlet_pressure = 0.5 * (lower_inlet_pressure + upper_inlet_pressure)
+    inlet_pressure = upper_inlet_pressure
     pressure = pressure_profile(inlet_pressure)
     gas_total_concentration = gas_fraction * pressure / (
         GAS_CONSTANT_J_PER_MOL_K * inlet_temperature

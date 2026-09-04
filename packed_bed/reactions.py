@@ -9,6 +9,20 @@ ReactionPhase = Literal["gas_gas", "gas_solid", "solid_solid"]
 KineticsHook = Callable[[Any], Any]
 
 
+@dataclass(frozen=True)
+class KineticsContext:
+    model: Any
+    idx_cell: Any
+    gas_species_index: Mapping[str, int]
+    solid_species_index: Mapping[str, int]
+
+    def gas_index(self, species_id: str) -> int:
+        return self.gas_species_index[species_id]
+
+    def solid_index(self, species_id: str) -> int:
+        return self.solid_species_index[species_id]
+
+
 def _unique_ordered(values: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(values))
 
@@ -264,6 +278,7 @@ def build_reaction_network(
 
 
 __all__ = (
+    "KineticsContext",
     "KineticsHook",
     "ReactionDefinition",
     "ReactionFamily",

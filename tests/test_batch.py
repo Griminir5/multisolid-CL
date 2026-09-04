@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import csv
+from functools import partial
 import json
+from multiprocessing import active_children, get_context
 import os
 from pathlib import Path
 from time import perf_counter, sleep
@@ -14,6 +17,7 @@ from packed_bed.batch import (
     load_batch_spec,
     run_batch_file,
 )
+from packed_bed import batch
 from packed_bed.config import resolve_case
 from packed_bed.reports import RunResult
 
@@ -28,9 +32,9 @@ BASE_CASE = (
 ).resolve()
 
 
-def _parallel_fake_run(case, **_kwargs):
+def _parallel_fake_run(case, *, barrier, **_kwargs):
     started_at = perf_counter()
-    sleep(0.5)
+    barrier.wait(timeout=15.0)
     case.output_directory.mkdir(parents=True, exist_ok=True)
     (case.output_directory / "worker.json").write_text(
         json.dumps(
@@ -61,6 +65,23 @@ def _slow_fake_run(case, **_kwargs):
     return RunResult(case=case, output_directory=case.output_directory)
 
 
+def _large_payload_run(case, **_kwargs):
+    if case.run.model.axial_cells == 4:
+        raise RuntimeError("x" * 1_000_000)
+    return RunResult(case=case, output_directory=case.output_directory,
+                     plot_errors={"plot": "x" * 1_000_000})
+
+
+def _crashing_run(case, **_kwargs):
+    os._exit(7)
+
+
+def _interruptible_run(case, **_kwargs):
+    if case.run.model.axial_cells == 5:
+        sleep(10.0)
+    return RunResult(case=case, output_directory=case.output_directory)
+
+
 def _write_batch(tmp_path: Path, axes: list[dict], **values) -> Path:
     document = {
         "base_case": str(BASE_CASE),
@@ -75,6 +96,20 @@ def _write_batch(tmp_path: Path, axes: list[dict], **values) -> Path:
 
 def _patch_value(value_id: str, patch: dict) -> dict:
     return {"id": value_id, "patch": patch}
+
+
+def _write_two_case_batch(tmp_path: Path, **values) -> Path:
+    return _write_conditions(tmp_path, {
+        "first": {"run": {"model": {"axial_cells": 4}}},
+        "second": {"run": {"model": {"axial_cells": 5}}},
+    }, **values)
+
+
+def _write_conditions(tmp_path: Path, conditions: dict, **values) -> Path:
+    return _write_batch(tmp_path, [{
+        "id": "condition",
+        "values": [_patch_value(name, patch) for name, patch in conditions.items()],
+    }], **values)
 
 
 def test_structured_patches_merge_recursively_in_axis_order(tmp_path: Path) -> None:
@@ -198,36 +233,19 @@ def test_dotted_set_overrides_are_rejected(tmp_path: Path) -> None:
 
 
 def test_workers_must_be_a_positive_integer(tmp_path: Path) -> None:
-    batch_path = _write_batch(
-        tmp_path,
-        [
-            {
-                "id": "condition",
-                "values": [
-                    _patch_value("value", {"run": {"model": {"axial_cells": 4}}})
-                ],
-            }
-        ],
-        workers=0,
-    )
+    batch_path = _write_conditions(tmp_path, {
+        "value": {"run": {"model": {"axial_cells": 4}}},
+    }, workers=0)
 
     with pytest.raises(BatchValidationError, match="workers.*positive integer"):
         load_batch_spec(batch_path)
 
 
 def test_slug_collisions_are_rejected_before_materialization(tmp_path: Path) -> None:
-    batch_path = _write_batch(
-        tmp_path,
-        [
-            {
-                "id": "condition",
-                "values": [
-                    _patch_value("a b", {"run": {"model": {"axial_cells": 4}}}),
-                    _patch_value("a-b", {"run": {"model": {"axial_cells": 5}}}),
-                ],
-            }
-        ],
-    )
+    batch_path = _write_conditions(tmp_path, {
+        "a b": {"run": {"model": {"axial_cells": 4}}},
+        "a-b": {"run": {"model": {"axial_cells": 5}}},
+    })
 
     with pytest.raises(BatchValidationError, match="slug collision"):
         expand_batch_cases(load_batch_spec(batch_path))
@@ -236,39 +254,28 @@ def test_slug_collisions_are_rejected_before_materialization(tmp_path: Path) -> 
 
 
 def test_case_root_must_resolve_inside_the_batch_output(tmp_path: Path) -> None:
-    batch_path = _write_batch(
-        tmp_path,
-        [
-            {
-                "id": "condition",
-                "values": [
-                    _patch_value("safe", {"run": {"model": {"axial_cells": 4}}})
-                ],
-            }
-        ],
-    )
+    batch_path = _write_conditions(tmp_path, {
+        "safe": {"run": {"model": {"axial_cells": 4}}},
+    })
     outside = tmp_path / "outside"
     outside.mkdir()
     output = tmp_path / "output"
     output.mkdir()
-    (output / "cases").symlink_to(outside, target_is_directory=True)
+    if os.name == "nt":
+        from _winapi import CreateJunction
+
+        CreateJunction(str(outside), str(output / "cases"))
+    else:
+        (output / "cases").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(BatchValidationError, match="escapes batch output directory"):
         expand_batch_cases(load_batch_spec(batch_path))
 
 
 def test_batch_validate_only_is_side_effect_free(tmp_path: Path) -> None:
-    batch_path = _write_batch(
-        tmp_path,
-        [
-            {
-                "id": "condition",
-                "values": [
-                    _patch_value("valid", {"run": {"model": {"axial_cells": 4}}})
-                ],
-            }
-        ],
-    )
+    batch_path = _write_conditions(tmp_path, {
+        "valid": {"run": {"model": {"axial_cells": 4}}},
+    })
     paths_before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
 
     result = run_batch_file(batch_path, validate_only=True)
@@ -279,18 +286,10 @@ def test_batch_validate_only_is_side_effect_free(tmp_path: Path) -> None:
 
 
 def test_all_cases_are_validated_before_any_case_is_written_or_run(tmp_path: Path) -> None:
-    batch_path = _write_batch(
-        tmp_path,
-        [
-            {
-                "id": "condition",
-                "values": [
-                    _patch_value("valid", {"run": {"model": {"axial_cells": 4}}}),
-                    _patch_value("invalid", {"run": {"model": {"bed_length_m": 5.0}}}),
-                ],
-            }
-        ],
-    )
+    batch_path = _write_conditions(tmp_path, {
+        "valid": {"run": {"model": {"axial_cells": 4}}},
+        "invalid": {"run": {"model": {"bed_length_m": 5.0}}},
+    })
     calls = []
 
     def fake_run(case, **_kwargs):
@@ -309,17 +308,9 @@ def test_all_cases_are_validated_before_any_case_is_written_or_run(tmp_path: Pat
 
 
 def test_existing_case_output_is_rejected_before_a_run(tmp_path: Path) -> None:
-    batch_path = _write_batch(
-        tmp_path,
-        [
-            {
-                "id": "condition",
-                "values": [
-                    _patch_value("existing", {"run": {"model": {"axial_cells": 4}}})
-                ],
-            }
-        ],
-    )
+    batch_path = _write_conditions(tmp_path, {
+        "existing": {"run": {"model": {"axial_cells": 4}}},
+    })
     (tmp_path / "output" / "cases" / "condition-existing").mkdir(parents=True)
     calls = []
 
@@ -396,21 +387,10 @@ def test_batch_execution_uses_resolved_case_plot_selection_and_artifacts(tmp_pat
 def test_parallel_batch_runs_single_threaded_cases_in_overlapping_processes(
     tmp_path: Path,
 ) -> None:
-    batch_path = _write_batch(
-        tmp_path,
-        [
-            {
-                "id": "condition",
-                "values": [
-                    _patch_value("first", {"run": {"model": {"axial_cells": 4}}}),
-                    _patch_value("second", {"run": {"model": {"axial_cells": 5}}}),
-                ],
-            }
-        ],
-        workers=2,
-    )
+    batch_path = _write_two_case_batch(tmp_path, workers=2)
 
-    result = run_batch_file(batch_path, run_case_fn=_parallel_fake_run)
+    run = partial(_parallel_fake_run, barrier=get_context("spawn").Barrier(2))
+    result = run_batch_file(batch_path, run_case_fn=run)
 
     assert result.workers == 2
     assert [record.status for record in result.records] == ["success", "success"]
@@ -433,20 +413,7 @@ def test_parallel_batch_runs_single_threaded_cases_in_overlapping_processes(
 
 
 def test_parallel_case_timeouts_kill_each_worker_and_continue(tmp_path: Path) -> None:
-    batch_path = _write_batch(
-        tmp_path,
-        [
-            {
-                "id": "condition",
-                "values": [
-                    _patch_value("first", {"run": {"model": {"axial_cells": 4}}}),
-                    _patch_value("second", {"run": {"model": {"axial_cells": 5}}}),
-                ],
-            }
-        ],
-        workers=2,
-        case_timeout_s=0.1,
-    )
+    batch_path = _write_two_case_batch(tmp_path, workers=2, case_timeout_s=0.1)
 
     result = run_batch_file(batch_path, run_case_fn=_slow_fake_run)
 
@@ -458,3 +425,62 @@ def test_parallel_case_timeouts_kill_each_worker_and_continue(tmp_path: Path) ->
     assert result.summary_path is not None
     summary = result.summary_path.read_text(encoding="utf-8")
     assert summary.count("timeout_failed") == 2
+
+
+def test_large_worker_payloads_are_drained_before_process_exit(tmp_path: Path) -> None:
+    result = run_batch_file(_write_two_case_batch(tmp_path, workers=2, case_timeout_s=5.0),
+                            run_case_fn=_large_payload_run)
+    assert [record.status for record in result.records] == ["simulation_failed", "success"]
+    assert result.records[0].error == "x" * 1_000_000
+    assert result.records[1].plot_errors == {"plot": "x" * 1_000_000}
+
+
+def test_crashed_workers_are_reaped_and_reported(tmp_path: Path) -> None:
+    children_before = active_children()
+    result = run_batch_file(_write_two_case_batch(tmp_path, workers=2), run_case_fn=_crashing_run)
+    assert [record.status for record in result.records] == ["simulation_failed"] * 2
+    assert all("exited with code 7" in record.error for record in result.records)
+    assert active_children() == children_before
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_interruption_preserves_completed_cases_and_reaps_workers(tmp_path, monkeypatch, workers):
+    children_before = active_children()
+    write_records = batch._write_records_csv
+    interrupted = False
+
+    def interrupt_after_first_completion(path, records, axis_ids):
+        nonlocal interrupted
+        write_records(path, records, axis_ids)
+        if not interrupted and records[0].status == "success":
+            with path.open(newline="", encoding="utf-8") as handle:
+                assert next(csv.DictReader(handle))["status"] == "success"
+            interrupted = True
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(batch, "_write_records_csv", interrupt_after_first_completion)
+    with pytest.raises(KeyboardInterrupt):
+        run_batch_file(_write_two_case_batch(tmp_path, workers=workers),
+                       run_case_fn=_interruptible_run)
+    with (tmp_path / "output" / "summary.csv").open(newline="", encoding="utf-8") as handle:
+        records = list(csv.DictReader(handle))
+    assert [record["status"] for record in records] == ["success", "interrupted_failed"]
+    assert "KeyboardInterrupt" in records[1]["error"]
+    assert active_children() == children_before
+
+
+def test_interrupted_csv_write_preserves_previous_snapshot(tmp_path, monkeypatch):
+    path = tmp_path / "summary.csv"
+    record = batch.BatchCaseRecord("case", {}, tmp_path, tmp_path / "run.yaml")
+    batch._write_records_csv(path, (record,), ())
+    previous = path.read_bytes()
+
+    def interrupt_write(writer, row):
+        writer.writer.writerow(["partial"])
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(csv.DictWriter, "writerow", interrupt_write)
+    with pytest.raises(KeyboardInterrupt):
+        batch._write_records_csv(path, (record,), ())
+    assert path.read_bytes() == previous
+    assert list(tmp_path.iterdir()) == [path]

@@ -157,6 +157,22 @@ def test_ordinary_run_writes_one_dataset_and_manifest(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
+def test_result_write_failure_survives_reporter_finalization(tmp_path: Path, monkeypatch) -> None:
+    from packed_bed.simulation import run_case
+
+    def fail(_dataset, _path):
+        raise OSError("disk full")
+
+    case = load_case(_write_inert_case(tmp_path))
+    monkeypatch.setattr("packed_bed.reports.write_dataset", fail)
+    with pytest.raises(RuntimeError, match="Data reporter failed") as error:
+        run_case(case)
+    assert str(error.value.__cause__) == "disk full"
+    manifest = json.loads((case.output_directory / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+
+
+@pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
 def test_dae_plotter_retention_cannot_change_reports_or_netcdf(tmp_path: Path) -> None:
     from packed_bed.reports import load_dataset
     from packed_bed.simulation import run_case

@@ -209,7 +209,7 @@ def execute_simulation(
     solver.RelativeTolerance = case.run.solver.relative_tolerance
     solver.SetLASolver(create_linear_solver(case.run.solver.name))
     reporter = data_reporter if data_reporter is not None else daeNoOpDataReporter()
-    if data_reporter is not None and hasattr(reporter, "IsConnected") and not reporter.IsConnected():
+    if data_reporter is not None and not reporter.IsConnected():
         process_name = case.run.simulation.system_name
         if not reporter.Connect(str(case.output_directory), process_name):
             raise RuntimeError(f"Cannot connect data reporter for process '{process_name}'.")
@@ -228,20 +228,9 @@ def execute_simulation(
         if initialized:
             simulation.Finalize()
 
-    if (
-        data_reporter is not None
-        and hasattr(reporter, "write_outputs")
-        and not getattr(reporter, "_written", False)
-        and getattr(reporter, "write_error", None) is None
-    ):
-        try:
-            reporter.write_outputs()
-        except Exception as exc:
-            raise RuntimeError("Data reporter failed while writing simulation reports.") from exc
-
-    write_error = getattr(reporter, "write_error", None)
-    if write_error is not None:
-        raise RuntimeError("Data reporter failed while writing simulation reports.") from write_error
+    finish = getattr(reporter, "finish", None)
+    if finish is not None:
+        finish()
     return reporter
 
 
@@ -260,9 +249,9 @@ def run_case(
     case.output_directory.mkdir(parents=True, exist_ok=True)
     solver_artifacts: dict[str, Path] = {}
     stage = "model construction"
-    started_at = perf_counter()
     dataset_reporter = None
-    result = None
+    result = RunResult(case=case, output_directory=case.output_directory)
+    started_at = perf_counter()
     try:
         simulation = PackedBedSimulation(case, property_registry)
         dataset_reporter = create_dataset_reporter(case)
@@ -284,9 +273,8 @@ def run_case(
             data_reporter=dataset_reporter,
             after_initialize=after_initialize,
         )
-        result = RunResult(
-            case=case,
-            output_directory=case.output_directory,
+        result = replace(
+            result,
             results_path=dataset_reporter.results_path,
             runtime_s=perf_counter() - started_at,
             artifact_paths={**dict(artifact_paths or {}), **solver_artifacts},
@@ -319,20 +307,10 @@ def run_case(
         return replace(result, manifest_path=write_run_manifest(result))
     except Exception as exc:
         if stage != "manifest writing":
-            failed_result = (
-                replace(result, status="failed")
-                if result
-                else RunResult(
-                    case=case,
-                    output_directory=case.output_directory,
-                    status="failed",
-                    runtime_s=perf_counter() - started_at,
-                    results_path=getattr(dataset_reporter, "results_path", None),
-                    artifact_paths={
-                        **dict(artifact_paths or {}),
-                        **solver_artifacts,
-                    },
-                )
+            failed_result = replace(
+                result, status="failed", runtime_s=perf_counter() - started_at,
+                results_path=getattr(dataset_reporter, "results_path", None),
+                artifact_paths={**dict(artifact_paths or {}), **solver_artifacts, **result.artifact_paths},
             )
             try:
                 write_run_manifest(

@@ -5,7 +5,7 @@ import math
 import sys
 from typing import TYPE_CHECKING
 
-from .batch import BatchResult, run_batch_file
+from .batch import run_batch_file
 from .config import PackedBedValidationError, load_case
 
 if TYPE_CHECKING:
@@ -13,33 +13,23 @@ if TYPE_CHECKING:
 
 
 def _positive_float(raw_value: str) -> float:
-    try:
-        value = float(raw_value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("must be a number.") from exc
+    value = float(raw_value)
     if not math.isfinite(value) or value <= 0.0:
         raise argparse.ArgumentTypeError("must be a finite number greater than zero.")
     return value
 
 
 def _positive_int(raw_value: str) -> int:
-    try:
-        value = int(raw_value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("must be an integer.") from exc
+    value = int(raw_value)
     if value < 1:
         raise argparse.ArgumentTypeError("must be greater than zero.")
     return value
 
 
 def launch_daetools_plotter(run_result: RunResult) -> int:
-    reporter = run_result.reporter
-    if reporter is None or not hasattr(reporter, "Process"):
-        raise ValueError("RunResult does not contain a DAETools reporter with a Process payload.")
-
-    process = reporter.Process
-    if process is None or not hasattr(process, "dictVariables"):
-        raise ValueError("RunResult reporter does not expose Process.dictVariables.")
+    process = getattr(run_result.reporter, "Process", None)
+    if not hasattr(process, "dictVariables"):
+        raise ValueError("The run has no retained DAETools process for the plotter.")
 
     try:
         from daetools.dae_plotter.data_receiver_io import dataReceiverProcess
@@ -65,80 +55,42 @@ def launch_daetools_plotter(run_result: RunResult) -> int:
     return app.exec()
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(*, batch: bool = False) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run a packed-bed simulation from YAML input files."
+        prog="python -m packed_bed" + (" batch" if batch else ""),
+        description="Run packed-bed simulations from YAML input files.",
+        epilog=None if batch else "For batches: python -m packed_bed batch --help",
     )
-    parser.add_argument("run_yaml", help="Path to the top-level run.yaml file.")
-    parser.add_argument(
-        "--validate-only",
-        action="store_true",
-        help="Validate the YAML bundle and exit without creating files or running the simulation.",
-    )
-    parser.add_argument(
-        "--artifacts",
-        action="store_true",
-        help="Generate the system, program, and initial-profile artifacts before the run.",
-    )
-    parser.add_argument(
-        "--dae-plotter",
-        dest="launch_dae_plotter",
-        action="store_true",
-        help="Open the DAETools plotter GUI after the run using the captured simulation results.",
-    )
+    parser.add_argument("input_yaml", help="Path to batch.yaml." if batch else "Path to run.yaml.")
+    parser.add_argument("--validate-only", action="store_true", help="Validate inputs without creating files.")
+    parser.add_argument("--debug", action="store_true", help="Show a traceback for unexpected errors.")
+    if batch:
+        parser.add_argument("--case-timeout-s", type=_positive_float, help="Stop a case after this many seconds.")
+        parser.add_argument("--workers", type=_positive_int, help="Number of single-threaded worker processes.")
+    else:
+        parser.add_argument("--artifacts", action="store_true", help="Create input diagrams before the run.")
+        parser.add_argument("--dae-plotter", action="store_true", help="Open the DAETools plotter after the run.")
     return parser
-
-
-def build_batch_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m packed_bed batch",
-        description="Run a batch of packed-bed simulations from a batch YAML file.",
-    )
-    parser.add_argument("batch_yaml", help="Path to the batch.yaml file.")
-    parser.add_argument(
-        "--validate-only",
-        action="store_true",
-        help="Expand and validate every batch case without creating files.",
-    )
-    parser.add_argument(
-        "--case-timeout-s",
-        type=_positive_float,
-        default=None,
-        help="Kill an individual batch case if it runs longer than this many seconds.",
-    )
-    parser.add_argument(
-        "--workers",
-        type=_positive_int,
-        default=None,
-        help=(
-            "Run up to this many simulations concurrently in single-threaded worker "
-            "processes; overrides batch.yaml."
-        ),
-    )
-    return parser
-
-
-def _print_failed_batch_records(batch_result: BatchResult) -> None:
-    for record in batch_result.records:
-        if record.status.endswith("_failed"):
-            print(f"{record.case_id}: {record.error}", file=sys.stderr)
-        for plot_id, error in record.plot_errors.items():
-            print(f"{record.case_id} plot '{plot_id}': {error}", file=sys.stderr)
 
 
 def _run_cli(argv: list[str]) -> int:
-    if argv and argv[0] == "batch":
-        args = build_batch_parser().parse_args(argv[1:])
+    batch = bool(argv and argv[0] == "batch")
+    args = build_parser(batch=batch).parse_args(argv[1:] if batch else argv)
+    if batch:
         batch_result = run_batch_file(
-            args.batch_yaml,
+            args.input_yaml,
             validate_only=args.validate_only,
             case_timeout_s=args.case_timeout_s,
             workers=args.workers,
         )
+        for record in batch_result.records:
+            if record.error:
+                print(f"{record.case_id}: {record.error}", file=sys.stderr)
+            for plot_id, error in record.plot_errors.items():
+                print(f"{record.case_id} plot '{plot_id}': {error}", file=sys.stderr)
         passed = batch_result.total_count - batch_result.failed_count
         if args.validate_only:
             print(f"Batch validation complete: {passed}/{batch_result.total_count} cases passed.")
-            _print_failed_batch_records(batch_result)
             return 2 if batch_result.failed_count else 0
 
         if batch_result.summary_path is None:
@@ -147,7 +99,6 @@ def _run_cli(argv: list[str]) -> int:
                 "failed validation; no simulations were started.",
                 file=sys.stderr,
             )
-            _print_failed_batch_records(batch_result)
             return 2
 
         succeeded = sum(1 for record in batch_result.records if record.status == "success")
@@ -155,11 +106,9 @@ def _run_cli(argv: list[str]) -> int:
             f"Batch complete: {succeeded}/{batch_result.total_count} cases succeeded. "
             f"Workers: {batch_result.workers}. Summary: {batch_result.summary_path}"
         )
-        _print_failed_batch_records(batch_result)
         return 1 if batch_result.failed_count or batch_result.plot_failed_count else 0
 
-    args = build_parser().parse_args(argv)
-    case = load_case(args.run_yaml)
+    case = load_case(args.input_yaml)
     if args.validate_only:
         print(f"Validation passed: {case.run_path}")
         return 0
@@ -174,7 +123,7 @@ def _run_cli(argv: list[str]) -> int:
     run_result = run_case(
         case,
         artifact_paths=artifact_paths,
-        retain_reporter=args.launch_dae_plotter,
+        retain_reporter=args.dae_plotter,
     )
     print(f"Simulation took {run_result.runtime_s:.3f} seconds.")
 
@@ -185,7 +134,7 @@ def _run_cli(argv: list[str]) -> int:
     for plot_id, error in run_result.plot_errors.items():
         print(f"plot '{plot_id}' failed: {error}", file=sys.stderr)
     exit_code = 1 if run_result.plot_errors else 0
-    if args.launch_dae_plotter:
+    if args.dae_plotter:
         print("Opening DAETools plotter. Close the plotter window to exit.")
         return launch_daetools_plotter(run_result) or exit_code
     return exit_code
@@ -199,6 +148,8 @@ def main(argv=None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:
+        if "--debug" in arguments:
+            raise
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

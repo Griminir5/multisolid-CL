@@ -4,6 +4,10 @@ reference_material/
 typings/
 pyrightconfig.json
 .venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
 
 Barin_Extraction/Thermochemical Data of Pure Substances - 1995 - Barin.pdf
 

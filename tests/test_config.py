@@ -114,7 +114,7 @@ def test_load_case_returns_one_resolved_case_with_compiled_programs(tmp_path: Pa
     assert isinstance(case.inlet_flow_program, CompiledProgram)
     assert case.inlet_flow_program.duration_s == 10.0
     assert case.inlet_composition_program.initial_value == (1.0,)
-    assert not hasattr(case, "program")
+    assert case.program.inlet_flow.initial == case.inlet_flow_program.initial_value
     assert case.output_directory == (tmp_path / "output").resolve()
 
 
@@ -241,9 +241,6 @@ def test_duplicate_yaml_keys_are_rejected_with_file_and_line(tmp_path: Path) -> 
     (tmp_path / "program.yaml").write_text(
         """inlet_flow: {initial: 1.0, steps: []}
 inlet_flow: {initial: 2.0, steps: []}
-inlet_temperature: {initial: 300.0, steps: []}
-outlet_pressure: {initial: 100000.0, steps: []}
-inlet_composition: {initial: {N2: 1.0}, steps: []}
 """,
         encoding="utf-8",
     )
@@ -254,6 +251,14 @@ inlet_composition: {initial: {N2: 1.0}, steps: []}
     message = str(caught.value)
     assert f"program is invalid: {tmp_path / 'program.yaml'}" in message
     assert "duplicate key 'inlet_flow' at line 2" in message
+
+
+@pytest.mark.parametrize("source", [b"? [x, y]\n: 1\n", b"\xff"])
+def test_invalid_yaml_uses_a_configuration_error(tmp_path, source):
+    run_path = _write_case(tmp_path)
+    (tmp_path / "program.yaml").write_bytes(source)
+    with pytest.raises(PackedBedValidationError, match="program contains invalid YAML"):
+        load_case(run_path)
 
 
 def test_missing_reference_files_are_reported_together(tmp_path: Path) -> None:

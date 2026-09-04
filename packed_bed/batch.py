@@ -13,16 +13,17 @@ import os
 from pathlib import Path
 from queue import Empty
 import re
+from tempfile import TemporaryDirectory
 from time import perf_counter
-from typing import Any, Callable
+from typing import Annotated, Any, Callable
 import unicodedata
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BeforeValidator, Field, ValidationError, field_validator, model_validator
 import yaml
 
 from .config import Case, PackedBedValidationError, resolve_case
 from .config.load import read_yaml_mapping, resolve_path
-from .config.models import ConfigString
+from .config.models import ConfigModel, ConfigString, _as_tuple
 from .reports import RunResult
 
 
@@ -43,24 +44,6 @@ _SINGLE_THREAD_ENVIRONMENT = {
 
 class BatchValidationError(PackedBedValidationError):
     pass
-
-
-class BatchCaseTimeoutError(TimeoutError):
-    pass
-
-
-class BatchCaseWorkerError(RuntimeError):
-    pass
-
-
-class BatchConfigModel(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
-
-
-def _as_tuple(value: Any) -> tuple[Any, ...]:
-    if not isinstance(value, (list, tuple)):
-        raise ValueError("must be provided as a YAML sequence.")
-    return tuple(value)
 
 
 def _require_unique(values: tuple[str, ...], label: str) -> None:
@@ -94,7 +77,7 @@ def _coerce_workers(value: Any, label: str = "workers") -> int:
     return value
 
 
-class BatchPatch(BatchConfigModel):
+class BatchPatch(ConfigModel):
     run: dict[ConfigString, Any] = Field(default_factory=dict)
     chemistry: dict[ConfigString, Any] = Field(default_factory=dict)
     program: dict[ConfigString, Any] = Field(default_factory=dict)
@@ -107,7 +90,7 @@ class BatchPatch(BatchConfigModel):
         return self
 
 
-class BatchAxisValue(BatchConfigModel):
+class BatchAxisValue(ConfigModel):
     id: ConfigString
     program: ConfigString | None = None
     geometry: ConfigString | None = None
@@ -120,25 +103,18 @@ class BatchAxisValue(BatchConfigModel):
         return self
 
 
-class BatchAxis(BatchConfigModel):
+class BatchAxis(ConfigModel):
     id: ConfigString
-    values: tuple[BatchAxisValue, ...]
-
-    @field_validator("values", mode="before")
-    @classmethod
-    def coerce_values(cls, value: Any) -> tuple[Any, ...]:
-        return _as_tuple(value)
+    values: Annotated[tuple[BatchAxisValue, ...], BeforeValidator(_as_tuple), Field(min_length=1)]
 
     @field_validator("values")
     @classmethod
     def validate_values(cls, value: tuple[BatchAxisValue, ...]) -> tuple[BatchAxisValue, ...]:
-        if not value:
-            raise ValueError("must not be empty.")
         _require_unique(tuple(axis_value.id for axis_value in value), "axis values")
         return value
 
 
-class GeometryPreset(BatchConfigModel):
+class GeometryPreset(ConfigModel):
     model: dict[ConfigString, Any] = Field(default_factory=dict)
     solids_file: ConfigString | None = None
 
@@ -149,36 +125,19 @@ class GeometryPreset(BatchConfigModel):
         return self
 
 
-class BatchSpec(BatchConfigModel):
+class BatchSpec(ConfigModel):
     base_case: ConfigString
     output_directory: ConfigString
-    case_timeout_s: float | None = None
-    workers: int = 1
+    case_timeout_s: Annotated[float | None, BeforeValidator(_coerce_case_timeout_s)] = None
+    workers: Annotated[int, BeforeValidator(_coerce_workers)] = 1
     artifacts: bool = False
     programs: dict[ConfigString, ConfigString] = Field(default_factory=dict)
     geometries: dict[ConfigString, GeometryPreset] = Field(default_factory=dict)
-    axes: tuple[BatchAxis, ...]
-
-    @field_validator("case_timeout_s", mode="before")
-    @classmethod
-    def validate_case_timeout_s(cls, value: Any) -> float | None:
-        return _coerce_case_timeout_s(value)
-
-    @field_validator("workers", mode="before")
-    @classmethod
-    def validate_workers(cls, value: Any) -> int:
-        return _coerce_workers(value)
-
-    @field_validator("axes", mode="before")
-    @classmethod
-    def coerce_axes(cls, value: Any) -> tuple[Any, ...]:
-        return _as_tuple(value)
+    axes: Annotated[tuple[BatchAxis, ...], BeforeValidator(_as_tuple), Field(min_length=1)]
 
     @field_validator("axes")
     @classmethod
     def validate_axes(cls, value: tuple[BatchAxis, ...]) -> tuple[BatchAxis, ...]:
-        if not value:
-            raise ValueError("must not be empty.")
         _require_unique(tuple(axis.id for axis in value), "axes")
         return value
 
@@ -211,14 +170,6 @@ class BatchDocument:
     @property
     def output_directory(self) -> Path:
         return resolve_path(self.base_dir, self.spec.output_directory)
-
-
-@dataclass(frozen=True)
-class BaseCaseMappings:
-    run: dict[str, Any]
-    chemistry: dict[str, Any]
-    program: dict[str, Any]
-    solids: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -285,23 +236,16 @@ def _require_mapping(value: Any, label: str) -> dict[str, Any]:
     return value
 
 
-def _load_base_case(document: BatchDocument) -> BaseCaseMappings:
+def _load_base_case(document: BatchDocument) -> dict[str, dict[str, Any]]:
     run_path = resolve_path(document.base_dir, document.spec.base_case)
     run = read_yaml_mapping(run_path, "run")
     references = _require_mapping(run.get("references"), "run.references")
     base_dir = run_path.parent
-    return BaseCaseMappings(
-        run=run,
-        chemistry=read_yaml_mapping(
-            resolve_path(base_dir, references.get("chemistry_file", "")), "chemistry"
-        ),
-        program=read_yaml_mapping(
-            resolve_path(base_dir, references.get("program_file", "")), "program"
-        ),
-        solids=read_yaml_mapping(
-            resolve_path(base_dir, references.get("solids_file", "")), "solids"
-        ),
-    )
+    documents = {"run": run}
+    for name in ("chemistry", "program", "solids"):
+        path = resolve_path(base_dir, references.get(f"{name}_file", ""))
+        documents[name] = read_yaml_mapping(path, name)
+    return documents
 
 
 def _merge_mapping(target: dict[str, Any], patch: dict[str, Any]) -> None:
@@ -393,12 +337,7 @@ def expand_batch_cases(document: BatchDocument) -> tuple[ExpandedBatchCase, ...]
         if len(case_id) > 180:
             digest = hashlib.sha256(case_id.encode()).hexdigest()[:8]
             case_id = f"{case_id[:171].rstrip('-_')}-{digest}"
-        documents = {
-            "run": deepcopy(base.run),
-            "chemistry": deepcopy(base.chemistry),
-            "program": deepcopy(base.program),
-            "solids": deepcopy(base.solids),
-        }
+        documents = deepcopy(base)
         selections = {axis.id: axis_value.id for axis, axis_value in axis_values}
 
         for _axis, axis_value in axis_values:
@@ -456,17 +395,12 @@ def _resolve_expanded_case(expanded: ExpandedBatchCase) -> Case:
     )
 
 
-def _write_yaml(path: Path, values: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(values, sort_keys=False), encoding="utf-8")
-
-
 def _write_case_files(cases: tuple[ExpandedBatchCase, ...]) -> None:
     for case in cases:
-        _write_yaml(case.run_yaml_path, case.run)
-        _write_yaml(case.case_directory / "chemistry.yaml", case.chemistry)
-        _write_yaml(case.case_directory / "program.yaml", case.program)
-        _write_yaml(case.case_directory / "solids.yaml", case.solids)
+        case.case_directory.mkdir(parents=True, exist_ok=True)
+        for name in ("run", "chemistry", "program", "solids"):
+            path = case.case_directory / f"{name}.yaml"
+            path.write_text(yaml.safe_dump(getattr(case, name), sort_keys=False), encoding="utf-8")
 
 
 def _force_single_threaded_cases(cases: tuple[ExpandedBatchCase, ...]) -> None:
@@ -497,132 +431,81 @@ def _check_output_collisions(
     _contained_path(document.output_directory, summary_path, "batch summary")
 
 
-def _balance_field(record: BatchCaseRecord, key: str, attribute: str) -> str | float:
-    error = record.balance_errors.get(key)
-    return "" if error is None else getattr(error, attribute)
-
-
 def _write_records_csv(
     path: Path,
     records: tuple[BatchCaseRecord, ...],
     axis_ids: tuple[str, ...],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    fields = ("status", "error", "case_directory", "runtime_s", "output_directory", "plot_status")
+    balance_fields = ("max_abs_error", "time_s", "unit")
     columns = [
-        "case_id",
-        *(f"axis_{axis_id}" for axis_id in axis_ids),
-        "status",
-        "error",
-        "case_directory",
-        "run_yaml",
-        "runtime_s",
-        "output_directory",
-        "plot_status",
-        "plot_errors",
-        "heat_balance_max_abs_error",
-        "heat_balance_time_s",
-        "heat_balance_unit",
-        "mass_balance_max_abs_error",
-        "mass_balance_time_s",
-        "mass_balance_unit",
+        "case_id", *(f"axis_{axis}" for axis in axis_ids),
+        "status", "error", "case_directory", "run_yaml", "runtime_s",
+        "output_directory", "plot_status", "plot_errors",
+        *(f"{key}_balance_{name}" for key in ("heat", "mass") for name in balance_fields),
     ]
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
-        writer.writeheader()
-        for record in records:
-            writer.writerow(
-                {
+    # Replace only a complete, flushed CSV; interrupted writes leave the previous snapshot intact.
+    with TemporaryDirectory(dir=path.parent) as temporary_directory:
+        temporary_path = Path(temporary_directory) / path.name
+        with temporary_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=columns)
+            writer.writeheader()
+            for record in records:
+                writer.writerow({
                     "case_id": record.case_id,
-                    "status": record.status,
-                    "error": record.error,
-                    "case_directory": str(record.case_directory),
-                    "run_yaml": str(record.run_yaml_path),
-                    **{
-                        f"axis_{axis}": record.selections.get(axis, "")
-                        for axis in axis_ids
-                    },
-                    "runtime_s": "" if record.runtime_s is None else record.runtime_s,
-                    "output_directory": (
-                        ""
-                        if record.output_directory is None
-                        else str(record.output_directory)
-                    ),
-                    "plot_status": record.plot_status,
+                    **{f"axis_{axis}": record.selections.get(axis, "") for axis in axis_ids},
+                    **{name: getattr(record, name) for name in fields},
+                    "run_yaml": record.run_yaml_path,
                     "plot_errors": json.dumps(record.plot_errors, sort_keys=True),
-                    "heat_balance_max_abs_error": _balance_field(
-                        record, "heat", "max_abs_error"
-                    ),
-                    "heat_balance_time_s": _balance_field(record, "heat", "time_s"),
-                    "heat_balance_unit": _balance_field(record, "heat", "unit"),
-                    "mass_balance_max_abs_error": _balance_field(
-                        record, "mass", "max_abs_error"
-                    ),
-                    "mass_balance_time_s": _balance_field(record, "mass", "time_s"),
-                    "mass_balance_unit": _balance_field(record, "mass", "unit"),
-                }
-            )
+                    **{f"{key}_balance_{name}": getattr(record.balance_errors.get(key), name, "")
+                       for key in ("heat", "mass") for name in balance_fields},
+                })
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary_path.replace(path)
 
 
 def _run_case_direct(
-    case: Case,
+    run_yaml_path: Path,
     generate_artifacts_fn: Callable[[Case], dict[str, Path]] | None,
     run_case_fn: Callable[..., RunResult] | None,
-) -> tuple[Path, dict[str, Any], str, dict[str, str]]:
-    if run_case_fn is None:
-        from .simulation import run_case
+) -> tuple[Path, dict[str, Any], str, dict[str, str]] | str:
+    """Run a materialized case and return its summary, or its error message."""
 
-        run_case_fn = run_case
-    artifact_paths = generate_artifacts_fn(case) if generate_artifacts_fn is not None else {}
-    result = run_case_fn(
-        case,
-        artifact_paths=artifact_paths,
-    )
-    return (
-        result.output_directory,
-        dict(result.balance_errors),
-        result.plot_status,
-        dict(result.plot_errors),
-    )
-
-
-def _run_case_worker(
-    run_yaml_path: Path,
-    single_threaded: bool,
-    generate_artifacts_fn,
-    run_case_fn,
-    result_queue,
-) -> None:
-    if single_threaded:
-        os.environ.update(_SINGLE_THREAD_ENVIRONMENT)
-        os.environ.setdefault("MKL_THREADING_LAYER", "GNU")
     try:
         from .config import load_case
 
         case = load_case(run_yaml_path)
-        output_directory, balance_errors, plot_status, plot_errors = _run_case_direct(
-            case,
-            generate_artifacts_fn,
-            run_case_fn,
-        )
-        result_queue.put(
-            {
-                "ok": True,
-                "output_directory": output_directory,
-                "balance_errors": balance_errors,
-                "plot_status": plot_status,
-                "plot_errors": plot_errors,
-            }
+        if run_case_fn is None:
+            from .simulation import run_case
+
+            run_case_fn = run_case
+        artifact_paths = generate_artifacts_fn(case) if generate_artifacts_fn is not None else {}
+        result = run_case_fn(case, artifact_paths=artifact_paths)
+        return (
+            result.output_directory, dict(result.balance_errors),
+            result.plot_status, dict(result.plot_errors),
         )
     except Exception as exc:
-        result_queue.put({"ok": False, "error": str(exc)})
+        return str(exc)
+
+
+def _run_case_worker(
+    run_yaml_path: Path,
+    generate_artifacts_fn,
+    run_case_fn,
+    result_queue,
+) -> None:
+    result_queue.put(_run_case_direct(run_yaml_path, generate_artifacts_fn, run_case_fn))
 
 
 @contextmanager
 def _single_threaded_worker_environment():
-    previous = {name: os.environ.get(name) for name in _SINGLE_THREAD_ENVIRONMENT}
-    threading_layer = os.environ.get("MKL_THREADING_LAYER")
-    os.environ.update(_SINGLE_THREAD_ENVIRONMENT)
-    os.environ.setdefault("MKL_THREADING_LAYER", "GNU")
+    limits = {**_SINGLE_THREAD_ENVIRONMENT,
+              "MKL_THREADING_LAYER": os.environ.get("MKL_THREADING_LAYER", "GNU")}
+    previous = {name: os.environ.get(name) for name in limits}
+    os.environ.update(limits)
     try:
         yield
     finally:
@@ -631,10 +514,6 @@ def _single_threaded_worker_environment():
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
-        if threading_layer is None:
-            os.environ.pop("MKL_THREADING_LAYER", None)
-        else:
-            os.environ["MKL_THREADING_LAYER"] = threading_layer
 
 
 @dataclass
@@ -643,34 +522,33 @@ class _ActiveCaseWorker:
     result_queue: Any
     record: BatchCaseRecord
     started_at: float
+    payload: tuple | str | None = None
 
 
 def _terminate_process(process) -> None:
+    if process.pid is None:
+        return
     if not process.is_alive():
         process.join()
         return
     process.terminate()
     process.join(_PROCESS_TERMINATE_GRACE_S)
-    if process.is_alive() and getattr(process, "kill", None) is not None:
+    if process.is_alive():
         process.kill()
         process.join()
 
 
 def _close_worker(worker: _ActiveCaseWorker) -> None:
     worker.result_queue.close()
-    close_process = getattr(worker.process, "close", None)
-    if close_process is not None:
-        close_process()
+    worker.process.close()
 
 
-def _apply_worker_payload(record: BatchCaseRecord, payload: dict[str, Any]) -> None:
-    if not payload.get("ok"):
-        raise BatchCaseWorkerError(str(payload.get("error", "Batch case worker failed.")))
-    record.output_directory = Path(payload["output_directory"])
-    record.balance_errors = dict(payload["balance_errors"])
-    record.plot_status = str(payload["plot_status"])
-    record.plot_errors = dict(payload["plot_errors"])
-    record.status = "success"
+def _apply_case_result(record: BatchCaseRecord, payload: tuple | str) -> None:
+    if isinstance(payload, str):
+        record.status, record.error = "simulation_failed", payload
+    else:
+        record.output_directory, record.balance_errors, record.plot_status, record.plot_errors = payload
+        record.status = "success"
 
 
 def _run_cases_in_processes(
@@ -681,6 +559,7 @@ def _run_cases_in_processes(
     timeout_s: float | None,
     generate_artifacts_fn: Callable[[Case], dict[str, Path]] | None,
     run_case_fn: Callable[..., RunResult] | None,
+    checkpoint: Callable[[], None],
 ) -> None:
     context = mp.get_context("spawn")
     pending = iter(zip(cases, records))
@@ -703,12 +582,13 @@ def _run_cases_in_processes(
                     target=_run_case_worker,
                     args=(
                         case.run_path,
-                        single_threaded,
                         generate_artifacts_fn,
                         run_case_fn,
                         result_queue,
                     ),
                 )
+                worker = _ActiveCaseWorker(process, result_queue, record, started_at)
+                active.append(worker)
                 try:
                     # Apply limits before the child imports NumPy or DAETools.
                     if single_threaded:
@@ -717,50 +597,39 @@ def _run_cases_in_processes(
                     else:
                         process.start()
                 except Exception as exc:
-                    if getattr(process, "pid", None) is not None:
-                        _terminate_process(process)
-                        close_process = getattr(process, "close", None)
-                        if close_process is not None:
-                            close_process()
-                    result_queue.close()
+                    _terminate_process(process)
+                    _close_worker(worker)
+                    active.remove(worker)
                     record.status = "simulation_failed"
                     record.error = (
                         "Could not start the batch case worker; custom functions must be "
                         f"picklable. {exc}"
                     )
                     record.runtime_s = perf_counter() - started_at
-                    continue
-                active.append(
-                    _ActiveCaseWorker(
-                        process=process,
-                        result_queue=result_queue,
-                        record=record,
-                        started_at=started_at,
-                    )
-                )
+                    checkpoint()
 
             made_progress = False
             now = perf_counter()
             for worker in tuple(active):
                 elapsed = now - worker.started_at
-                if (
-                    timeout_s is not None
-                    and elapsed >= timeout_s
-                    and worker.process.is_alive()
-                ):
+                alive = worker.process.is_alive()
+                # Drain before joining: a large payload can keep the child's queue feeder alive.
+                if worker.payload is None:
+                    try:
+                        worker.payload = worker.result_queue.get(timeout=0.0 if alive else 0.1)
+                    except Empty:
+                        pass
+                if alive and (timeout_s is None or elapsed < timeout_s):
+                    continue
+                if alive:
                     _terminate_process(worker.process)
                     worker.record.status = "timeout_failed"
                     worker.record.error = f"Timed out after {timeout_s:g} seconds."
-                elif worker.process.is_alive():
-                    continue
                 else:
                     worker.process.join()
-                    try:
-                        payload = worker.result_queue.get(timeout=1.0)
-                        _apply_worker_payload(worker.record, payload)
-                    except Empty:
-                        worker.record.status = "simulation_failed"
-                        worker.record.error = (
+                    payload = worker.payload
+                    if payload is None:
+                        payload = (
                             "Batch case worker finished without returning a result."
                             if worker.process.exitcode == 0
                             else (
@@ -768,14 +637,13 @@ def _run_cases_in_processes(
                                 f"{worker.process.exitcode}."
                             )
                         )
-                    except Exception as exc:
-                        worker.record.status = "simulation_failed"
-                        worker.record.error = str(exc)
+                    _apply_case_result(worker.record, payload)
 
                 worker.record.runtime_s = perf_counter() - worker.started_at
                 _close_worker(worker)
                 active.remove(worker)
                 made_progress = True
+                checkpoint()
 
             if active and not made_progress:
                 active[0].process.join(_PROCESS_POLL_INTERVAL_S)
@@ -843,46 +711,45 @@ def run_batch_file(
 
     summary_path = document.output_directory / "summary.csv"
     _check_output_collisions(document, expanded_cases, summary_path)
-    _write_case_files(expanded_cases)
-
-    if generate_artifacts_fn is None and document.spec.artifacts:
-        from .artifacts import generate_artifacts
-
-        generate_artifacts_fn = generate_artifacts
-
-    cases = tuple(case for case in resolved_cases if case is not None)
-    if effective_workers > 1 or timeout_s is not None:
-        _run_cases_in_processes(
-            cases,
-            records,
-            workers=effective_workers,
-            timeout_s=timeout_s,
-            generate_artifacts_fn=generate_artifacts_fn,
-            run_case_fn=run_case_fn,
-        )
-    else:
-        for case, record in zip(cases, records):
-            record.status = "running"
-            start = perf_counter()
-            try:
-                output_directory, balance_errors, plot_status, plot_errors = _run_case_direct(
-                    case,
-                    generate_artifacts_fn,
-                    run_case_fn,
-                )
-                record.output_directory = output_directory
-                record.balance_errors = balance_errors
-                record.plot_status = plot_status
-                record.plot_errors = plot_errors
-                record.status = "success"
-            except Exception as exc:
-                record.status = "simulation_failed"
-                record.error = str(exc)
-            finally:
-                record.runtime_s = perf_counter() - start
-
     axis_ids = tuple(axis.id for axis in document.spec.axes)
-    _write_records_csv(summary_path, records, axis_ids)
+
+    def checkpoint() -> None:
+        _write_records_csv(summary_path, records, axis_ids)
+
+    checkpoint()
+    try:
+        _write_case_files(expanded_cases)
+        if generate_artifacts_fn is None and document.spec.artifacts:
+            from .artifacts import generate_artifacts
+
+            generate_artifacts_fn = generate_artifacts
+        cases = tuple(case for case in resolved_cases if case is not None)
+        if effective_workers > 1 or timeout_s is not None:
+            _run_cases_in_processes(
+                cases, records, workers=effective_workers, timeout_s=timeout_s,
+                generate_artifacts_fn=generate_artifacts_fn, run_case_fn=run_case_fn,
+                checkpoint=checkpoint,
+            )
+        else:
+            for record in records:
+                record.status = "running"
+                start = perf_counter()
+                try:
+                    payload = _run_case_direct(
+                        record.run_yaml_path, generate_artifacts_fn, run_case_fn,
+                    )
+                    _apply_case_result(record, payload)
+                finally:
+                    record.runtime_s = perf_counter() - start
+                checkpoint()
+    except BaseException as exc:
+        for record in records:
+            if record.status in ("running", "validation_passed"):
+                record.status = "interrupted_failed"
+                record.error = f"Batch interrupted: {type(exc).__name__}: {exc}"
+        raise
+    finally:
+        checkpoint()
     return BatchResult(
         batch_path=document.batch_path,
         output_directory=document.output_directory,
@@ -895,7 +762,6 @@ def run_batch_file(
 __all__ = (
     "BatchAxis",
     "BatchAxisValue",
-    "BatchCaseTimeoutError",
     "BatchDocument",
     "BatchPatch",
     "BatchResult",

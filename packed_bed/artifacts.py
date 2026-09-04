@@ -6,20 +6,15 @@ from importlib.util import find_spec
 import math
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-
-import matplotlib.pyplot as plt
 import numpy as np
 
 from .config import Case
+from .plotting.definitions import pyplot, save_figure
 from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S
 from .solid_profiles import (
-    build_cell_scalar_profile,
+    build_cell_profiles,
     build_face_scalar_profile,
     build_uniform_axial_grid,
-    convert_solid_profile_to_bed_volume,
     gas_fraction_from_voidages,
     solid_fraction_from_voidages,
     zone_edges,
@@ -96,11 +91,6 @@ def _finalize_series_axes(axes, *, x_min, x_max):
         axis.grid(True, alpha=0.3)
         axis.set_xlim(float(x_min), float(x_max))
         axis.margins(x=0.0)
-
-
-def _save_figure(figure, path: Path) -> None:
-    figure.savefig(path, bbox_inches="tight")
-    plt.close(figure)
 
 
 def _render_system_graph(case: Case, output_dir: Path, property_registry) -> dict[str, Path]:
@@ -228,6 +218,7 @@ def render_operating_program(
     *,
     smooth_ramp_width_s: float = DEFAULT_SMOOTH_RAMP_WIDTH_S,
 ) -> dict[str, Path]:
+    plt = pyplot()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -251,32 +242,16 @@ def render_operating_program(
 
     figure, axes = plt.subplots(4, 1, figsize=(12, 12), sharex=True)
 
-    flow_values = _series_from_smoothed_program(
-        inlet_flow_program,
-        sample_times,
-        smooth_ramp_width_s=smooth_ramp_width_s,
-    )
-    axes[0].plot(sample_times, flow_values, color="#1d3557", linewidth=2)
-    axes[0].set_ylabel("mol/s")
-    axes[0].set_title("Inlet Flow")
-
-    temp_values = _series_from_smoothed_program(
-        inlet_temperature_program,
-        sample_times,
-        smooth_ramp_width_s=smooth_ramp_width_s,
-    )
-    axes[1].plot(sample_times, temp_values, color="#e76f51", linewidth=2)
-    axes[1].set_ylabel("K")
-    axes[1].set_title("Inlet Temperature")
-
-    pressure_values = _series_from_smoothed_program(
-        outlet_pressure_program,
-        sample_times,
-        smooth_ramp_width_s=smooth_ramp_width_s,
-    )
-    axes[2].plot(sample_times, pressure_values, color="#264653", linewidth=2)
-    axes[2].set_ylabel("Pa")
-    axes[2].set_title("Outlet Pressure")
+    for axis, program, color, unit, title in (
+        (axes[0], inlet_flow_program, "#1d3557", "mol/s", "Inlet Flow"),
+        (axes[1], inlet_temperature_program, "#e76f51", "K", "Inlet Temperature"),
+        (axes[2], outlet_pressure_program, "#264653", "Pa", "Outlet Pressure"),
+    ):
+        values = _series_from_smoothed_program(
+            program, sample_times, smooth_ramp_width_s=smooth_ramp_width_s,
+        )
+        axis.plot(sample_times, values, color=color, linewidth=2)
+        axis.set(ylabel=unit, title=title)
 
     composition_values = _series_from_smoothed_program(
         inlet_composition_program,
@@ -304,12 +279,13 @@ def render_operating_program(
     figure.tight_layout()
 
     svg_path = output_dir / "operating_program.svg"
-    _save_figure(figure, svg_path)
+    save_figure(figure, svg_path)
 
     return {"operating_program_svg": svg_path}
 
 
 def render_initial_solid_profile(case: Case, output_dir) -> dict[str, Path]:
+    plt = pyplot()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -319,16 +295,9 @@ def render_initial_solid_profile(case: Case, output_dir) -> dict[str, Path]:
         case.run.model.axial_cells,
     )
     authored_edges = zone_edges(case.solids)
-    e_b = build_cell_scalar_profile(case.solids, cell_centers, "e_b")
-    e_p = build_cell_scalar_profile(case.solids, cell_centers, "e_p")
+    e_b, e_p, bed_basis_concentration = build_cell_profiles(case.solids, cell_centers)
     gas_fraction = gas_fraction_from_voidages(e_b, e_p)
     solid_fraction = solid_fraction_from_voidages(e_b, e_p)
-    bed_basis_concentration = convert_solid_profile_to_bed_volume(
-        case.solids,
-        cell_centers,
-        solid_fraction,
-        case.solids.solid_species,
-    )
     d_p = build_face_scalar_profile(case.solids, face_positions, "d_p")
 
     unit_label = {
@@ -381,7 +350,7 @@ def render_initial_solid_profile(case: Case, output_dir) -> dict[str, Path]:
     figure.tight_layout()
 
     svg_path = output_dir / "initial_solid_profile.svg"
-    _save_figure(figure, svg_path)
+    save_figure(figure, svg_path)
 
     return {"initial_solid_profile_svg": svg_path}
 

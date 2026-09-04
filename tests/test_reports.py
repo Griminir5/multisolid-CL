@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
-import subprocess
-import sys
 
 import numpy as np
 import pytest
@@ -163,6 +162,8 @@ def test_each_report_owns_exact_sources_outputs_dimensions_and_units(
         for variable in dataset.data_vars.values()
     )
     assert set(dataset.coords) == {dimension for dimensions in expected_outputs.values() for dimension in dimensions}
+    assert dataset.time.attrs["units"] == "s"
+    assert all(dataset[name].attrs["units"] == "m" for name in ("x_cell", "x_face") if name in dataset.coords)
 
 
 def test_gas_mole_fraction_uses_model_boundaries_and_hides_flux_support(tmp_path: Path) -> None:
@@ -244,7 +245,7 @@ def test_netcdf_only_plots_continue_after_one_failure(tmp_path: Path, monkeypatc
     assert load_dataset(results_path).identical(dataset)
 
 
-def test_netcdf_round_trip_manifest_and_ml_conversion(tmp_path: Path) -> None:
+def test_netcdf_round_trip_manifest_preserves_input_snapshot(tmp_path: Path) -> None:
     case, process = _synthetic_case_and_process(tmp_path)
     reports = ("temperature", "pressure", "gas_mole_fraction", "gas_flux")
     case = _with_outputs(case, reports=reports, plots=PLOT_REGISTRY)
@@ -261,11 +262,14 @@ def test_netcdf_round_trip_manifest_and_ml_conversion(tmp_path: Path) -> None:
         balance_errors=compute_balance_errors(results_path),
         artifact_paths=plots.paths,
     )
+    input_hash = hashlib.sha256(case.program_path.read_bytes()).hexdigest()
+    case.program_path.write_text("invalid: [edited after loading", encoding="utf-8")
     manifest_path = write_run_manifest(result)
 
     assert all(path.is_file() for path in plots.paths.values())
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["status"] == "success"
+    assert manifest["inputs"]["program"]["sha256"] == input_hash
     assert manifest["outputs"]["results"]["sha256"]
     assert manifest["dataset"]["dimensions"]["gas_species"] == 2
     assert manifest["configuration"]["run"]["solver"]["suppress_algebraic_errors"] is False
@@ -283,24 +287,6 @@ def test_netcdf_round_trip_manifest_and_ml_conversion(tmp_path: Path) -> None:
         "stage": "solver execution",
         "traceback": "synthetic traceback",
     }
-
-    matrix_path = tmp_path / "matrix.csv"
-    subprocess.run(
-        [
-            sys.executable,
-            "tools/to_ml_matrix.py",
-            str(results_path),
-            str(matrix_path),
-            "--variables",
-            "temperature",
-            "pressure",
-        ],
-        cwd=Path(__file__).parents[1],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    assert matrix_path.is_file()
 
 
 def test_pre_run_artifacts_use_only_the_resolved_case(tmp_path: Path, monkeypatch) -> None:

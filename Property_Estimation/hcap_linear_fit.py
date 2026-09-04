@@ -1,44 +1,14 @@
+import argparse
+from pathlib import Path
+
+if __package__:
+    from ._fit import _as_1d_float_array, _evaluate_basis_matrix, _safe_r_squared, evaluate_linear_basis_model
+else:
+    from _fit import _as_1d_float_array, _evaluate_basis_matrix, _safe_r_squared, evaluate_linear_basis_model
+
 
 import numpy as np
 import matplotlib.pyplot as plt
-
-T_data = np.genfromtxt(r"Property_Estimation\enth_hcap_data\fe3o4\temp.csv",dtype=float)[1:]
-h_data = np.genfromtxt(r"Property_Estimation\enth_hcap_data\fe3o4\enth.csv",dtype=float)[1:]
-cp_data = np.genfromtxt(r"Property_Estimation\enth_hcap_data\fe3o4\hcap.csv",dtype=float)[1:]
-
-h_ref = -1118380 # J/mol
-t_ref = 298.15  # K
-
-h_weight = 9.0
-cp_weight = 1.0
-plot_all_models = True
-
-def _as_1d_float_array(values, name):
-    array = np.asarray(values, dtype=float)
-    if array.ndim != 1:
-        raise ValueError(f"{name} must be one-dimensional")
-    return array
-
-
-def _evaluate_basis_matrix(T_data, basis_funcs, name):
-    if not basis_funcs:
-        raise ValueError(f"{name} cannot be empty")
-
-    columns = []
-    for idx, basis_func in enumerate(basis_funcs):
-        values = np.asarray(basis_func(T_data), dtype=float)
-        if values.ndim == 0:
-            values = np.full_like(T_data, float(values), dtype=float)
-        if values.shape != T_data.shape:
-            raise ValueError(
-                f"{name}[{idx}] returned shape {values.shape}, expected {T_data.shape}"
-            )
-        if not np.all(np.isfinite(values)):
-            raise ValueError(f"{name}[{idx}] returned non-finite values")
-        columns.append(values)
-
-    return np.column_stack(columns)
-
 
 def fit_linear_basis_enthcp(
     T_data,
@@ -78,17 +48,6 @@ def fit_linear_basis_enthcp(
 
     theta, residuals, rank, singular_values = np.linalg.lstsq(A, b, rcond=None)
     return theta, residuals, rank, singular_values
-
-
-def evaluate_linear_basis_model(T_data, basis_funcs, params, offset=0.0):
-    T_data = _as_1d_float_array(T_data, "T_data")
-    params = _as_1d_float_array(params, "params")
-
-    if len(basis_funcs) != len(params):
-        raise ValueError("basis_funcs and params must have the same length")
-
-    basis_matrix = _evaluate_basis_matrix(T_data, basis_funcs, "basis_funcs")
-    return offset + basis_matrix @ params
 
 
 def _poly_cp_basis(power, t_ref):
@@ -172,13 +131,6 @@ def build_default_basis_sweep(t_ref, max_poly_order=5):
     #bases.append(make_shomate_basis(t_ref))
     #bases.append(make_log_reciprocal_basis(t_ref))
     return bases
-
-
-def _safe_r_squared(y_true, y_pred):
-    total_sum_squares = np.sum((y_true - np.mean(y_true)) ** 2)
-    if total_sum_squares <= 0.0:
-        return np.nan
-    return 1.0 - np.sum((y_true - y_pred) ** 2) / total_sum_squares
 
 
 def summarize_basis_fit(
@@ -324,121 +276,60 @@ def print_fit_details(result, title):
     print(f"  BIC             = {result['bic']:.6g}")
 
 
-def plot_fit_comparison(
-    T_data,
-    h_data,
-    cp_data,
-    primary_result,
-    h_ref,
-    all_results=None,
-    plot_all_models=True,
-    secondary_result=None,
-):
-    T_plot = np.linspace(np.min(T_data), np.max(T_data), num=2000)
-
-    fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=True)
-
-    ax1.scatter(T_data, cp_data, label="Original")
-    ax1.set_ylabel("Cp [J/(mol*K)]")
-
-    ax2.scatter(T_data, h_data, label="Original")
-    ax2.set_xlabel("Temperature [K]")
-    ax2.set_ylabel("H [J/mol]")
-
-    if plot_all_models:
-        if all_results is None:
-            raise ValueError("all_results is required when plot_all_models=True")
-
-        for result in all_results:
-            cp_curve = evaluate_linear_basis_model(
-                T_plot,
-                result["basis"]["cp_basis_funcs"],
-                result["theta"],
+def plot_fit_comparison(T_data, h_data, cp_data, results, h_ref):
+    temperatures = np.linspace(np.min(T_data), np.max(T_data), num=2000)
+    figure, axes = plt.subplots(2, 1, sharex=True)
+    best_rss, best_bic = results[0], min(results, key=lambda result: result["bic"])
+    for axis, data, basis_key, offset, label in (
+        (axes[0], cp_data, "cp_basis_funcs", 0.0, "Cp [J/(mol*K)]"),
+        (axes[1], h_data, "h_basis_funcs", h_ref, "H [J/mol]"),
+    ):
+        axis.scatter(T_data, data, label="Original")
+        for result in results:
+            curve = evaluate_linear_basis_model(
+                temperatures, result["basis"][basis_key], result["theta"], offset=offset,
             )
-            h_curve = evaluate_linear_basis_model(
-                T_plot,
-                result["basis"]["h_basis_funcs"],
-                result["theta"],
-                offset=h_ref,
-            )
-            line_width = 2.5 if result["name"] == primary_result["name"] else 1.1
-            alpha = 0.95 if result["name"] == primary_result["name"] else 0.55
-            label = (
-                f"Best RSS: {result['name']}"
-                if result["name"] == primary_result["name"]
-                else result["name"]
-            )
-            ax1.plot(T_plot, cp_curve, linewidth=line_width, alpha=alpha, label=label)
-            ax2.plot(T_plot, h_curve, linewidth=line_width, alpha=alpha, label=label)
+            axis.plot(temperatures, curve, label=result["name"],
+                      linewidth=2.5 if result is best_rss else 1.1,
+                      linestyle="--" if result is best_bic and result is not best_rss else "-")
+        axis.set_ylabel(label)
+        axis.legend(loc="best", fontsize="small")
+    axes[1].set_xlabel("Temperature [K]")
+    figure.tight_layout()
+    return figure
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Fit heat capacity and enthalpy from species CSV data.")
+    parser.add_argument("species", help="Species directory under the data root.")
+    parser.add_argument("--h-ref", type=float, required=True, help="Reference enthalpy in J/mol.")
+    parser.add_argument("--t-ref", type=float, default=298.15)
+    parser.add_argument("--order", type=int, default=5)
+    parser.add_argument("--data-root", type=Path, default=Path(__file__).parent / "enth_hcap_data")
+    parser.add_argument("--output", type=Path, help="Save a figure instead of opening a window.")
+    args = parser.parse_args(argv)
+    if args.order < 0:
+        parser.error("--order must be nonnegative")
+    directory = args.data_root / args.species
+    temperature, enthalpy, capacity = (
+        np.genfromtxt(directory / f"{name}.csv", dtype=float)[1:] for name in ("temp", "enth", "hcap")
+    )
+    results = sweep_basis_fits(
+        temperature, enthalpy, capacity,
+        build_default_basis_sweep(t_ref=args.t_ref, max_poly_order=args.order),
+        args.h_ref, h_weight=9.0, cp_weight=1.0,
+    )
+    print(format_sweep_table(results))
+    for result, label in zip(results[:2], ("Best residual fit", "Second residual fit")):
+        print_fit_details(result, label)
+    print_fit_details(min(results, key=lambda item: item["bic"]), "Best BIC fit")
+    figure = plot_fit_comparison(temperature, enthalpy, capacity, results, args.h_ref)
+    if args.output:
+        figure.savefig(args.output, bbox_inches="tight")
+        plt.close(figure)
     else:
-        cp_primary = evaluate_linear_basis_model(
-            T_plot,
-            primary_result["basis"]["cp_basis_funcs"],
-            primary_result["theta"],
-        )
-        h_primary = evaluate_linear_basis_model(
-            T_plot,
-            primary_result["basis"]["h_basis_funcs"],
-            primary_result["theta"],
-            offset=h_ref,
-        )
-
-        ax1.plot(T_plot, cp_primary, label=f"Best RSS: {primary_result['name']}")
-        ax2.plot(T_plot, h_primary, label=f"Best RSS: {primary_result['name']}")
-
-    if secondary_result is not None and secondary_result["name"] != primary_result["name"]:
-        cp_secondary = evaluate_linear_basis_model(
-            T_plot,
-            secondary_result["basis"]["cp_basis_funcs"],
-            secondary_result["theta"],
-        )
-        h_secondary = evaluate_linear_basis_model(
-            T_plot,
-            secondary_result["basis"]["h_basis_funcs"],
-            secondary_result["theta"],
-            offset=h_ref,
-        )
-        ax1.plot(T_plot, cp_secondary, "--", label=f"Best BIC: {secondary_result['name']}")
-        ax2.plot(T_plot, h_secondary, "--", label=f"Best BIC: {secondary_result['name']}")
-
-    ax1.legend(loc="best", fontsize="small")
-    ax2.legend(loc="best", fontsize="small")
-    plt.tight_layout()
-    plt.show()
+        plt.show()
 
 
-bases = build_default_basis_sweep(t_ref=t_ref, max_poly_order=5)
-results = sweep_basis_fits(
-    T_data=T_data,
-    h_data=h_data,
-    cp_data=cp_data,
-    bases=bases,
-    h_ref=h_ref,
-    h_weight=h_weight,
-    cp_weight=cp_weight,
-)
-
-best_rss = results[0]
-best2nd_rss = results[1]
-best_bic = min(results, key=lambda result: result["bic"])
-
-print("Basis sweep summary")
-print(format_sweep_table(results))
-print()
-print_fit_details(best_rss, "Best weighted residual fit")
-print()
-print_fit_details(best2nd_rss, "Second best weighted residual fit")
-print()
-print_fit_details(best_bic, "Best BIC fit")
-
-plot_fit_comparison(
-    T_data,
-    h_data,
-    cp_data,
-    best_rss,
-    h_ref=h_ref,
-    all_results=results,
-    plot_all_models=plot_all_models,
-    secondary_result=best_bic,
-)
-
+if __name__ == "__main__":
+    main()

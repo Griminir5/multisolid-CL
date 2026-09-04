@@ -1,31 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Mapping
 
 from ..reactions import KineticsHook, ReactionFamily, ReactionNetwork
-
-
-@dataclass(frozen=True)
-class KineticsContext:
-    model: Any
-    idx_cell: Any
-    gas_species_index: Mapping[str, int]
-    solid_species_index: Mapping[str, int]
-
-    def gas_index(self, species_id: str) -> int:
-        return self.gas_species_index[species_id]
-
-    def solid_index(self, species_id: str) -> int:
-        return self.solid_species_index[species_id]
-
-from .copper_al2o3 import FAMILY as COPPER_AL2O3_SAN_PIO_FAMILY  # noqa: E402
-from .copper_sio2 import FAMILY as COPPER_SIO2_SAN_PIO_FAMILY  # noqa: E402
-from .iron_he import FAMILY as IRON_HE_FAMILY  # noqa: E402
-from .nickel_medrano import FAMILY as NICKEL_MEDRANO_FAMILY  # noqa: E402
-from .reforming_numaguchi import FAMILY as REFORMING_NUMAGUCHI_FAMILY  # noqa: E402
-from .reforming_xu_froment import FAMILY as REFORMING_XU_FROMENT_FAMILY  # noqa: E402
+from .copper_al2o3 import FAMILY as COPPER_AL2O3_SAN_PIO_FAMILY
+from .copper_sio2 import FAMILY as COPPER_SIO2_SAN_PIO_FAMILY
+from .iron_he import FAMILY as IRON_HE_FAMILY
+from .nickel_medrano import FAMILY as NICKEL_MEDRANO_FAMILY
+from .reforming_numaguchi import FAMILY as REFORMING_NUMAGUCHI_FAMILY
+from .reforming_xu_froment import FAMILY as REFORMING_XU_FROMENT_FAMILY
 
 
 FAMILY_REGISTRY: Mapping[str, ReactionFamily] = MappingProxyType({
@@ -70,7 +54,6 @@ def resolve_kinetics_hooks(
 
 __all__ = (
     "FAMILY_REGISTRY",
-    "KineticsContext",
     "load_reaction_families",
     "resolve_kinetics_hooks",
 )

@@ -1,571 +1,270 @@
-# multisolid-CL packed bed model
+# multisolid-CL
 
-`packed_bed` is a DAETools-based packed-bed reactor simulation package for
-multi-species gas flow, solid inventories, heat balance, reaction source terms,
-and configurable operating programs. Runs are driven by YAML files that describe
-the selected gas species, solid species, reactions, inlet program, geometry,
-solver tolerances, and requested outputs.
+`packed_bed` simulates gas flow, heat transfer, and reactions in a packed-bed reactor.
+The model uses DAETools. YAML files specify the species, solids, operating program, geometry, solver, and outputs.
+Each run writes an xarray dataset in NetCDF format and a JSON manifest.
 
-For the runtime flow and supported extension points, see
-[`docs/architecture.md`](docs/architecture.md).
+**Install the package.** Use Python 3.11 or 3.12. The commands below use PowerShell from the repository directory.
 
-The current source tree is intended to be run from a checkout. There is no
-project packaging metadata in this repository yet, so install the runtime
-dependencies into your Python environment and run commands from the repository
-root.
+1. Create an environment.
 
-This repository does not redistribute DAETools, OpenCS, OpenCL kernels, PyQt, or
-other third-party runtime packages. Install those dependencies separately under
-their own licenses.
+   ```powershell
+   python -m venv .venv
+   ```
 
-## Requirements
+2. Activate the environment.
 
-- Python 3.11 or Python 3.12.
-- DAETools 2.6.0, including the dependencies normally required by DAETools.
-- Runtime Python dependencies used directly by this package:
-  - `numpy`
-  - `xarray`
-  - `scipy` (used for portable NetCDF output)
-  - `pydantic`
-  - `PyYAML`
-  - `matplotlib`
-  - `PyQt6`
-  - `PyQt6-WebEngine`
-- Optional dependencies:
-  - Graphviz plus `pygraphviz`, used to render the species/reaction system graph.
-  - `vtk`, for DAETools or visualization workflows that need VTK support.
+   ```powershell
+   .\.venv\Scripts\Activate.ps1
+   ```
 
-Example environment setup:
+3. Install the package and test dependencies.
 
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install numpy xarray scipy pydantic PyYAML matplotlib
-```
-Afterwards follow `daetools` installation guide.
+   ```powershell
+   python -m pip install -e ".[dev]"
+   ```
 
-Install optional graph rendering support only if you need `system_graph.svg`:
+4. Install [DAETools 2.6.0](https://daetools.sourceforge.io/downloads.html) and its dependencies in the same environment.
+   Use the DAETools archive for your operating system and Python version.
+   From the extracted DAETools directory, run `python -m pip install .`.
 
-```powershell
-python -m pip install pygraphviz
-```
+Configuration validation does not need DAETools. Simulation needs a working DAETools installation and a supported solver.
+This repository does not distribute DAETools, OpenCS, or their binary dependencies.
 
-`pygraphviz` also needs the Graphviz system libraries and executables available
-to the build and runtime environment.
+For the DAETools plotter, install the GUI dependencies with `python -m pip install -e ".[plotter]"`.
+For the system graph, install Graphviz.
+Then run `python -m pip install -e ".[graph]"`.
+Graphviz must be available to `pygraphviz`.
 
-## Quick start
-
-From the repository root, validate the bundled example configuration:
+**Validate a case.** Start with the [default case](packed_bed/examples/default_case/run.yaml).
 
 ```powershell
 python -m packed_bed packed_bed/examples/default_case/run.yaml --validate-only
 ```
 
-Remove `--validate-only` to integrate the case. `--artifacts` creates the
-configuration-only system, operating-program, and initial-profile diagrams
-before the run. `--dae-plotter` retains the existing DAETools process for its
-GUI; it does not change what is reported to `results.nc`.
+Validation detects duplicate YAML keys, invalid fields, missing species, unresolved references, and incompatible report or plot selections.
+It does not create output files. It does not establish the scientific validity of a reaction or property correlation.
 
-## Running a batch
-
-Batch runs expand a cartesian product of named options into ordinary case
-directories. Each generated case contains materialized `run.yaml`,
-`chemistry.yaml`, `program.yaml`, and `solids.yaml` files, then uses the normal
-single-case validation and execution path.
+**Run a case.** Remove `--validate-only` to start the solver.
 
 ```powershell
-python -m packed_bed batch packed_bed\examples\default_batch_case\batch.yaml
+python -m packed_bed packed_bed/examples/default_case/run.yaml
 ```
 
-Run independent simulations concurrently, with one single-threaded worker
-process per active case:
+Use `--artifacts` to create the operating-program diagram and initial solid profile before the run.
+If `pygraphviz` is available, this option also creates the system graph.
+Use `--dae-plotter` to open the DAETools plotter after the run.
+Use `--debug` to show the traceback for an unexpected error.
+The installed `packed-bed` command accepts the same arguments as `python -m packed_bed`.
+
+A single run can replace files in its output directory. Use a different output directory to keep an earlier result.
+
+**Edit the input files.** The run file refers to three other files.
+All relative paths use the directory that contains the referring file.
+
+| File | Contents |
+| --- | --- |
+| `run.yaml` | File references, geometry, solver settings, output paths, reports, and plots |
+| `chemistry.yaml` | Gas species, reaction families, and reaction IDs |
+| `program.yaml` | Inlet flow, inlet temperature, outlet pressure, and inlet composition |
+| `solids.yaml` | Solid species, initial concentrations, voidages, and particle diameters |
+
+Use the complete YAML files in the example directory as templates.
+Use kelvin, pascals, metres, seconds, and mol/s unless a field specifies another unit.
+Each composition must include every selected gas species. The mole fractions must sum to 1.
+Solid zones must cover the bed without gaps or overlaps.
+
+A program channel has an `initial` value and an optional list of `hold` or `ramp` steps.
+Each step has a `duration_s`. Each ramp also has a `target`.
+A channel without steps stays constant.
+
+With `repeat_program: true`, the next cycle starts from the previous cycle's final value.
+The program does not reset to its initial value between cycles.
+
+The solver smooths ramps with a one-second width. Thus, the value at time zero can differ from the declared initial value.
+The simulation horizon limits the compiled program.
+
+For a flow in gas hourly space velocity, set `inlet_flow.basis: ghsv_per_h`.
+The compiler uses the bed volume, 273.15 K, and 100,000 Pa to convert GHSV to mol/s.
+The manifest retains the declared basis and the compiled values.
+
+**Select numerical settings.** The mass and heat schemes are independent.
+Available schemes are `upwind1`, `central`, `linear_upwind2`, `muscl_minmod`, `weno3`, and `weno5`.
+The default interior flow mode is `forward_only`.
+The `reversible` mode permits flow reversal at interior faces. It does not change the inlet and outlet boundary conditions.
+
+`solver.name` selects a backend from the registry in [simulation.py](packed_bed/simulation.py).
+The default is `trilinos_klu`. The default example selects `superlu`.
+Use a backend included in your DAETools installation.
+`threads: 0` retains environment limits and uses the DAETools default thread count.
+A positive value sets the thread count.
+
+The IDAS defaults are `suppress_algebraic_errors: false`, `max_nonlinear_iterations: 4`, and `nonlinear_convergence_coefficient: 0.33`.
+The default example changes these values and uses `relative_tolerance: 1.0e-3`.
+Compare important results with a stricter tolerance before you use a new solver configuration.
+
+**Run a batch.** A batch expands the combinations of named axis values into separate cases.
 
 ```powershell
-python -m packed_bed batch packed_bed\examples\default_batch_case\batch.yaml --workers 8
+python -m packed_bed batch packed_bed/examples/default_batch_case/batch.yaml --validate-only
+python -m packed_bed batch packed_bed/examples/default_batch_case/batch.yaml --workers 4 --case-timeout-s 600
 ```
 
-The same setting can be stored as top-level `workers: 8` in `batch.yaml`; the
-CLI option overrides it. If omitted, the default is `1` (the bundled example
-sets it to `4`). When more than one worker is requested, every generated case
-is materialized with `solver.threads: 1`, and the worker also limits OpenMP,
-MKL, OpenBLAS, NumExpr, BLIS, and Accelerate to one thread before importing the
-numerical runtime. `workers` is capped at the number of cases, but is not capped
-at the machine's logical CPU count; choose a value no larger than the available
-CPUs and reduce it if solver memory becomes the limiting resource. Processes
-are not pinned to particular CPU IDs—the OS scheduler assigns each
-single-threaded simulation to a core.
+The first command validates all four example cases without writes.
+The second command runs up to four cases at the same time.
+Each worker uses one numerical thread when the requested worker count exceeds one.
 
-Expand and validate every generated case without creating directories,
-manifests, plots, or other files:
+A timeout stops that case. The batch continues with the other cases.
 
-```powershell
-python -m packed_bed batch packed_bed\examples\default_batch_case\batch.yaml --validate-only
-```
+The command-line values override `workers` and `case_timeout_s` in the batch file.
+Without these settings, the batch uses one worker and no timeout.
+The worker count cannot exceed the case count. It is not limited automatically by the CPU count.
 
-Kill and mark a single generated case as failed if it exceeds a per-case wall
-clock timeout, while continuing with the rest of the batch:
+The batch validates every case before it creates case files or starts simulations.
+Nested patches merge mappings in axis order. Later axes take precedence; lists replace earlier lists.
+Program and geometry presets use the same case validation as a single run.
+Each case receives its own four YAML files and output directory.
 
-```powershell
-python -m packed_bed batch packed_bed\examples\default_batch_case\batch.yaml --case-timeout-s 600
-```
+`summary.csv` records case selections, status, runtime, output paths, plot errors, and available balance errors.
+The batch updates this file after each case completes and on a handled interruption.
+A batch refuses to overwrite existing case directories or its summary.
+To run the batch again, select a new output directory. Automatic resume is not available.
+Use `python -m packed_bed batch --help` for the batch options.
 
-The same default can be set in `batch.yaml` with `case_timeout_s: 600.0`; the
-CLI option overrides the file setting.
+**Select reports and plots.** Reports determine the contents of `results.nc`.
+The [report registry](packed_bed/reports.py) defines the variables, dimensions, and units.
 
-The batch specification lives beside its own base case. Program presets can use
-the normal mol/s inlet-flow form, or can set `inlet_flow.basis: ghsv_per_h`.
-GHSV is ordinary program configuration for both single and batch cases. It is
-compiled to mol/s using the resolved case geometry, 273.15 K, and 1 bar; a
-materialized batch `program.yaml` retains the declared basis and values.
+Available reports are `temperature`, `pressure`, `velocity`, `gas_concentration`, `gas_mole_fraction`, `solid_concentration`, `solid_mole_fraction`,
+`gas_flux`, `reaction_rate`, `gas_enthalpy_flux`, `heat_balance`, and `mass_balance`.
+The reaction-rate report requires at least one selected reaction.
+An empty report list produces a dataset with the scheduled time coordinate and run metadata.
 
-Batch value overrides use recursive document patches. Nested mappings merge,
-later axes win deterministically, and sequences replace as a whole:
+| Plot | Required reports |
+| --- | --- |
+| `axial_profiles` | `temperature`, `pressure` |
+| `outlet_composition` | `gas_mole_fraction` |
+| `outlet_conditions` | `temperature`, `pressure`, `gas_flux` |
 
-```yaml
-axes:
-  - id: temperature
-    values:
-      - id: 700c
-        patch:
-          run:
-            model:
-              ambient_temperature_k: 973.15
-          program:
-            inlet_temperature:
-              initial: 973.15
-```
+Set `outputs.requested_plots: []` to disable automatic plots.
+Plots read the completed NetCDF file. Plot selection does not change the dataset.
+A plot failure does not discard a successful simulation result.
 
-Set top-level `artifacts: true` in `batch.yaml` when pre-run diagrams are
-wanted. Post-run plots are ordinary case configuration, so batch axes inherit
-or patch `run.outputs.requested_plots` in the same way as any other `run.yaml`
-value.
+Solid mole fraction is a derived output. It does not add a solver variable.
+The mass and heat balance reports add three and four accounting equations, respectively.
+The outlet composition uses the last-face species fluxes. At zero total flow, it uses the final cell's composition.
+Set `outputs.solver_incidence_matrix: true` for a labelled solver-incidence CSV and PNG.
 
-A completed batch writes one `summary.csv` containing each case selection,
-status, runtime, output path, and requested balance-error summaries.
+**Read the results.** Each run writes these files under `outputs.directory`.
 
-The top-level `run.yaml` points to three sibling input files:
+| File | Contents |
+| --- | --- |
+| `results.nc` | Selected variables with labelled time, species, cell, face, and reaction dimensions |
+| `manifest.json` | Input configuration, source hashes, code commit, package versions, output inventory, and status |
 
-- `chemistry.yaml`: selected gas species, reaction families, and reaction IDs.
-- `program.yaml`: inlet flow, inlet temperature, outlet pressure, and inlet
-  gas composition programs.
-- `solids.yaml`: selected solid species and the initial axial solid profile.
-
-Outputs are written under the `outputs.directory` configured in `run.yaml`.
-Artifacts are written under `outputs.artifacts_directory`.
-
-Each run writes:
-
-- `results.nc`: one labelled xarray dataset containing exactly the selected
-  reports, their model-sourced boundaries, and their derived public outputs.
-- `manifest.json`: configuration, Git and package versions, hashes, dataset
-  dimensions/units, runtime, simulation and plot status, balance summaries, or
-  failure stage/traceback.
-
-`results.nc` is finalized before any registered plot starts. Each configured
-plot consumes that file read-only, and plot selection is recorded only in the
-manifest. Consequently, changing `requested_plots` cannot change simulation
-reporting targets or NetCDF contents.
-
-The dataset uses separate labelled dimensions including `time`, `x_cell`,
-`x_face`, `gas_species`, `solid_species`, and `reaction`. Solid mole fractions
-are derived during extraction, so requesting them does not change the DAE
-system. Load all results in one line:
+File-based runs capture input hashes from the bytes parsed by the loader.
+The manifest preserves those hashes if the source files change later.
+An in-memory case has no source-file hashes.
+The code commit refers to the package repository, independently of the case directory.
+An installation without a Git checkout records no code commit.
+A failed run records its failure stage and traceback when it can write the manifest.
 
 ```python
-import xarray as xr
+from packed_bed.reports import load_dataset
 
-results = xr.load_dataset("output/results.nc", engine="scipy")
+results = load_dataset("packed_bed/examples/default_case/output/results.nc")
+outlet = results.outlet_composition.sel(gas_species="H2")
 ```
 
-For an explicitly selected downstream ML matrix, use
-`tools/to_ml_matrix.py`; core extraction does not impose a permanent feature
-list. The xarray adoption spike is recorded in `docs/xarray-spike.md`.
-
-`tools/generate_clr_programs.py` is the retained, deterministic CLI for
-generating stratified GHSV operating programs for sampling studies; run it with
-`--help` to see its output, count, seed, and channel-probability options.
-
-## Configuration example
-
-The complete tracked example is
-[`packed_bed/examples/default_case`](packed_bed/examples/default_case). A case
-uses the following four-file shape.
-
-`chemistry.yaml` selects species and reactions:
-
-```yaml
-gas_species:
-  - H2
-  - H2O
-  - N2
-  - O2
-
-reaction_families:
-  - nickel_medrano
-
-reaction_ids:
-  - ni_reduction_h2_medrano
-  - ni_oxidation_o2_medrano
-```
-
-Bundled families are `nickel_medrano`, `reforming_xu_froment`,
-`reforming_numaguchi`, `copper_sio2_san_pio`, `copper_al2o3_san_pio`, and
-`iron_he`. The two copper families are intentionally support-specific: the
-SiO2 family does not require aluminium or spinel components. See
-`packed_bed/kinetics/KINETICS_SOURCES.md` for provenance and reaction scope.
-
-`program.yaml` defines scalar channels and the inlet composition channel. Every
-composition mapping must contain exactly the configured gas species, and mole
-fractions must sum to `1.0`.
-
-```yaml
-inlet_flow:
-  initial: 1.0
-
-inlet_temperature:
-  initial: 600.0
-
-outlet_pressure:
-  initial: 5000000.0
-
-inlet_composition:
-  initial:
-    H2: 0.0
-    H2O: 0.0
-    N2: 1.0
-    O2: 0.0
-  steps:
-    - kind: ramp
-      duration_s: 5.0
-      target:
-        H2: 0.0
-        H2O: 0.0
-        N2: 0.8
-        O2: 0.2
-    - kind: hold
-      duration_s: 150.0
-```
-
-`solids.yaml` defines selected solid species and one or more contiguous axial
-zones. The zones must start at `0.0`, must not contain gaps or overlaps, and
-must end at `model.bed_length_m`.
-
-```yaml
-solid_species:
-  - Ni
-  - NiO
-
-initial_profile:
-  basis: bed
-  zones:
-    - x_start_m: 0.0
-      x_end_m: 2.5
-      e_b: 0.5
-      e_p: 0.5
-      d_p: 0.01
-      values:
-        Ni: 1143.0
-        NiO: 0.0
-```
-
-`run.yaml` selects geometry, solver settings, numerical schemes, and reports.
-Supported axial schemes are `upwind1`, `central`, `linear_upwind2`,
-`muscl_minmod`, `weno3`, and `weno5`. Interior transport behavior is selected
-alongside them:
-
-```yaml
-simulation:
-  interior_flow_mode: forward_only
-  mass_scheme: weno3
-  heat_scheme: weno3
-```
-
-`forward_only` is the default and constructs only the upstream state needed
-for positive flow. The model currently supports forward flow end-to-end: its
-inlet and outlet equations are oriented in that direction. `reversible`
-enables two-sided flux splitting at interior faces, so local species and
-advective-enthalpy transport can select either reconstructed state, but it does
-not make the boundary conditions reversible.
-
-The solver block exposes the IDAS controls used by the bundled performance
-profile:
-
-```yaml
-solver:
-  name: superlu
-  threads: 0
-  relative_tolerance: 1.0e-3
-  suppress_algebraic_errors: true
-  max_nonlinear_iterations: 12
-  nonlinear_convergence_coefficient: 1.0
-```
-
-When omitted, the last three controls retain DAETools' defaults: `false`, `4`,
-and `0.33`. Algebraic-error suppression removes algebraic variables from the
-local time-integration error norm; IDAS still solves their equations at every
-step. It is appropriate for this index-1 formulation, but tolerance changes
-should always be checked against a stricter reference for a new case. The full
-default-case benchmark and error comparison are recorded in
-[`docs/performance.md`](docs/performance.md).
-
-Common report IDs include `temperature`, `pressure`, `velocity`, `gas_concentration`,
-`gas_mole_fraction`, `solid_concentration`, `solid_mole_fraction`, `gas_flux`,
-`reaction_rate`, `gas_enthalpy_flux`, `heat_balance`, and `mass_balance`.
-
-Report and automatic plot selection are explicit and independent:
-
-```yaml
-outputs:
-  directory: output
-  artifacts_directory: output/artifacts
-  solver_incidence_matrix: false
-  requested_reports:
-    - temperature
-    - pressure
-    - gas_mole_fraction
-    - gas_flux
-  requested_plots:
-    - outlet_composition
-    - outlet_conditions
-    - axial_profiles
-```
-
-`outlet_composition` requires `gas_mole_fraction`; `outlet_conditions`
-requires `temperature`, `pressure`, and `gas_flux`; and `axial_profiles`
-requires `temperature` and `pressure`. Validation reports unknown IDs and all
-missing report dependencies before model construction or output creation. An
-empty `requested_plots` list disables automatic plots.
-
-The `gas_mole_fraction` report records `y_in` and `y_gas`. Its outlet
-composition is derived from the last-face `N_gas_face` species fluxes; when
-the absolute total flux is below the flow tolerance it falls back to the final
-cell of `y_gas`. That face flux is an internal reporting dependency and does
-not expose `gas_flux` in NetCDF unless `gas_flux` is explicitly requested.
-
-Most reports only control recording of variables required by the physical
-model. The mass and heat balances are optional solver-integrated diagnostics:
-their three and four accounting variables/equations, respectively, exist only
-when those reports are requested. `reaction_rate` requires at least one
-selected reaction. Solid mole fraction remains a derived output and does not
-add a solver variable. With an empty report list, `results.nc` contains only
-the scheduled time coordinate and run metadata.
-
-Set `outputs.solver_incidence_matrix: true` to write solver sparsity artifacts
-after DAETools initializes the model. The run writes a labelled CSV edge list
-and a static PNG under `artifacts_directory`.
-
-## Adding new components
-
-In this codebase, a "component" is a gas or solid species identifier such as
-`H2`, `Ni`, or `Fe2O3`. Component IDs are used consistently across the property
-registry, reactions, chemistry configuration, inlet composition, and solid
-profiles.
-
-To add a component:
-
-1. Add a `SpeciesProperties` record to `PROPERTY_REGISTRY` in
-   `packed_bed/properties.py`.
-2. Use `phase="gas"` for gas species and `phase="solid"` for solid species.
-3. Provide `mw` in `kg/mol`.
-4. Provide an enthalpy correlation for every gas and solid species.
-5. Provide a viscosity correlation for every gas species.
-6. Add the species ID to `chemistry.yaml` if it is a gas species.
-7. Add the species ID to `solids.yaml` and to every solid zone's `values` map if
-   it is a solid species.
-8. For gas species, add that species to every `program.yaml`
-   `inlet_composition.initial` and ramp `target` map.
-9. If a reaction uses the component, include it in that reaction's
-   `required_species`, `stoichiometry`, or `catalyst_species` as appropriate.
-
-Gas and solid species identifiers must be disjoint. The loader rejects a run if
-the same ID appears in both `gas_species` and `solid_species`.
-
-Example gas record:
+For a machine-learning table, select the variables explicitly.
 
 ```python
-"H2": SpeciesProperties(
-    name="Hydrogen",
-    phase="gas",
-    mw=2.01588e-3,
-    enthalpy=PolynomialHeatCapacity(
-        h_form_ref=0.0,
-        coefficients=(2.94409905e01, -2.38377533e-03, 6.39601662e-06, -2.03147561e-09),
-    ),
-    viscosity=QuadraticViscosity(
-        a0=2.04091133e-05,
-        a1=1.41343819e-08,
-        a2=-2.34255119e-12,
-    ),
+matrix = results[["outlet_temperature", "outlet_flow"]].to_stacked_array(
+    "feature", sample_dims=("time",)
 )
+matrix.to_pandas().to_csv("features.csv")
 ```
 
-Example solid record:
+**Use the Python interface.** Load the case before you import the simulation runtime.
 
 ```python
-"NiO": SpeciesProperties(
-    name="Nickel Oxide",
-    phase="solid",
-    mw=74.6928e-3,
-    enthalpy=PolynomialHeatCapacity(
-        h_form_ref=-239701.0,
-        coefficients=(5.64774634e01, -1.56343578e-02, 2.10045988e-05, -4.78601077e-09),
-    ),
-)
+from packed_bed.config import load_case
+
+case = load_case("packed_bed/examples/default_case/run.yaml")
+from packed_bed.simulation import run_case
+
+result = run_case(case)
 ```
 
-## Adding property correlations
+Read the source in this order:
 
-Property correlations are defined in `packed_bed/properties.py`.
+| Source | Responsibility |
+| --- | --- |
+| [config/models.py](packed_bed/config/models.py), [config/load.py](packed_bed/config/load.py) | Parse, validate, and resolve one `Case` |
+| [programs.py](packed_bed/programs.py) | Compile operating channels |
+| [properties.py](packed_bed/properties.py), [reactions.py](packed_bed/reactions.py), [kinetics/](packed_bed/kinetics/) | Define properties, stoichiometry, and rate expressions |
+| [model.py](packed_bed/model.py) | Declare variables and equations |
+| [initialization.py](packed_bed/initialization.py) | Calculate and apply the initial state |
+| [simulation.py](packed_bed/simulation.py) | Configure the solver, execute the run, and finalize outputs |
+| [reports.py](packed_bed/reports.py), [plotting/](packed_bed/plotting/) | Extract results and render selected plots |
+| [batch.py](packed_bed/batch.py), [cli.py](packed_bed/cli.py) | Execute batches and process command-line arguments |
 
-All property correlations implement `BaseCorrelation`:
+**Add a species or reaction family.** Keep scientific definitions with their source references.
 
-```python
-class BaseCorrelation(ABC):
-    def dae_expression(self, temperature):
-        ...
+1. Add a `SpeciesProperties` record to `PROPERTY_REGISTRY` in `properties.py`.
+2. Specify the phase, molecular weight in kg/mol, and enthalpy correlation in J/mol.
+3. For a gas species, also specify a viscosity correlation in Pa s.
+4. Add the species to the applicable chemistry, composition, or solid-profile maps.
 
-    def value(self, temperature):
-        ...
+A property correlation supplies `value(temperature)` for numeric values and `dae_expression(temperature)` for symbolic values.
+`PolynomialHeatCapacity` coefficients use ascending powers of `T - t_ref`.
+`ShomateHeatCapacity` and `QuadraticViscosity` remain separate correlations.
+
+For a new family, create one module under `kinetics/`.
+Import `KineticsContext`, `ReactionDefinition`, and `ReactionFamily` from `packed_bed.reactions`.
+Define the reactions and their rate functions in that module. Export one `FAMILY` object.
+Add that object to `FAMILY_REGISTRY` in `kinetics/__init__.py`.
+
+Use negative stoichiometric coefficients for reactants and positive coefficients for products.
+List catalysts separately. Include all required species in the reaction and family declarations.
+
+Each rate function receives a context with the model, cell index, and gas/solid index methods.
+Return rates in mol/(m^3 s) per total bed volume.
+Keep DAETools imports lazy so that configuration validation can run without the solver.
+The [kinetics source notes](packed_bed/kinetics/KINETICS_SOURCES.md) describe the supplied families.
+
+Keep `DeclareEquations` contiguous. Preserve equation names, order, and solver incidence during mechanical changes.
+
+**Run the tests.** Use the same environment that contains the editable package.
+
+```powershell
+python -m pytest
 ```
 
-Follow the existing pattern:
+Tests use temporary output directories. Solver tests need DAETools; they skip when the package is absent.
+To run only the checks that do not need the solver, use this command:
 
-- `value(...)` is the numeric NumPy implementation used for validation, reports,
-  or offline calculations.
-- `dae_expression(...)` returns a DAETools symbolic expression with units,
-  usually by wrapping constants with `daetools.pyDAE.Constant` and `pyUnits`.
-- Temperatures are in K.
-- Enthalpy is in J/mol.
-- Heat capacity coefficients should evaluate to J/(mol K).
-- Gas viscosity is in Pa s.
-
-Polynomial heat capacities use `PolynomialHeatCapacity`; its coefficients are
-ordered by ascending powers of `T - t_ref`. `ShomateHeatCapacity` remains a
-separate correlation, and gas viscosity uses `QuadraticViscosity`.
-
-After adding a genuinely different correlation, use it in a `SpeciesProperties` record in
-`PROPERTY_REGISTRY`.
-
-## Adding a reaction family
-
-Generic reaction data structures live in `packed_bed/reactions.py`; actual
-reaction definitions and rate hooks belong together in one module under
-`packed_bed/kinetics`. Each module exports one `FAMILY` object:
-
-```python
-FAMILY = ReactionFamily(
-    name="my_family",
-    required_gas_species=("H2", "H2O"),
-    required_solid_species=("Ni", "NiO"),
-    reactions=(
-        ReactionDefinition(
-            id="my_reaction",
-            name="Readable reaction name",
-            phase="gas_solid",
-            stoichiometry={"H2": -1.0, "NiO": -1.0, "Ni": 1.0, "H2O": 1.0},
-            required_species=("H2", "H2O", "Ni", "NiO"),
-            source_reference="Citation or source note",
-        ),
-    ),
-    kinetics_hooks={"my_reaction": my_reaction_rate},
-)
+```powershell
+python -m pytest --ignore=tests/test_solver_infrastructure.py
 ```
 
-Important rules:
+The tests cover configuration, examples, transport, inert initialization, worker failures, provenance, and output structure.
+They do not establish the scientific validity of the supplied reaction mechanisms.
 
-- Family names and reaction IDs must be unique.
-- `phase` must be one of `gas_gas`, `gas_solid`, or `solid_solid`.
-- Reactants use negative stoichiometric coefficients.
-- Products use positive stoichiometric coefficients.
-- Do not include zero coefficients.
-- `required_species` must include every stoichiometric species and every
-  catalyst species.
-- Catalysts go in `catalyst_species`, not in `stoichiometry`.
-- `required_gas_species` and `required_solid_species` describe only components
-  that the family can use.
-- `kinetics_hooks` maps reaction IDs directly to their rate functions.
-- Add `FAMILY` to the explicit registry in `packed_bed/kinetics/__init__.py`,
-  then select both the family and desired reaction IDs in `chemistry.yaml`.
+**Use the research tools.** These commands operate from the repository directory.
 
-The reaction network builder creates gas and solid source matrices from the
-stoichiometry. The current solver stores reaction rates as `mol/(m^3 s)` per
-total bed volume, so convert any catalyst-volume, gas-volume, or solid-volume
-rate expression inside the kinetics hook before returning it.
-
-## Kinetics hook shape
-
-Hooks are ordinary functions referenced directly by their family; importing a
-family does not register anything or import DAETools. Solver symbols are loaded
-only when an expression function executes.
-
-Minimal hook shape:
-
-```python
-from . import KineticsContext
-from .runtime import Constant, Exp, K, m, mol, s
-
-
-def my_reaction_rate(context: KineticsContext):
-    gas_idx = context.gas_index("H2")
-    solid_idx = context.solid_index("NiO")
-
-    temperature_k = context.model.T(context.idx_cell) / Constant(1.0 * K)
-    h2_y = context.model.y_gas(gas_idx, context.idx_cell)
-    nio_c = context.model.c_sol(solid_idx, context.idx_cell) / Constant(1.0 * mol / m**3)
-
-    rate_expression = h2_y * nio_c * Exp(-10000.0 / temperature_k)
-    return Constant(1.0 * mol / (m**3 * s)) * rate_expression
+```powershell
+python tools/generate_clr_programs.py --help
+python -m Property_Estimation.hcap_linear_fit fe3o4 --h-ref -1118380 --output heat_capacity.png
+python -m Property_Estimation.visc_fit o2 --output viscosity.png
 ```
 
-`KineticsContext` provides:
+The fitting tools accept species, data paths, and polynomial order as command-line inputs.
+Without `--output`, they open a figure window.
+The local `alex_repro/` comparison script reads NetCDF outputs.
+The local `active_learning_optimization/` directory contains result extraction and comparison tools.
+These local research directories remain ignored by Git. The obsolete relaunch helper is retained as text under `active_learning_optimization/archive/`.
 
-- `model`: the DAETools model instance.
-- `idx_cell`: the distributed axial cell index for the current equation.
-- `gas_index(species_id)`: index lookup for gas species variables.
-- `solid_index(species_id)`: index lookup for solid species variables.
+**License.** This project uses GPL-3.0-only. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Third-party dependencies retain their own licenses.
 
-Frequently used model variables in kinetics hooks include:
-
-- `model.T(idx_cell)`: bed temperature.
-- `model.P(idx_cell)`: bed pressure.
-- `model.y_gas(gas_idx, idx_cell)`: gas mole fraction.
-- `model.c_gas(gas_idx, idx_cell)`: gas concentration.
-- `model.c_sol(solid_idx, idx_cell)`: solid concentration.
-- `model.R_rxn(reaction_idx, idx_cell)`: reaction rate variable.
-
-Each selected reaction must have a hook in its selected family. Missing hooks
-are rejected before solver assembly.
-
-## Validation behavior
-
-`load_case(...)` validates each YAML file, resolves its references, compiles the
-four operating-program channels, and returns one `Case` for the runtime. This
-path does not import DAETools or create output files. It checks, among other
-things:
-
-- unknown species IDs,
-- gas/solid phase mismatches,
-- missing required property data,
-- duplicate species or reaction IDs,
-- inlet composition species mismatches,
-- inlet composition sums,
-- solid zone contiguity,
-- unknown reaction IDs,
-- reactions that require unselected species,
-- unknown report IDs,
-- unknown plot IDs and missing plot report dependencies,
-- missing or unknown kinetics hooks during simulation assembly.
-
-Use `--validate-only` after editing inputs or adding new model components.
-
-## License
-
-This project is licensed under the GNU General Public License version 3 only
-(`GPL-3.0-only`). See `LICENSE` for the full license text and
-`THIRD_PARTY_NOTICES.md` for dependency license notes.
-
-Third-party software is not relicensed by this project. DAETools, OpenCS, PyQt,
-Graphviz, VTK, NumPy, xarray, SciPy, matplotlib, pydantic, PyYAML, pygraphviz,
-and other dependencies retain their own license terms and should be installed
-or obtained separately.
+The language reference for this README is [ASD-STE100, Issue 9](https://www.asd-ste100.org/).

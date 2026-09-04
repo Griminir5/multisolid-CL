@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import hashlib
 import math
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -52,11 +53,13 @@ class Case:
     chemistry: ChemistryConfig
     solids: SolidConfig
     run: RunConfig
+    program: ProgramConfig
     reaction_families: tuple[ReactionFamily, ...]
     inlet_flow_program: CompiledProgram
     inlet_composition_program: CompiledProgram
     inlet_temperature_program: CompiledProgram
     outlet_pressure_program: CompiledProgram
+    input_hashes: dict[str, str] = field(default_factory=dict)
 
     @property
     def output_directory(self) -> Path:
@@ -71,7 +74,8 @@ def load_case(run_yaml_path: str | Path) -> Case:
     """Load, resolve, compile, and structurally validate one case."""
 
     run_path = Path(run_yaml_path).resolve()
-    run_data = read_yaml_mapping(run_path, "run")
+    input_hashes = {}
+    run_data = read_yaml_mapping(run_path, "run", hashes=input_hashes)
     run = _parse_config_model(RunConfig, run_data, "run", run_path)
     base_dir = run_path.parent
     input_paths = {
@@ -90,30 +94,16 @@ def load_case(run_yaml_path: str | Path) -> Case:
     if path_errors:
         raise PackedBedValidationError("\n".join(path_errors))
 
-    return _build_case(
+    return resolve_case(
         run_path=run_path,
         chemistry_path=input_paths["chemistry"],
         program_path=input_paths["program"],
         solids_path=input_paths["solids"],
-        run=run,
-        chemistry=_parse_config_model(
-            ChemistryConfig,
-            read_yaml_mapping(input_paths["chemistry"], "chemistry"),
-            "chemistry",
-            input_paths["chemistry"],
-        ),
-        program=_parse_config_model(
-            ProgramConfig,
-            read_yaml_mapping(input_paths["program"], "program"),
-            "program",
-            input_paths["program"],
-        ),
-        solids=_parse_config_model(
-            SolidConfig,
-            read_yaml_mapping(input_paths["solids"], "solids"),
-            "solids",
-            input_paths["solids"],
-        ),
+        run_data=run_data,
+        chemistry_data=read_yaml_mapping(input_paths["chemistry"], "chemistry", hashes=input_hashes),
+        program_data=read_yaml_mapping(input_paths["program"], "program", hashes=input_hashes),
+        solids_data=read_yaml_mapping(input_paths["solids"], "solids", hashes=input_hashes),
+        input_hashes=input_hashes,
     )
 
 
@@ -127,6 +117,7 @@ def resolve_case(
     chemistry_data: dict[str, Any],
     program_data: dict[str, Any],
     solids_data: dict[str, Any],
+    input_hashes: dict[str, str] | None = None,
 ) -> Case:
     """Resolve an in-memory case without reading or writing files."""
 
@@ -136,31 +127,10 @@ def resolve_case(
         "program": Path(program_path).resolve(),
         "solids": Path(solids_path).resolve(),
     }
-    return _build_case(
-        run_path=paths["run"],
-        chemistry_path=paths["chemistry"],
-        program_path=paths["program"],
-        solids_path=paths["solids"],
-        run=_parse_config_model(RunConfig, run_data, "run", paths["run"]),
-        chemistry=_parse_config_model(
-            ChemistryConfig, chemistry_data, "chemistry", paths["chemistry"]
-        ),
-        program=_parse_config_model(ProgramConfig, program_data, "program", paths["program"]),
-        solids=_parse_config_model(SolidConfig, solids_data, "solids", paths["solids"]),
-    )
-
-
-def _build_case(
-    *,
-    run_path: Path,
-    chemistry_path: Path,
-    program_path: Path,
-    solids_path: Path,
-    run: RunConfig,
-    chemistry: ChemistryConfig,
-    program: ProgramConfig,
-    solids: SolidConfig,
-) -> Case:
+    run = _parse_config_model(RunConfig, run_data, "run", paths["run"])
+    chemistry = _parse_config_model(ChemistryConfig, chemistry_data, "chemistry", paths["chemistry"])
+    program = _parse_config_model(ProgramConfig, program_data, "program", paths["program"])
+    solids = _parse_config_model(SolidConfig, solids_data, "solids", paths["solids"])
 
     shape_errors = _validate_input_shapes(chemistry, solids, program, run)
     if shape_errors:
@@ -181,18 +151,20 @@ def _build_case(
         time_horizon=run.simulation.time_horizon_s,
     )
     case = Case(
-        run_path=run_path,
-        chemistry_path=chemistry_path,
-        solids_path=solids_path,
-        program_path=program_path,
+        run_path=paths["run"],
+        chemistry_path=paths["chemistry"],
+        solids_path=paths["solids"],
+        program_path=paths["program"],
         chemistry=chemistry,
         solids=solids,
         run=run,
+        program=program,
         reaction_families=reaction_families,
         inlet_flow_program=programs[0],
         inlet_composition_program=programs[1],
         inlet_temperature_program=programs[2],
         outlet_pressure_program=programs[3],
+        input_hashes=dict(input_hashes or {}),
     )
     return validate_case(case)
 
@@ -331,21 +303,23 @@ def _parse_config_model(model_type, data: dict[str, Any], label: str, path: Path
         raise PackedBedValidationError("\n".join(lines)) from exc
 
 
-def read_yaml_mapping(path: Path, label: str) -> dict[str, Any]:
+def read_yaml_mapping(path: Path, label: str, *, hashes=None) -> dict[str, Any]:
     try:
-        with path.open("r", encoding="utf-8") as handle:
-            data = yaml.load(handle, Loader=_UniqueKeyLoader)
+        source = path.read_bytes()
+        data = yaml.load(source.decode("utf-8"), Loader=_UniqueKeyLoader)
     except PackedBedValidationError as exc:
         raise PackedBedValidationError(f"{label} is invalid: {path}\n- {exc}") from exc
     except FileNotFoundError as exc:
         raise PackedBedValidationError(f"{label} was not found: {path}") from exc
     except OSError as exc:
         raise PackedBedValidationError(f"Could not read {label}: {path}") from exc
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, UnicodeError, TypeError) as exc:
         raise PackedBedValidationError(f"{label} contains invalid YAML: {path}") from exc
 
     if not isinstance(data, dict):
         raise PackedBedValidationError(f"{label} must contain a top-level mapping: {path}")
+    if hashes is not None:
+        hashes[label] = hashlib.sha256(source).hexdigest()
     return data
 
 

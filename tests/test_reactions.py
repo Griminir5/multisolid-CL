@@ -27,6 +27,8 @@ def guarded_import(name, *args, **kwargs):
         raise AssertionError(f'forbidden solver import: {name}')
     return real_import(name, *args, **kwargs)
 builtins.__import__ = guarded_import
+from packed_bed.reactions import KineticsContext
+assert 'packed_bed.kinetics' not in sys.modules
 from packed_bed.kinetics import FAMILY_REGISTRY
 assert tuple(FAMILY_REGISTRY) == (
     'nickel_medrano',

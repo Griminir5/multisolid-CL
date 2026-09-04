@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from ..reactions import ReactionDefinition, ReactionFamily
-from . import KineticsContext
+from ..reactions import KineticsContext, ReactionDefinition, ReactionFamily
 from .runtime import Constant, Exp, K, Pa, Sqrt, m, mol, s
 
 

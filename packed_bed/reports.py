@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 import hashlib
 from importlib.metadata import PackageNotFoundError, version
@@ -246,6 +247,7 @@ class RunResult:
     artifact_paths: dict[str, Path] = field(default_factory=dict)
     plot_errors: dict[str, str] = field(default_factory=dict)
     reporter: Any | None = None
+    code_git: dict[str, Any] = field(default_factory=lambda: _git_state())
 
     @property
     def plot_status(self) -> str:
@@ -355,14 +357,14 @@ def extract_dataset(process, case: Case):
                 f"Reporter variable '{source}' has shape {values.shape}; "
                 f"expected time plus {field_spec.dimensions}."
             )
-        variable_coords = {"time": time}
+        variable_coords = {"time": coordinates["time"]}
         for index, (dimension, size) in enumerate(zip(field_spec.dimensions, values.shape[1:])):
             resolved = _coordinate(case, variable, dimension, index, size)
             if dimension in coordinates and not np.array_equal(coordinates[dimension][1], resolved):
                 raise ValueError(f"Reporter variables disagree on coordinate '{dimension}'.")
             attributes = {"units": "m"} if dimension in {"x_cell", "x_face"} else {}
             coordinates[dimension] = (dimension, resolved, attributes)
-            variable_coords[dimension] = resolved
+            variable_coords[dimension] = coordinates[dimension]
         raw[source] = xr.DataArray(
             values,
             dims=("time", *field_spec.dimensions),
@@ -417,7 +419,6 @@ def create_dataset_reporter(case: Case):
             self.results_path = None
             self.write_error = None
             self._connected = False
-            self._written = False
 
         def Connect(self, connect_string, process_name):
             try:
@@ -432,52 +433,51 @@ def create_dataset_reporter(case: Case):
                 return False
 
         def Disconnect(self):
+            self._connected = False
             try:
-                if not self._written:
-                    self.write_outputs()
-                self._connected = False
+                self.finish()
                 return True
-            except Exception as exc:
-                self.write_error = exc
-                self._connected = False
+            except Exception:
                 return False
 
         def IsConnected(self):
             return self._connected
 
-        def write_outputs(self):
-            self.results_path = write_dataset(
-                extract_dataset(self.Process, case),
-                self.output_directory / RESULTS_FILENAME,
-            )
-            self._written = True
+        def finish(self):
+            if self.write_error is None and self.results_path is None:
+                try:
+                    self.results_path = write_dataset(
+                        extract_dataset(self.Process, case), self.output_directory / RESULTS_FILENAME,
+                    )
+                except Exception as exc:
+                    self.write_error = exc
+            if self.write_error is not None:
+                raise RuntimeError("Data reporter failed while writing simulation reports.") from self.write_error
             return self.results_path
 
     return PackedBedDatasetReporter()
 
 
 def compute_balance_errors(dataset_or_path) -> dict[str, BalanceError]:
-    dataset = (
-        load_dataset(dataset_or_path)
-        if isinstance(dataset_or_path, (str, Path))
-        else dataset_or_path
-    )
+    import xarray as xr
+
     errors = {}
-    for key, variable_name, unit in (
-        ("heat", "heat_balance_error", "J"),
-        ("mass", "mass_balance_error", "kg"),
-    ):
-        if variable_name not in dataset:
-            continue
-        values = np.asarray(dataset[variable_name].values, dtype=float)
-        if values.size == 0 or np.all(np.isnan(values)):
-            continue
-        index = int(np.nanargmax(np.abs(values)))
-        errors[key] = BalanceError(
-            max_abs_error=float(abs(values[index])),
-            time_s=float(dataset.time.values[index]),
-            unit=unit,
-        )
+    source = (
+        xr.open_dataset(dataset_or_path, engine="scipy")
+        if isinstance(dataset_or_path, (str, Path)) else nullcontext(dataset_or_path)
+    )
+    with source as dataset:
+        for key, unit in (("heat", "J"), ("mass", "kg")):
+            variable_name = f"{key}_balance_error"
+            if variable_name not in dataset:
+                continue
+            values = np.asarray(dataset[variable_name].values, dtype=float)
+            if values.size == 0 or np.all(np.isnan(values)):
+                continue
+            index = int(np.nanargmax(np.abs(values)))
+            errors[key] = BalanceError(
+                max_abs_error=float(abs(values[index])), time_s=float(dataset.time.values[index]), unit=unit,
+            )
     return errors
 
 
@@ -498,18 +498,15 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _git_state(path: Path) -> dict[str, Any]:
+def _git_state() -> dict[str, Any]:
+    source = str(Path(__file__).resolve().parent)
     try:
-        root = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-            check=True, capture_output=True, text=True,
-        ).stdout.strip()
         commit = subprocess.run(
-            ["git", "-C", root, "rev-parse", "HEAD"],
+            ["git", "-C", source, "rev-parse", "HEAD"],
             check=True, capture_output=True, text=True,
         ).stdout.strip()
         dirty = bool(subprocess.run(
-            ["git", "-C", root, "status", "--porcelain"],
+            ["git", "-C", source, "status", "--porcelain"],
             check=True, capture_output=True, text=True,
         ).stdout.strip())
         return {"commit": commit, "dirty": dirty}
@@ -528,16 +525,18 @@ def _package_versions() -> dict[str, str | None]:
 
 
 def _dataset_inventory(path: Path | None) -> dict[str, Any]:
+    import xarray as xr
+
     if path is None or not path.is_file():
         return {}
-    dataset = load_dataset(path)
-    return {
-        "dimensions": {name: int(size) for name, size in dataset.sizes.items()},
-        "variables": {
-            name: {"dimensions": list(variable.dims), "units": variable.attrs.get("units", "")}
-            for name, variable in dataset.data_vars.items()
-        },
-    }
+    with xr.open_dataset(path, engine="scipy") as dataset:
+        return {
+            "dimensions": dict(dataset.sizes),
+            "variables": {
+                name: {"dimensions": list(variable.dims), "units": variable.attrs.get("units", "")}
+                for name, variable in dataset.data_vars.items()
+            },
+        }
 
 
 def _compiled_programs(case: Case) -> dict[str, Any]:
@@ -550,14 +549,6 @@ def _compiled_programs(case: Case) -> dict[str, Any]:
             ("outlet_pressure", case.outlet_pressure_program),
         )
     }
-
-
-def _normalized_program(case: Case) -> dict[str, Any]:
-    from .config.load import read_yaml_mapping
-    from .config.models import ProgramConfig
-
-    values = read_yaml_mapping(case.program_path, "program")
-    return ProgramConfig.model_validate(values).model_dump(mode="json")
 
 
 def write_run_manifest(
@@ -590,18 +581,18 @@ def write_run_manifest(
             "python": platform.python_version(),
             "platform": platform.platform(),
             "packages": _package_versions(),
-            "git": _git_state(case.run_path.parent),
+            "git": result.code_git,
         },
         "configuration": {
             "run": case.run.model_dump(mode="json"),
             "chemistry": case.chemistry.model_dump(mode="json"),
-            "program": _normalized_program(case),
+            "program": case.program.model_dump(mode="json"),
             "solids": case.solids.model_dump(mode="json"),
             "compiled_programs": _compiled_programs(case),
         },
         "inputs": {
-            name: {"path": str(path), "sha256": _sha256(path)}
-            for name, path in inputs.items() if path.is_file()
+            name: {"path": str(inputs[name]), "sha256": digest}
+            for name, digest in case.input_hashes.items()
         },
         "outputs": output_records,
         "dataset": _dataset_inventory(result.results_path),

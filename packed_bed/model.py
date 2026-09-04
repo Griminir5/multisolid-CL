@@ -16,9 +16,8 @@ from .axial_schemes import (
 )
 from .config import Case
 from .initialization import CIRCLE_CONSTANT
-from .kinetics import KineticsContext
 from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S
-from .reactions import ReactionNetwork
+from .reactions import KineticsContext, ReactionNetwork
 from pyUnits import J, K, Pa, kg, m, mol, s
 
 def _variable_type(name, units, lower, upper, initial=0.0, tolerance=1.0e-5):
@@ -33,7 +32,7 @@ def _variable_type(name, units, lower, upper, initial=0.0, tolerance=1.0e-5):
 
 
 molar_flux_type = _variable_type("molar_flux_type", mol / (s * m**2), -1.0e5, 1.0e5)
-molar_flow_type = _variable_type("molar_flow_type", mol / s, -1.0e3, 1.0e3)
+molar_flow_type = _variable_type("molar_flow_type", mol / s, -1.0e5, 1.0e5)
 molar_conc_type = _variable_type("molar_conc_type", mol / m**3, 0.0, 1.0e5)
 molar_conc_sol_type = _variable_type("molar_conc_sol_type", mol / m**3, 0.0, 1.0e6)
 molar_frac_type = _variable_type("molar_frac_type", dimless, -0.1, 1.1)

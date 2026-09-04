@@ -1,17 +1,18 @@
+import argparse
 from pathlib import Path
+
+if __package__:
+    from ._fit import _as_1d_float_array, _evaluate_basis_matrix, _safe_r_squared, evaluate_linear_basis_model
+else:
+    from _fit import _as_1d_float_array, _evaluate_basis_matrix, _safe_r_squared, evaluate_linear_basis_model
+
 import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.optimize import OptimizeWarning, curve_fit
 
-species = "o2"
-max_poly_order = 2
-plot_all_models = True
-
-
-def load_viscosity_data(species):
-    data_root = Path(__file__).resolve().parent / "visc_data"
+def load_viscosity_data(species, data_root):
     data_dir = data_root / species
 
     if not data_dir.is_dir():
@@ -33,13 +34,6 @@ def load_viscosity_data(species):
     return T_data, visc_data, data_dir
 
 
-def _as_1d_float_array(values, name):
-    array = np.asarray(values, dtype=float)
-    if array.ndim != 1:
-        raise ValueError(f"{name} must be one-dimensional")
-    return array
-
-
 def _safe_scale(values):
     values = _as_1d_float_array(values, "values")
     scale = float(np.std(values))
@@ -52,26 +46,6 @@ def _safe_scale(values):
     return 1.0
 
 
-def _evaluate_basis_matrix(T_data, basis_funcs, name):
-    if not basis_funcs:
-        raise ValueError(f"{name} cannot be empty")
-
-    columns = []
-    for idx, basis_func in enumerate(basis_funcs):
-        values = np.asarray(basis_func(T_data), dtype=float)
-        if values.ndim == 0:
-            values = np.full_like(T_data, float(values), dtype=float)
-        if values.shape != T_data.shape:
-            raise ValueError(
-                f"{name}[{idx}] returned shape {values.shape}, expected {T_data.shape}"
-            )
-        if not np.all(np.isfinite(values)):
-            raise ValueError(f"{name}[{idx}] returned non-finite values")
-        columns.append(values)
-
-    return np.column_stack(columns)
-
-
 def fit_linear_basis_viscosity(T_data, visc_data, basis_funcs):
     T_data = _as_1d_float_array(T_data, "T_data")
     visc_data = _as_1d_float_array(visc_data, "visc_data")
@@ -82,17 +56,6 @@ def fit_linear_basis_viscosity(T_data, visc_data, basis_funcs):
     A = _evaluate_basis_matrix(T_data, basis_funcs, "basis_funcs")
     theta, residuals, rank, singular_values = np.linalg.lstsq(A, visc_data, rcond=None)
     return theta, residuals, rank, singular_values
-
-
-def evaluate_linear_basis_model(T_data, basis_funcs, params):
-    T_data = _as_1d_float_array(T_data, "T_data")
-    params = _as_1d_float_array(params, "params")
-
-    if len(basis_funcs) != len(params):
-        raise ValueError("basis_funcs and params must have the same length")
-
-    basis_matrix = _evaluate_basis_matrix(T_data, basis_funcs, "basis_funcs")
-    return basis_matrix @ params
 
 
 def _poly_basis(power, t_ref):
@@ -180,13 +143,6 @@ def build_default_model_sweep(t_ref, max_poly_order=5):
     ]
     models.append(make_power_law_basis())
     return models
-
-
-def _safe_r_squared(y_true, y_pred):
-    total_sum_squares = np.sum((y_true - np.mean(y_true)) ** 2)
-    if total_sum_squares <= 0.0:
-        return np.nan
-    return 1.0 - np.sum((y_true - y_pred) ** 2) / total_sum_squares
 
 
 def evaluate_model(T_data, model, params):
@@ -388,15 +344,19 @@ def plot_fit_comparison(
     ax2.legend(loc="best", fontsize="small")
     plt.tight_layout()
 
-    # if "agg" in plt.get_backend().lower():
-    #     plt.close(fig)
-    #     return
-
-    plt.show()
+    return fig
 
 
-def main():
-    T_data, visc_data, data_dir = load_viscosity_data(species)
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Fit viscosity from species CSV data.")
+    parser.add_argument("species", help="Species directory under the data root.")
+    parser.add_argument("--order", type=int, default=2)
+    parser.add_argument("--data-root", type=Path, default=Path(__file__).parent / "visc_data")
+    parser.add_argument("--output", type=Path, help="Save a figure instead of opening a window.")
+    args = parser.parse_args(argv)
+    if args.order < 0:
+        parser.error("--order must be nonnegative")
+    T_data, visc_data, data_dir = load_viscosity_data(args.species, args.data_root)
     T_data = _as_1d_float_array(T_data, "T_data")
     visc_data = _as_1d_float_array(visc_data, "visc_data")
 
@@ -406,7 +366,7 @@ def main():
     poly_reference_temperature = float(np.mean(T_data))
     models = build_default_model_sweep(
         t_ref=poly_reference_temperature,
-        max_poly_order=max_poly_order,
+        max_poly_order=args.order,
     )
     results = sweep_model_fits(
         T_data=T_data,
@@ -418,7 +378,7 @@ def main():
     best2nd_rss = results[1] if len(results) > 1 else results[0]
     best_bic = min(results, key=lambda result: result["bic"])
 
-    print(f"Species: {species}")
+    print(f"Species: {args.species}")
     print(f"Data directory: {data_dir}")
     print(f"Polynomial reference temperature = {poly_reference_temperature:.6g} K")
     print()
@@ -431,14 +391,19 @@ def main():
     print()
     print_fit_details(best_bic, "Best BIC fit")
 
-    plot_fit_comparison(
+    figure = plot_fit_comparison(
         T_data,
         visc_data,
         best_rss,
         all_results=results,
-        plot_all_models=plot_all_models,
+        plot_all_models=True,
         secondary_result=best_bic,
     )
+    if args.output:
+        figure.savefig(args.output, bbox_inches="tight")
+        plt.close(figure)
+    else:
+        plt.show()
 
 
 if __name__ == "__main__":

@@ -22,9 +22,14 @@ def zone_edges(solids_config):
     )
 
 
-def build_solid_profile_matrix(solids_config, cell_centers_m, solid_species):
+def build_cell_profiles(solids_config, cell_centers_m):
+    """Assign each cell's voidages and bed-volume solid concentrations together."""
+
     cell_centers_m = np.asarray(cell_centers_m, dtype=float)
+    solid_species = solids_config.solid_species
     profile = np.zeros((len(solid_species), len(cell_centers_m)), dtype=float)
+    e_b = np.zeros(len(cell_centers_m), dtype=float)
+    e_p = np.zeros(len(cell_centers_m), dtype=float)
     assigned = np.zeros(len(cell_centers_m), dtype=bool)
     zones = solids_config.initial_profile.zones
 
@@ -40,39 +45,19 @@ def build_solid_profile_matrix(solids_config, cell_centers_m, solid_species):
             )
 
         assigned |= mask
+        e_b[mask] = zone.e_b
+        e_p[mask] = zone.e_p
         for sol_idx, species_id in enumerate(solid_species):
             profile[sol_idx, mask] = float(zone.values[species_id])
 
     if cell_centers_m.size and not np.all(assigned):
         raise ValueError("Solid profile zones did not cover every cell center.")
 
-    return profile
-
-
-def build_cell_scalar_profile(solids_config, cell_centers_m, attribute_name):
-    cell_centers_m = np.asarray(cell_centers_m, dtype=float)
-    profile = np.zeros(len(cell_centers_m), dtype=float)
-    assigned = np.zeros(len(cell_centers_m), dtype=bool)
-    zones = solids_config.initial_profile.zones
-
-    for zone_index, zone in enumerate(zones):
-        is_last_zone = zone_index == len(zones) - 1
-        if is_last_zone:
-            mask = (cell_centers_m >= zone.x_start_m - _POSITION_TOL) & (
-                cell_centers_m <= zone.x_end_m + _POSITION_TOL
-            )
-        else:
-            mask = (cell_centers_m >= zone.x_start_m - _POSITION_TOL) & (
-                cell_centers_m < zone.x_end_m - _POSITION_TOL
-            )
-
-        profile[mask] = float(getattr(zone, attribute_name))
-        assigned |= mask
-
-    if cell_centers_m.size and not np.all(assigned):
-        raise ValueError(f"Solid profile zones did not cover every cell center for '{attribute_name}'.")
-
-    return profile
+    if solids_config.initial_profile.basis == "solid":
+        profile *= solid_fraction_from_voidages(e_b, e_p)[np.newaxis, :]
+    elif solids_config.initial_profile.basis != "bed":
+        raise ValueError(f"Unsupported solid concentration basis '{solids_config.initial_profile.basis}'.")
+    return e_b, e_p, profile
 
 
 def build_face_scalar_profile(solids_config, face_positions_m, attribute_name):
@@ -123,12 +108,3 @@ def gas_fraction_from_voidages(e_b, e_p):
 
 def solid_fraction_from_voidages(e_b, e_p):
     return 1.0 - gas_fraction_from_voidages(e_b, e_p)
-
-
-def convert_solid_profile_to_bed_volume(solids_config, cell_centers_m, solid_fraction, solid_species):
-    solid_profile_basis = build_solid_profile_matrix(solids_config, cell_centers_m, solid_species)
-    if solids_config.initial_profile.basis == "solid":
-        return solid_profile_basis * np.asarray(solid_fraction, dtype=float)[np.newaxis, :]
-    if solids_config.initial_profile.basis == "bed":
-        return solid_profile_basis
-    raise ValueError(f"Unsupported solid concentration basis '{solids_config.initial_profile.basis}'.")

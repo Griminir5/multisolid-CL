@@ -7,7 +7,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-import yaml
+import pytest
 
 from packed_bed import cli
 from packed_bed.config import load_case
@@ -23,17 +23,18 @@ BASE_CASE_DIRECTORY = (
 ).resolve()
 
 
-def _copy_case(tmp_path: Path) -> Path:
+def _copy_case(tmp_path: Path, source: Path = BASE_CASE_DIRECTORY) -> Path:
     case_directory = tmp_path / "case"
-    shutil.copytree(BASE_CASE_DIRECTORY, case_directory)
+    case_directory.mkdir()
+    for path in source.glob("*.yaml"):
+        shutil.copyfile(path, case_directory / path.name)
     return case_directory / "run.yaml"
 
 
-def test_single_case_validate_only_creates_nothing_and_skips_runtime(
-    tmp_path: Path,
-    capsys,
-) -> None:
-    run_path = _copy_case(tmp_path)
+@pytest.mark.parametrize("example", ["default_case", "default_batch_case/base_case"])
+def test_single_case_validate_only_creates_nothing_and_skips_runtime(tmp_path, capsys, example):
+    source = Path(__file__).parents[1] / "packed_bed" / "examples" / example
+    run_path = _copy_case(tmp_path, source)
     paths_before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
 
     exit_code = cli.main([str(run_path), "--validate-only", "--artifacts"])
@@ -45,36 +46,15 @@ def test_single_case_validate_only_creates_nothing_and_skips_runtime(
 
 
 def test_batch_validate_only_creates_no_cases_or_manifest(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "batch.yaml"
-    batch_path.write_text(
-        yaml.safe_dump(
-            {
-                "base_case": str(BASE_CASE_DIRECTORY / "run.yaml"),
-                "output_directory": "output",
-                "axes": [
-                    {
-                        "id": "condition",
-                        "values": [
-                            {
-                                "id": "valid",
-                                "patch": {"run": {"model": {"axial_cells": 4}}},
-                            }
-                        ],
-                    }
-                ],
-            },
-            sort_keys=False,
-        ),
-        encoding="utf-8",
-    )
+    batch_directory = tmp_path / "batch"
+    shutil.copytree(BASE_CASE_DIRECTORY.parent, batch_directory, ignore=shutil.ignore_patterns("output"))
+    paths_before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
+    exit_code = cli.main(["batch", str(batch_directory / "batch.yaml"), "--validate-only"])
 
-    exit_code = cli.main(["batch", str(batch_path), "--validate-only"])
-
-    captured = capsys.readouterr()
     assert exit_code == 0
-    assert captured.out == "Batch validation complete: 1/1 cases passed.\n"
-    assert "Manifest" not in captured.out
-    assert not (tmp_path / "output").exists()
+    assert capsys.readouterr().out == "Batch validation complete: 4/4 cases passed.\n"
+    assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == paths_before
+    assert not (batch_directory / "output").exists()
 
 
 def test_cli_import_and_validation_do_not_import_daetools(tmp_path: Path) -> None:
@@ -176,3 +156,14 @@ def test_validation_errors_are_concise_and_use_a_distinct_exit_code(
     assert exit_code == 2
     assert captured.out == ""
     assert captured.err == f"error: run was not found: {missing_path.resolve()}\n"
+
+
+def test_debug_exposes_unexpected_errors_and_help_lists_batch(monkeypatch):
+    def fail(_path):
+        raise RuntimeError("unexpected loader failure")
+
+    monkeypatch.setattr(cli, "load_case", fail)
+    assert cli.main(["case.yaml"]) == 1
+    with pytest.raises(RuntimeError, match="unexpected loader failure"):
+        cli.main(["case.yaml", "--debug"])
+    assert "packed_bed batch --help" in cli.build_parser().format_help()

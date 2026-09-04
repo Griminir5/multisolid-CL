@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
-from ..reactions import ReactionDefinition, ReactionFamily
-from . import KineticsContext
+from ..reactions import KineticsContext, ReactionDefinition, ReactionFamily
 from .runtime import Abs, Constant, Exp, K, Max, Min, Pa, m, mol, s
 
 
@@ -78,25 +76,6 @@ RATIONAL_POWER_COEFFICIENTS = {
 }
 
 
-@dataclass(frozen=True)
-class MedranoANTerms:
-    temperature_k: Any
-    total_gas_conc_molm3: Any
-    gas_mole_fraction: Any
-    ni_conc_molm3: Any
-    nio_conc_molm3: Any
-    total_solid_inventory_molm3: Any
-    frac_reduced: Any
-    frac_oxidised: Any
-
-
-@dataclass(frozen=True)
-class MedranoANReactionState:
-    conversion: Any
-    unreacted_fraction: Any
-    total_solid_inventory_molm3: Any
-
-
 def _temperature_k_expression(temperature) -> Any:
     return temperature / Constant(1.0 * K)
 
@@ -120,45 +99,6 @@ def _bounded_fraction_expr(x):
 def _availability_gate_expr(x, gate: float):
     available = _available_expr(x)
     return available / (available + Constant(gate))
-
-
-def _medrano_terms(context: KineticsContext, gas_species_id: str) -> MedranoANTerms:
-    nickel_idx = context.solid_index("Ni")
-    nickel_oxide_idx = context.solid_index("NiO")
-    gas_idx = context.gas_index(gas_species_id)
-    temperature_k = _temperature_k_expression(context.model.T(context.idx_cell))
-    pressure_pa = _pressure_pa_expression(context.model.P(context.idx_cell))
-    c_ni = _available_expr(_concentration_expression(context.model.c_sol(nickel_idx, context.idx_cell)))
-    c_nio = _available_expr(_concentration_expression(context.model.c_sol(nickel_oxide_idx, context.idx_cell)))
-    c_solid_total = c_ni + c_nio
-    c_solid_denominator = c_solid_total + Constant(POS_EPS)
-
-    return MedranoANTerms(
-        temperature_k=temperature_k,
-        total_gas_conc_molm3=pressure_pa / (Constant(GAS_CONSTANT_J_PER_MOL_K) * temperature_k),
-        gas_mole_fraction=context.model.y_gas(gas_idx, context.idx_cell),
-        ni_conc_molm3=c_ni,
-        nio_conc_molm3=c_nio,
-        total_solid_inventory_molm3=c_solid_total,
-        frac_reduced=c_ni / c_solid_denominator,
-        frac_oxidised=c_nio / c_solid_denominator,
-    )
-
-
-def _medrano_reaction_state_expr(comp_key: str, terms: MedranoANTerms) -> MedranoANReactionState:
-    if comp_key == "O2":
-        return MedranoANReactionState(
-            conversion=terms.frac_oxidised,
-            unreacted_fraction=terms.frac_reduced,
-            total_solid_inventory_molm3=terms.total_solid_inventory_molm3,
-        )
-    if comp_key in {"H2", "CO"}:
-        return MedranoANReactionState(
-            conversion=terms.frac_reduced,
-            unreacted_fraction=terms.frac_oxidised,
-            total_solid_inventory_molm3=terms.total_solid_inventory_molm3,
-        )
-    raise KeyError(f"Unsupported Medrano AN component key: {comp_key}")
 
 
 def _rational_power_expr(power: float, x):
@@ -259,69 +199,41 @@ def _medrano_conversion_rate_expr(
     return gas_gate * solid_gate * numerator / _denominator_safe_expr(denominator)
 
 
-def _medrano_reaction_rate_expr(
-    comp_key: str,
-    *,
-    temperature_k,
-    total_gas_concentration_molm3,
-    gas_mole_fraction,
-    conversion,
-    unreacted_fraction,
-    total_solid_inventory_molm3,
-):
-    return total_solid_inventory_molm3 * _medrano_conversion_rate_expr(
+def _medrano_reaction_rate(context: KineticsContext, comp_key: str):
+    nickel_idx = context.solid_index("Ni")
+    nickel_oxide_idx = context.solid_index("NiO")
+    temperature_k = _temperature_k_expression(context.model.T(context.idx_cell))
+    pressure_pa = _pressure_pa_expression(context.model.P(context.idx_cell))
+    c_ni = _available_expr(_concentration_expression(context.model.c_sol(nickel_idx, context.idx_cell)))
+    c_nio = _available_expr(_concentration_expression(context.model.c_sol(nickel_oxide_idx, context.idx_cell)))
+    c_solid_total = c_ni + c_nio
+    c_solid_denominator = c_solid_total + Constant(POS_EPS)
+    frac_reduced = c_ni / c_solid_denominator
+    frac_oxidised = c_nio / c_solid_denominator
+    conversion, unreacted_fraction = (
+        (frac_oxidised, frac_reduced) if comp_key == "O2" else (frac_reduced, frac_oxidised)
+    )
+    rate_expression = c_solid_total * _medrano_conversion_rate_expr(
         comp_key,
         temperature_k=temperature_k,
-        total_gas_concentration_molm3=total_gas_concentration_molm3,
-        gas_mole_fraction=gas_mole_fraction,
+        total_gas_concentration_molm3=pressure_pa / (Constant(GAS_CONSTANT_J_PER_MOL_K) * temperature_k),
+        gas_mole_fraction=context.model.y_gas(context.gas_index(comp_key), context.idx_cell),
         conversion=conversion,
         unreacted_fraction=unreacted_fraction,
     )
+    return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
 
 def medrano_reduction_h2(context: KineticsContext):
-    terms = _medrano_terms(context, "H2")
-    state = _medrano_reaction_state_expr("H2", terms)
-    rate_expression = _medrano_reaction_rate_expr(
-        "H2",
-        temperature_k=terms.temperature_k,
-        total_gas_concentration_molm3=terms.total_gas_conc_molm3,
-        gas_mole_fraction=terms.gas_mole_fraction,
-        conversion=state.conversion,
-        unreacted_fraction=state.unreacted_fraction,
-        total_solid_inventory_molm3=state.total_solid_inventory_molm3,
-    )
-    return Constant(1.0 * mol / (m**3 * s)) * rate_expression
+    return _medrano_reaction_rate(context, "H2")
 
 
 def medrano_reduction_co(context: KineticsContext):
-    terms = _medrano_terms(context, "CO")
-    state = _medrano_reaction_state_expr("CO", terms)
-    rate_expression = _medrano_reaction_rate_expr(
-        "CO",
-        temperature_k=terms.temperature_k,
-        total_gas_concentration_molm3=terms.total_gas_conc_molm3,
-        gas_mole_fraction=terms.gas_mole_fraction,
-        conversion=state.conversion,
-        unreacted_fraction=state.unreacted_fraction,
-        total_solid_inventory_molm3=state.total_solid_inventory_molm3,
-    )
-    return Constant(1.0 * mol / (m**3 * s)) * rate_expression
+    return _medrano_reaction_rate(context, "CO")
 
 
 def medrano_oxidation_o2(context: KineticsContext):
-    terms = _medrano_terms(context, "O2")
-    state = _medrano_reaction_state_expr("O2", terms)
-    rate_expression = _medrano_reaction_rate_expr(
-        "O2",
-        temperature_k=terms.temperature_k,
-        total_gas_concentration_molm3=terms.total_gas_conc_molm3,
-        gas_mole_fraction=terms.gas_mole_fraction,
-        conversion=state.conversion,
-        unreacted_fraction=state.unreacted_fraction,
-        total_solid_inventory_molm3=state.total_solid_inventory_molm3,
-    )
-    return Constant(1.0 * mol / (m**3 * s)) * rate_expression
+    return _medrano_reaction_rate(context, "O2")
 
 
 FAMILY = ReactionFamily(
