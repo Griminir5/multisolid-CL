@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import hashlib
 import itertools
 import json
+import logging
 import math
 import multiprocessing as mp
 import os
@@ -14,7 +15,7 @@ from pathlib import Path
 from queue import Empty
 import re
 from tempfile import TemporaryDirectory
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Annotated, Any, Callable
 import unicodedata
 
@@ -29,6 +30,9 @@ from .reports import RunResult
 
 _PROCESS_TERMINATE_GRACE_S = 5.0
 _PROCESS_POLL_INTERVAL_S = 0.05
+_SUMMARY_REPLACE_DELAYS_S = (0.05, 0.1, 0.2, 0.4)
+_WINDOWS_FILE_LOCK_ERRORS = (5, 32, 33)
+_LOGGER = logging.getLogger(__name__)
 _SLUG_UNSAFE_RE = re.compile(r"[^a-z0-9]+")
 _SINGLE_THREAD_ENVIRONMENT = {
     "BLIS_NUM_THREADS": "1",
@@ -463,7 +467,17 @@ def _write_records_csv(
                 })
             handle.flush()
             os.fsync(handle.fileno())
-        temporary_path.replace(path)
+        # Windows readers commonly allow writes but deny replacing an open file.
+        # Keep the complete temporary snapshot while retrying a short-lived lock.
+        for attempt in range(len(_SUMMARY_REPLACE_DELAYS_S) + 1):
+            try:
+                temporary_path.replace(path)
+                break
+            except PermissionError as exc:
+                if (getattr(exc, "winerror", None) not in _WINDOWS_FILE_LOCK_ERRORS
+                        or attempt == len(_SUMMARY_REPLACE_DELAYS_S)):
+                    raise
+                sleep(_SUMMARY_REPLACE_DELAYS_S[attempt])
 
 
 def _run_case_direct(
@@ -712,11 +726,27 @@ def run_batch_file(
     summary_path = document.output_directory / "summary.csv"
     _check_output_collisions(document, expanded_cases, summary_path)
     axis_ids = tuple(axis.id for axis in document.spec.axes)
+    checkpoint_blocked = False
 
     def checkpoint() -> None:
-        _write_records_csv(summary_path, records, axis_ids)
+        nonlocal checkpoint_blocked
+        try:
+            _write_records_csv(summary_path, records, axis_ids)
+        except PermissionError as exc:
+            if getattr(exc, "winerror", None) not in _WINDOWS_FILE_LOCK_ERRORS:
+                raise
+            if not checkpoint_blocked:
+                _LOGGER.warning(
+                    "Could not update batch summary %s: %s. Keeping the previous "
+                    "snapshot and continuing simulations; a later checkpoint will retry.",
+                    summary_path, exc,
+                )
+            checkpoint_blocked = True
+        else:
+            checkpoint_blocked = False
 
-    checkpoint()
+    # Establish a writable summary before launching any simulations.
+    _write_records_csv(summary_path, records, axis_ids)
     try:
         _write_case_files(expanded_cases)
         if generate_artifacts_fn is None and document.spec.artifacts:
@@ -747,9 +777,20 @@ def run_batch_file(
             if record.status in ("running", "validation_passed"):
                 record.status = "interrupted_failed"
                 record.error = f"Batch interrupted: {type(exc).__name__}: {exc}"
+        try:
+            _write_records_csv(summary_path, records, axis_ids)
+        except OSError as summary_exc:
+            # Preserve the original interruption even if its snapshot cannot be saved.
+            _LOGGER.error("Could not save interrupted batch summary %s: %s", summary_path, summary_exc)
         raise
-    finally:
-        checkpoint()
+    try:
+        _write_records_csv(summary_path, records, axis_ids)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Could not write final batch summary {summary_path}: {exc}. "
+            "Case outputs are preserved in their output directories. "
+            "Close any readers holding the summary open and check write access."
+        ) from exc
     return BatchResult(
         batch_path=document.batch_path,
         output_directory=document.output_directory,

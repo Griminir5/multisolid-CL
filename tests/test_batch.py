@@ -65,6 +65,10 @@ def _slow_fake_run(case, **_kwargs):
     return RunResult(case=case, output_directory=case.output_directory)
 
 
+def _successful_fake_run(case, **_kwargs):
+    return RunResult(case=case, output_directory=case.output_directory)
+
+
 def _large_payload_run(case, **_kwargs):
     if case.run.model.axial_cells == 4:
         raise RuntimeError("x" * 1_000_000)
@@ -484,3 +488,127 @@ def test_interrupted_csv_write_preserves_previous_snapshot(tmp_path, monkeypatch
         batch._write_records_csv(path, (record,), ())
     assert path.read_bytes() == previous
     assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows read handles block file replacement")
+def test_csv_write_retries_until_reader_closes(tmp_path, monkeypatch):
+    path = tmp_path / "summary.csv"
+    record = batch.BatchCaseRecord("case", {}, tmp_path, tmp_path / "run.yaml")
+    batch._write_records_csv(path, (record,), ())
+    previous = path.read_bytes()
+    delays = []
+    with path.open("r") as reader:
+        def close_reader_on_retry(delay):
+            delays.append(delay)
+            assert path.read_bytes() == previous
+            reader.close()
+
+        monkeypatch.setattr(batch, "sleep", close_reader_on_retry)
+        record.status = "success"
+        batch._write_records_csv(path, (record,), ())
+    assert delays == [batch._SUMMARY_REPLACE_DELAYS_S[0]]
+    with path.open(newline="") as handle:
+        assert next(csv.DictReader(handle))["status"] == "success"
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows read handles block file replacement")
+def test_csv_write_bounds_retries_and_preserves_snapshot_while_locked(tmp_path, monkeypatch):
+    path = tmp_path / "summary.csv"
+    record = batch.BatchCaseRecord("case", {}, tmp_path, tmp_path / "run.yaml")
+    batch._write_records_csv(path, (record,), ())
+    previous = path.read_bytes()
+    delays = []
+    monkeypatch.setattr(batch, "sleep", delays.append)
+    record.status = "success"
+    with path.open("r"), pytest.raises(PermissionError):
+        batch._write_records_csv(path, (record,), ())
+    assert delays == list(batch._SUMMARY_REPLACE_DELAYS_S)
+    assert path.read_bytes() == previous
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows read handles block file replacement")
+@pytest.mark.parametrize("workers", [1, 2])
+def test_locked_checkpoint_does_not_interrupt_cases(tmp_path, monkeypatch, caplog, workers):
+    children_before = active_children()
+    write_records = batch._write_records_csv
+    locked = False
+
+    def hold_reader_during_first_completion(path, records, axes):
+        nonlocal locked
+        if not locked and any(record.status == "success" for record in records):
+            locked = True
+            with path.open("r"):
+                return write_records(path, records, axes)
+        return write_records(path, records, axes)
+
+    monkeypatch.setattr(batch, "_write_records_csv", hold_reader_during_first_completion)
+    monkeypatch.setattr(batch, "sleep", lambda _delay: None)
+    result = run_batch_file(_write_two_case_batch(tmp_path, workers=workers), run_case_fn=_successful_fake_run)
+    assert locked
+    assert [record.status for record in result.records] == ["success", "success"]
+    with result.summary_path.open(newline="") as handle:
+        assert [row["status"] for row in csv.DictReader(handle)] == ["success", "success"]
+    assert "Keeping the previous snapshot and continuing simulations" in caplog.text
+    assert active_children() == children_before
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows read handles block file replacement")
+def test_persistent_final_lock_reports_summary_error_after_cases_complete(tmp_path, monkeypatch, caplog):
+    write_records = batch._write_records_csv
+    reader = None
+    recorded = ()
+
+    def hold_reader_until_batch_returns(path, records, axes):
+        nonlocal reader, recorded
+        recorded = records
+        if reader is None and any(record.status == "success" for record in records):
+            reader = path.open("r")
+        return write_records(path, records, axes)
+
+    monkeypatch.setattr(batch, "_write_records_csv", hold_reader_until_batch_returns)
+    monkeypatch.setattr(batch, "sleep", lambda _delay: None)
+    try:
+        with pytest.raises(RuntimeError, match="Could not write final batch summary") as error:
+            run_batch_file(_write_two_case_batch(tmp_path), run_case_fn=_successful_fake_run)
+        assert isinstance(error.value.__cause__, PermissionError)
+        assert "Case outputs are preserved" in str(error.value)
+        assert [record.status for record in recorded] == ["success", "success"]
+        assert caplog.text.count("Keeping the previous snapshot") == 1
+    finally:
+        if reader is not None:
+            reader.close()
+
+
+def test_summary_write_error_does_not_mask_interruption(tmp_path, monkeypatch, caplog):
+    write_records = batch._write_records_csv
+    interrupted = False
+
+    def interrupt_then_fail_to_save(path, records, axes):
+        nonlocal interrupted
+        if interrupted:
+            raise OSError("summary unavailable")
+        write_records(path, records, axes)
+        if records[0].status == "success":
+            interrupted = True
+            raise KeyboardInterrupt("original interruption")
+
+    monkeypatch.setattr(batch, "_write_records_csv", interrupt_then_fail_to_save)
+    with pytest.raises(KeyboardInterrupt, match="original interruption"):
+        run_batch_file(_write_two_case_batch(tmp_path), run_case_fn=_successful_fake_run)
+    assert "Could not save interrupted batch summary" in caplog.text
+    assert "summary unavailable" in caplog.text
+
+
+def test_csv_write_does_not_retry_unrelated_permission_errors(tmp_path, monkeypatch):
+    path = tmp_path / "summary.csv"
+    record = batch.BatchCaseRecord("case", {}, tmp_path, tmp_path / "run.yaml")
+
+    def deny_replace(_source, _target):
+        raise PermissionError("unrelated access error")
+
+    monkeypatch.setattr(Path, "replace", deny_replace)
+    monkeypatch.setattr(batch, "sleep", lambda _delay: pytest.fail("Unexpected retry"))
+    with pytest.raises(PermissionError, match="unrelated access error"):
+        batch._write_records_csv(path, (record,), ())
