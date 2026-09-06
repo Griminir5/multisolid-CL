@@ -104,6 +104,7 @@ def test_configure_idas_maps_every_per_case_control(monkeypatch) -> None:
         "daetools.IDAS.SuppressAlg": True,
         "daetools.IDAS.MaxNonlinIters": 12,
         "daetools.IDAS.NonlinConvCoef": 1.0,
+        "daetools.IDAS.MaxOrd": 5,
     }
 
 

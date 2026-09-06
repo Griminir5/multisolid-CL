@@ -151,6 +151,7 @@ class ModelConfig(ConfigModel):
 
 
 class SolverConfig(ConfigModel):
+    backend: Literal["daetools", "compiled"] = "daetools"
     name: Literal[
         "trilinos_klu",
         "trilinos_umfpack",
@@ -158,15 +159,24 @@ class SolverConfig(ConfigModel):
         "trilinos_aztecoo",
         "trilinos_aztecoo_ifpack",
         "trilinos_aztecoo_ml",
+        "sundials_gmres_ifpack",
         "superlu",
         "superlu_mt",
+        "band",
         "intel_pardiso",
     ] = "trilinos_klu"
     threads: int = Field(default=0, ge=0)
     relative_tolerance: PositiveFloat
+    concentration_absolute_tolerance: PositiveFloat = 1.0e-5
     suppress_algebraic_errors: bool = False
     max_nonlinear_iterations: int = Field(default=4, ge=1)
     nonlinear_convergence_coefficient: PositiveFloat = 0.33
+    maximum_order: int = Field(default=5, ge=1, le=5)
+    scale_residuals: bool = False
+    step_growth_threshold: float = Field(default=2.0, ge=1.0, allow_inf_nan=False)
+    nonlinear_refresh_interval: int = Field(default=0, ge=0, strict=True)
+    vector_exponentials: bool = Field(default=False, strict=True)
+    band_reciprocals: bool = Field(default=False, strict=True)
 
 
 class OutputConfig(ConfigModel):
@@ -188,6 +198,50 @@ class RunConfig(ConfigModel):
     def validate_reporting_window(self) -> "RunConfig":
         if self.simulation.reporting_interval_s > self.simulation.time_horizon_s:
             raise ValueError("reporting_interval_s must not exceed time_horizon_s.")
+        return self
+
+    @model_validator(mode="after")
+    def validate_compiled_backend(self) -> "RunConfig":
+        if self.solver.band_reciprocals and (
+            self.solver.backend != "compiled" or self.solver.name != "band"
+        ):
+            raise ValueError(
+                "band_reciprocals requires solver.backend: compiled and solver.name: band."
+            )
+        if self.solver.vector_exponentials and self.solver.backend != "compiled":
+            raise ValueError(
+                "vector_exponentials currently requires solver.backend: compiled."
+            )
+        if self.solver.nonlinear_refresh_interval and self.solver.backend != "compiled":
+            raise ValueError(
+                "nonlinear_refresh_interval currently requires solver.backend: compiled."
+            )
+        if self.solver.name == "band" and self.solver.backend != "compiled":
+            raise ValueError("solver.name: band requires solver.backend: compiled.")
+        if self.solver.scale_residuals and self.solver.backend != "compiled":
+            raise ValueError(
+                "scale_residuals currently requires solver.backend: compiled."
+            )
+        if (
+            self.solver.step_growth_threshold != 2.0
+            and self.solver.backend != "compiled"
+        ):
+            raise ValueError(
+                "step_growth_threshold currently requires solver.backend: compiled."
+            )
+        if self.solver.backend == "compiled":
+            if self.solver.name not in {"superlu", "superlu_mt", "band"}:
+                raise ValueError(
+                    "The compiled backend requires solver.name: superlu, superlu_mt or band."
+                )
+            if self.simulation.report_time_derivatives:
+                raise ValueError(
+                    "The compiled backend does not support report_time_derivatives: true."
+                )
+            if self.outputs.solver_incidence_matrix:
+                raise ValueError(
+                    "The compiled backend does not support solver_incidence_matrix: true."
+                )
         return self
 
 

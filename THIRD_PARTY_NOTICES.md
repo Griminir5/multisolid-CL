@@ -22,6 +22,18 @@ those projects.
 - pydantic: MIT.
 - PyYAML: MIT.
 
+## Optional Compiled Solver
+
+- scikit-sundae supplies the separately installed SUNDIALS runtime used by the
+  compiled backend. Its wheel and bundled libraries retain their own notices.
+- The native Newton helper adapts SUNDIALS control flow under BSD-3-Clause.
+  The bundled [license](packed_bed/compiled/licenses/SUNDIALS-LICENSE.txt) and
+  [notice](packed_bed/compiled/licenses/SUNDIALS-NOTICE.txt) accompany the source
+  and are included in package distributions.
+- The optional vector exponential uses code extracted from SLEEF 3.9.0,
+  copyright Naoki Shibata and contributors, under the
+  [Boost Software License 1.0](packed_bed/compiled/licenses/SLEEF-LICENSE.txt).
+
 ## Optional Tools
 
 - pygraphviz: BSD-3-Clause. PyPI binary wheels may bundle Graphviz components

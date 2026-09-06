@@ -31,6 +31,19 @@ def _variable_type(name, units, lower, upper, initial=0.0, tolerance=1.0e-5):
     )
 
 
+def _with_absolute_tolerance(variable_type, tolerance):
+    """Copy a type without changing the defaults used by another case."""
+    return daeVariableType(
+        name=variable_type.Name,
+        units=variable_type.Units,
+        lowerBound=variable_type.LowerBound,
+        upperBound=variable_type.UpperBound,
+        initialGuess=variable_type.InitialGuess,
+        absTolerance=tolerance,
+        valueConstraint=variable_type.ValueConstraint,
+    )
+
+
 molar_flux_type = _variable_type("molar_flux_type", mol / (s * m**2), -1.0e5, 1.0e5)
 molar_flow_type = _variable_type("molar_flow_type", mol / s, -1.0e5, 1.0e5)
 molar_conc_type = _variable_type("molar_conc_type", mol / m**3, 0.0, 1.0e5)
@@ -62,6 +75,11 @@ class PackedBedModel(daeModel):
         parent=None,
     ):
         daeModel.__init__(self, name, parent, description)
+
+        concentration_tolerance = case.run.solver.concentration_absolute_tolerance
+        gas_concentration_type = _with_absolute_tolerance(molar_conc_type, concentration_tolerance)
+        solid_concentration_type = _with_absolute_tolerance(molar_conc_sol_type, concentration_tolerance)
+        self._concentration_types = (gas_concentration_type, solid_concentration_type)
 
         self.gas_species = list(case.chemistry.gas_species)
         self.solid_species = list(case.solids.solid_species)
@@ -111,12 +129,24 @@ class PackedBedModel(daeModel):
 
         self.gasfrac = daeParameter("gasfrac", dimless, self, "Fraction of total bed volume occupied by gas", [self.x_centers])
 
-        self.N_gas_face = daeVariable("N_gas_face", molar_flux_type, self, "Species i molar flux at cell faces", [self.N_gas, self.x_faces])
-        self.c_sol = daeVariable("c_sol", molar_conc_sol_type, self, "Concentration of solid component i per total bed volume", [self.N_sol, self.x_centers])
-        self.ct_gas = daeVariable("c_gas_tot", molar_conc_type, self, "Total concentration of gas per total bed volume", [self.x_centers])
-        self.ct_sol = daeVariable("c_sol_tot", molar_conc_sol_type, self, "Total concentration of solid per total bed volume", [self.x_centers])
+        # ILU does not pivot like a direct solver. Match the species-balance rows
+        # to concentration columns, and the later face-flux rows to face fluxes.
+        iterative_order = (
+            case.run.solver.name.startswith("trilinos_aztecoo")
+            or case.run.solver.name == "sundials_gmres_ifpack"
+        )
+        if iterative_order:
+            self.c_gas = daeVariable("c_gas", gas_concentration_type, self, "Concentration of gaseous component i per total bed volume", [self.N_gas, self.x_centers])
+        else:
+            self.N_gas_face = daeVariable("N_gas_face", molar_flux_type, self, "Species i molar flux at cell faces", [self.N_gas, self.x_faces])
+        self.c_sol = daeVariable("c_sol", solid_concentration_type, self, "Concentration of solid component i per total bed volume", [self.N_sol, self.x_centers])
+        self.ct_gas = daeVariable("c_gas_tot", gas_concentration_type, self, "Total concentration of gas per total bed volume", [self.x_centers])
+        self.ct_sol = daeVariable("c_sol_tot", solid_concentration_type, self, "Total concentration of solid per total bed volume", [self.x_centers])
         self.y_gas = daeVariable("y_gas", molar_frac_type, self, "Molar fraction of gaseous component i", [self.N_gas, self.x_centers])
-        self.c_gas = daeVariable("c_gas", molar_conc_type, self, "Concentration of gaseous component i per total bed volume", [self.N_gas, self.x_centers])
+        if iterative_order:
+            self.N_gas_face = daeVariable("N_gas_face", molar_flux_type, self, "Species i molar flux at cell faces", [self.N_gas, self.x_faces])
+        else:
+            self.c_gas = daeVariable("c_gas", gas_concentration_type, self, "Concentration of gaseous component i per total bed volume", [self.N_gas, self.x_centers])
 
         self.R_rxn = None
         if self.reaction_network.has_reactions:

@@ -247,6 +247,7 @@ class RunResult:
     artifact_paths: dict[str, Path] = field(default_factory=dict)
     plot_errors: dict[str, str] = field(default_factory=dict)
     reporter: Any | None = None
+    solver_stats: dict[str, Any] = field(default_factory=dict)
     code_git: dict[str, Any] = field(default_factory=lambda: _git_state())
 
     @property
@@ -419,6 +420,15 @@ def create_dataset_reporter(case: Case):
             self.results_path = None
             self.write_error = None
             self._connected = False
+            self._compiled_process = None
+
+        @property
+        def Process(self):
+            return self._compiled_process if self._compiled_process is not None else super().Process
+
+        def accept_process(self, process):
+            """Accept array results while preserving the usual reporter/plotter interface."""
+            self._compiled_process = process
 
         def Connect(self, connect_string, process_name):
             try:
@@ -516,7 +526,7 @@ def _git_state() -> dict[str, Any]:
 
 def _package_versions() -> dict[str, str | None]:
     versions = {}
-    for name in ("numpy", "xarray", "scipy", "matplotlib", "pydantic", "daetools"):
+    for name in ("numpy", "xarray", "scipy", "matplotlib", "pydantic", "daetools", "scikit-sundae"):
         try:
             versions[name] = version(name)
         except PackageNotFoundError:
@@ -577,6 +587,7 @@ def write_run_manifest(
     manifest = {
         "status": result.status,
         "runtime_s": result.runtime_s,
+        "solver_stats": result.solver_stats,
         "environment": {
             "python": platform.python_version(),
             "platform": platform.platform(),

@@ -14,6 +14,7 @@ dependencies = ["numpy", "scipy", "xarray", "pydantic>=2", "PyYAML", "matplotlib
 [project.optional-dependencies]
 dev = ["pytest"]
 graph = ["pygraphviz"]
+compiled = ["scikit-sundae==1.1.3; sys_platform == 'win32'"]
 
 [project.scripts]
 packed-bed = "packed_bed.cli:main"
@@ -24,6 +25,9 @@ namespaces = false
 
 [tool.setuptools.package-data]
 packed_bed = [
+    "compiled/*.cpp",
+    "compiled/*.hpp",
+    "compiled/licenses/*.txt",
     "examples/default_case/*.yaml",
     "examples/default_batch_case/batch.yaml",
     "examples/default_batch_case/base_case/*.yaml",

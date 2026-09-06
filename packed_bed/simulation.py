@@ -7,6 +7,7 @@ from importlib import import_module
 import os
 from pathlib import Path
 from time import perf_counter
+from types import SimpleNamespace
 import traceback
 
 from daetools.pyDAE import (
@@ -15,6 +16,7 @@ from daetools.pyDAE import (
     daeNoOpDataReporter,
     daePythonStdOutLog,
     daeSimulation,
+    eSundialsGMRES,
 )
 
 from .config import Case
@@ -40,6 +42,7 @@ _SOLVER_REGISTRY = {
     "trilinos_aztecoo": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("AztecOO", "ILUT")),
     "trilinos_aztecoo_ifpack": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("AztecOO_Ifpack", "ILU")),
     "trilinos_aztecoo_ml": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("AztecOO_ML", "DD-ML")),
+    "sundials_gmres_ifpack": ("trilinos", "pyTrilinos", "daePreconditioner_Ifpack", ("ILU",)),
     "superlu": ("superlu", "pySuperLU", "daeCreateSuperLUSolver", ()),
     "superlu_mt": ("superlu_mt", "pySuperLU_MT", "daeCreateSuperLUSolver", ()),
     "intel_pardiso": ("intel_pardiso", "pyIntelPardiso", "daeCreateIntelPardisoSolver", ()),
@@ -138,6 +141,7 @@ def configure_idas(solver_config) -> None:
         "daetools.IDAS.NonlinConvCoef",
         solver_config.nonlinear_convergence_coefficient,
     )
+    daetools_config.SetInteger("daetools.IDAS.MaxOrd", getattr(solver_config, "maximum_order", 5))
 
 
 def _configure_aztecoo_ifpack(linear_solver):
@@ -160,8 +164,19 @@ def _configure_aztecoo_ifpack(linear_solver):
     return linear_solver
 
 
+def _configure_sundials_ifpack(preconditioner):
+    # Stronger ILU is needed for the coupled chemistry/enthalpy/pressure blocks.
+    # Avoid a fixed absolute perturbation across variables with different units.
+    parameters = preconditioner.ParameterList
+    parameters.set_int("fact: level-of-fill", 10)
+    parameters.set_float("fact: absolute threshold", 0.0)
+    parameters.set_float("fact: relative threshold", 1.0)
+    parameters.set_float("fact: relax value", 0.0)
+    return preconditioner
+
+
 def create_linear_solver(name: str):
-    """Create one solver from the explicit supported registry."""
+    """Create a third-party solver, or the preconditioner for native GMRES."""
 
     try:
         module_name, backend_name, factory_name, arguments = _SOLVER_REGISTRY[name]
@@ -170,6 +185,8 @@ def create_linear_solver(name: str):
     module = import_module(f"daetools.solvers.{module_name}")
     factory = getattr(getattr(module, backend_name), factory_name)
     solver = factory(*arguments)
+    if name == "sundials_gmres_ifpack":
+        return _configure_sundials_ifpack(solver)
     return _configure_aztecoo_ifpack(solver) if name.endswith("_ifpack") else solver
 
 
@@ -198,6 +215,16 @@ def execute_simulation(
     """Initialize, run, finalize, and flush reports through one execution path."""
 
     case = simulation.case
+    compiled = case.run.solver.backend == "compiled"
+    if compiled:
+        if case.run.solver.name not in {"superlu", "superlu_mt", "band"}:
+            raise ValueError("The compiled backend requires solver.name: superlu, superlu_mt or band.")
+        if case.run.simulation.report_time_derivatives:
+            raise ValueError("The compiled backend does not yet support report_time_derivatives: true.")
+        if case.run.outputs.solver_incidence_matrix:
+            raise ValueError("Compiled solver incidence output is not yet supported; use the daetools backend for the full model graph.")
+        if data_reporter is not None and not hasattr(data_reporter, "accept_process"):
+            raise ValueError("The compiled backend requires the standard dataset reporter or no data reporter.")
     configure_threads(case.run.solver.threads)
     configure_idas(case.run.solver)
     _configure_reporting(simulation)
@@ -207,7 +234,21 @@ def execute_simulation(
 
     solver = daeIDAS()
     solver.RelativeTolerance = case.run.solver.relative_tolerance
-    solver.SetLASolver(create_linear_solver(case.run.solver.name))
+    # DAETools still supplies consistent initial data for the compiled backend.
+    initial_solver_name = "superlu" if compiled and case.run.solver.name == "band" else case.run.solver.name
+    linear_solver = create_linear_solver(initial_solver_name)
+    if case.run.solver.name == "sundials_gmres_ifpack":
+        # Native IDAS GMRES uses the integrator's state weights and adaptive
+        # linear stopping criterion. AztecOO's adapter ignores those weights.
+        config = daeGetConfig()
+        config.SetInteger("daetools.IDAS.gmres.kspace", 100)
+        config.SetInteger("daetools.IDAS.gmres.MaxRestarts", 5)
+        config.SetFloat("daetools.IDAS.gmres.EpsLin", 0.05)
+        config.SetString("daetools.IDAS.gmres.GSType", "MODIFIED_GS")
+        config.SetString("daetools.IDAS.gmres.JacTimesVecFn", "DifferenceQuotient")
+        solver.SetLASolver(eSundialsGMRES, linear_solver)
+    else:
+        solver.SetLASolver(linear_solver)
     reporter = data_reporter if data_reporter is not None else daeNoOpDataReporter()
     if data_reporter is not None and not reporter.IsConnected():
         process_name = case.run.simulation.system_name
@@ -217,21 +258,41 @@ def execute_simulation(
     log = daePythonStdOutLog()
     log.PrintProgress = False
     initialized = False
+    returned_reporter = reporter
     try:
         simulation.Initialize(solver, reporter, log)
         initialized = True
         if after_initialize is not None:
             after_initialize(simulation, solver)
         simulation.SolveInitial()
-        simulation.Run()
+        if compiled:
+            from .compiled import integrate
+
+            process, simulation.solver_stats = integrate(simulation)
+            if hasattr(reporter, "accept_process"):
+                reporter.accept_process(process)
+            else:
+                returned_reporter = SimpleNamespace(Process=process)
+        else:
+            integration_started = perf_counter()
+            simulation.Run()
+            simulation.solver_stats = {
+                "integration_s": perf_counter() - integration_started,
+                "runtime": f"DAETools IDAS / {case.run.solver.name}",
+                "integrator": dict(solver.IntegratorStats),
+            }
     finally:
         if initialized:
+            # DAETools performed only initialization for this backend. Its normal
+            # final statistics would misleadingly show zero integration steps.
+            if compiled:
+                log.Enabled = False
             simulation.Finalize()
 
-    finish = getattr(reporter, "finish", None)
+    finish = getattr(returned_reporter, "finish", None)
     if finish is not None:
         finish()
-    return reporter
+    return returned_reporter
 
 
 def run_case(
@@ -280,6 +341,7 @@ def run_case(
             artifact_paths={**dict(artifact_paths or {}), **solver_artifacts},
             reporter=reporter if retain_reporter else None,
             balance_errors=compute_balance_errors(dataset_reporter.results_path),
+            solver_stats=getattr(simulation, "solver_stats", {}),
         )
         if case.run.outputs.requested_plots:
             from .plotting import _render_requested_plots

@@ -25,7 +25,11 @@ def _case_documents(
     flow_duration_s: float | None = None,
     composition_duration_s: float | None = None,
 ) -> dict[str, dict]:
-    flow_steps = [] if flow_duration_s is None else [{"kind": "hold", "duration_s": flow_duration_s}]
+    flow_steps = (
+        []
+        if flow_duration_s is None
+        else [{"kind": "hold", "duration_s": flow_duration_s}]
+    )
     composition_steps = (
         []
         if composition_duration_s is None
@@ -98,11 +102,15 @@ def _case_documents(
 
 def _write_case(tmp_path: Path, documents: dict[str, dict] | None = None) -> Path:
     for filename, document in (documents or _case_documents()).items():
-        (tmp_path / filename).write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+        (tmp_path / filename).write_text(
+            yaml.safe_dump(document, sort_keys=False), encoding="utf-8"
+        )
     return tmp_path / "run.yaml"
 
 
-def test_load_case_returns_one_resolved_case_with_compiled_programs(tmp_path: Path) -> None:
+def test_load_case_returns_one_resolved_case_with_compiled_programs(
+    tmp_path: Path,
+) -> None:
     run_path = _write_case(
         tmp_path,
         _case_documents(flow_duration_s=10.0, composition_duration_s=10.0),
@@ -145,12 +153,20 @@ def test_solver_controls_default_to_daetools_values_and_accept_tuning(
     default_case = load_case(_write_case(default_directory, _case_documents()))
 
     assert default_case.run.solver.model_dump() == {
+        "backend": "daetools",
         "name": "trilinos_klu",
         "threads": 0,
         "relative_tolerance": 1.0e-5,
+        "concentration_absolute_tolerance": 1.0e-5,
         "suppress_algebraic_errors": False,
         "max_nonlinear_iterations": 4,
         "nonlinear_convergence_coefficient": 0.33,
+        "maximum_order": 5,
+        "scale_residuals": False,
+        "step_growth_threshold": 2.0,
+        "nonlinear_refresh_interval": 0,
+        "vector_exponentials": False,
+        "band_reciprocals": False,
     }
 
     documents = _case_documents()
@@ -158,6 +174,7 @@ def test_solver_controls_default_to_daetools_values_and_accept_tuning(
         name="superlu",
         threads=2,
         relative_tolerance=1.0e-3,
+        concentration_absolute_tolerance=1.0e-11,
         suppress_algebraic_errors=True,
         max_nonlinear_iterations=12,
         nonlinear_convergence_coefficient=1.0,
@@ -167,13 +184,144 @@ def test_solver_controls_default_to_daetools_values_and_accept_tuning(
     tuned_case = load_case(_write_case(tuned_directory, documents))
 
     assert tuned_case.run.solver.model_dump() == {
+        "backend": "daetools",
         "name": "superlu",
         "threads": 2,
         "relative_tolerance": 1.0e-3,
+        "concentration_absolute_tolerance": 1.0e-11,
         "suppress_algebraic_errors": True,
         "max_nonlinear_iterations": 12,
         "nonlinear_convergence_coefficient": 1.0,
+        "maximum_order": 5,
+        "scale_residuals": False,
+        "step_growth_threshold": 2.0,
+        "nonlinear_refresh_interval": 0,
+        "vector_exponentials": False,
+        "band_reciprocals": False,
     }
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    (
+        "solver",
+        "derivatives",
+        "incidence",
+        "order",
+        "scaling",
+        "band_backend",
+        "step_growth_backend",
+        "nonlinear_refresh_backend",
+        "vector_exp_backend",
+        "reciprocal_backend",
+        "reciprocal_sparse",
+    ),
+)
+def test_compiled_backend_rejects_unsupported_configuration(tmp_path, invalid):
+    documents = _case_documents()
+    run = documents["run.yaml"]
+    run["solver"].update(backend="compiled", name="superlu")
+    if invalid == "solver":
+        run["solver"]["name"] = "trilinos_klu"
+    elif invalid == "derivatives":
+        run["simulation"]["report_time_derivatives"] = True
+    elif invalid == "incidence":
+        run["outputs"]["solver_incidence_matrix"] = True
+    elif invalid == "scaling":
+        run["solver"].update(backend="daetools", scale_residuals=True)
+    elif invalid == "band_backend":
+        run["solver"].update(backend="daetools", name="band")
+    elif invalid == "step_growth_backend":
+        run["solver"].update(backend="daetools", step_growth_threshold=1.25)
+    elif invalid == "nonlinear_refresh_backend":
+        run["solver"].update(backend="daetools", nonlinear_refresh_interval=4)
+    elif invalid == "vector_exp_backend":
+        run["solver"].update(backend="daetools", vector_exponentials=True)
+    elif invalid == "reciprocal_backend":
+        run["solver"].update(backend="daetools", band_reciprocals=True)
+    elif invalid == "reciprocal_sparse":
+        run["solver"].update(backend="compiled", name="superlu", band_reciprocals=True)
+    else:
+        run["solver"]["maximum_order"] = 6
+    with pytest.raises(PackedBedValidationError):
+        load_case(_write_case(tmp_path, documents))
+
+
+@pytest.mark.parametrize("threshold", (0.0, 0.99, float("inf"), float("nan")))
+def test_step_growth_threshold_rejects_invalid_values(tmp_path, threshold):
+    documents = _case_documents()
+    documents["run.yaml"]["solver"].update(
+        backend="compiled", name="band", step_growth_threshold=threshold
+    )
+    with pytest.raises(PackedBedValidationError, match="step_growth_threshold"):
+        load_case(_write_case(tmp_path, documents))
+
+
+@pytest.mark.parametrize("interval", (-1, 1.5, True, float("inf")))
+def test_nonlinear_refresh_interval_rejects_invalid_values(tmp_path, interval):
+    documents = _case_documents()
+    documents["run.yaml"]["solver"].update(
+        backend="compiled", name="band", nonlinear_refresh_interval=interval
+    )
+    with pytest.raises(PackedBedValidationError, match="nonlinear_refresh_interval"):
+        load_case(_write_case(tmp_path, documents))
+
+
+@pytest.mark.parametrize("value", (1, "true", None))
+def test_band_reciprocals_requires_boolean(tmp_path, value):
+    documents = _case_documents()
+    documents["run.yaml"]["solver"].update(
+        backend="compiled", name="band", band_reciprocals=value
+    )
+    with pytest.raises(PackedBedValidationError, match="band_reciprocals"):
+        load_case(_write_case(tmp_path, documents))
+
+
+@pytest.mark.parametrize("value", (1, "true", None))
+def test_vector_exponentials_requires_boolean(tmp_path, value):
+    documents = _case_documents()
+    documents["run.yaml"]["solver"].update(
+        backend="compiled", name="band", vector_exponentials=value
+    )
+    with pytest.raises(PackedBedValidationError, match="vector_exponentials"):
+        load_case(_write_case(tmp_path, documents))
+
+
+
+
+def test_compiled_example_preserves_default_physics():
+    from tools.benchmark_compiled import solver_settings
+
+    directory = Path(__file__).resolve().parents[1] / "packed_bed/examples/default_case"
+    original = load_case(directory / "run.yaml")
+    compiled = load_case(directory / "run_compiled.yaml")
+    assert compiled.run.model == original.run.model
+    assert compiled.chemistry == original.chemistry
+    assert compiled.solids == original.solids
+    assert compiled.program == original.program
+    assert compiled.run.simulation.time_horizon_s == 12000.0
+    assert compiled.run.simulation.reporting_interval_s == 1.0
+    for key, value in solver_settings("compiled", 1e-6).items():
+        assert getattr(compiled.run.solver, key) == value
+    assert compiled.output_directory != original.output_directory
+
+
+@pytest.mark.parametrize("profile", ("reference", "compiled", "superlu", "band", "gmres"))
+def test_benchmark_copies_inputs_and_matches_state_tolerances(tmp_path, profile):
+    from tools.benchmark_compiled import custom_documents, prepare_case
+
+    source = Path(__file__).resolve().parents[1] / "packed_bed/examples/default_case/run_compiled.yaml"
+    original = source.read_bytes()
+    documents = custom_documents(source)
+    run_file, fingerprint = prepare_case(documents, tmp_path, profile, 1e-6, 1e-11)
+    case = load_case(run_file)
+    assert case.run.solver.relative_tolerance == 1e-6
+    assert case.run.solver.concentration_absolute_tolerance == 1e-11
+    assert case.output_directory == tmp_path / "output"
+    assert case.run.solver.backend == ("daetools" if profile in ("reference", "gmres") else "compiled")
+    assert source.read_bytes() == original
+    _, changed = prepare_case(documents, tmp_path, profile, 1e-5, 1e-11)
+    assert changed != fingerprint
 
 
 def test_load_case_is_side_effect_free(tmp_path: Path) -> None:
@@ -182,8 +330,13 @@ def test_load_case_is_side_effect_free(tmp_path: Path) -> None:
 
     load_case(run_path)
 
-    assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == files_before
+    assert (
+        sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
+        == files_before
+    )
     assert not (tmp_path / "output").exists()
+
+
 
 
 def test_ghsv_inlet_flow_is_compiled_for_an_ordinary_case(tmp_path: Path) -> None:
@@ -277,7 +430,9 @@ def test_missing_reference_files_are_reported_together(tmp_path: Path) -> None:
     assert "run.references.solids_file does not exist" in message
 
 
-def test_structural_errors_use_configuration_paths_and_are_aggregated(tmp_path: Path) -> None:
+def test_structural_errors_use_configuration_paths_and_are_aggregated(
+    tmp_path: Path,
+) -> None:
     documents = _case_documents()
     documents["chemistry.yaml"]["gas_species"] = ["N2", "H2"]
     zone = documents["solids.yaml"]["initial_profile"]["zones"][0]
@@ -294,7 +449,9 @@ def test_structural_errors_use_configuration_paths_and_are_aggregated(tmp_path: 
     assert "program.inlet_composition.initial species mismatch: missing H2" in message
 
 
-def test_component_reaction_and_report_references_are_aggregated(tmp_path: Path) -> None:
+def test_component_reaction_and_report_references_are_aggregated(
+    tmp_path: Path,
+) -> None:
     documents = _case_documents()
     documents["chemistry.yaml"] = {
         "gas_species": ["MysteryGas"],
@@ -315,16 +472,23 @@ def test_component_reaction_and_report_references_are_aggregated(tmp_path: Path)
     message = str(caught.value)
     assert "Unknown gas species 'MysteryGas'" in message
     assert "chemistry.reaction_ids contains unknown id 'mystery_reaction'" in message
-    assert "run.outputs.requested_reports contains unknown ids: mystery_report" in message
+    assert (
+        "run.outputs.requested_reports contains unknown ids: mystery_report" in message
+    )
     assert "run.outputs.requested_plots contains unknown ids: mystery_plot" in message
-    assert "'outlet_conditions' requires requested_reports: gas_flux, pressure, temperature" in message
+    assert (
+        "'outlet_conditions' requires requested_reports: gas_flux, pressure, temperature"
+        in message
+    )
 
 
 def test_reaction_rate_report_requires_a_selected_reaction(tmp_path: Path) -> None:
     documents = _case_documents()
     documents["run.yaml"]["outputs"]["requested_reports"] = ["reaction_rate"]
 
-    with pytest.raises(PackedBedValidationError, match="requires at least one selected reaction"):
+    with pytest.raises(
+        PackedBedValidationError, match="requires at least one selected reaction"
+    ):
         load_case(_write_case(tmp_path, documents))
 
 
@@ -344,7 +508,9 @@ def test_requested_plots_is_required_and_unique(tmp_path: Path) -> None:
     duplicate["run.yaml"]["outputs"]["requested_reports"] = ["temperature", "pressure"]
     duplicate_directory = tmp_path / "duplicate"
     duplicate_directory.mkdir()
-    with pytest.raises(PackedBedValidationError, match="contains duplicates: axial_profiles"):
+    with pytest.raises(
+        PackedBedValidationError, match="contains duplicates: axial_profiles"
+    ):
         load_case(_write_case(duplicate_directory, duplicate))
 
 
@@ -356,8 +522,9 @@ def test_unknown_reaction_family_uses_configuration_path(tmp_path: Path) -> None
     with pytest.raises(PackedBedValidationError) as caught:
         load_case(run_path)
 
-    assert "chemistry.reaction_families: Unknown reaction families: mystery_family" in str(
-        caught.value
+    assert (
+        "chemistry.reaction_families: Unknown reaction families: mystery_family"
+        in str(caught.value)
     )
 
 
@@ -370,8 +537,9 @@ def test_reaction_must_belong_to_a_selected_family(tmp_path: Path) -> None:
     with pytest.raises(PackedBedValidationError) as caught:
         load_case(run_path)
 
-    assert "chemistry.reaction_ids contains unknown id 'smr_reaction_xu_froment'" in str(
-        caught.value
+    assert (
+        "chemistry.reaction_ids contains unknown id 'smr_reaction_xu_froment'"
+        in str(caught.value)
     )
 
 

@@ -103,6 +103,20 @@ The IDAS defaults are `suppress_algebraic_errors: false`, `max_nonlinear_iterati
 The default example changes these values and uses `relative_tolerance: 1.0e-3`.
 Compare important results with a stricter tolerance before you use a new solver configuration.
 
+**Use the compiled CPU backend on Windows x64.** Install the optional runtime with
+`python -m pip install -e ".[compiled]"` and the C++ x64 component of Visual Studio Build Tools.
+The compiled backend derives its equations from the DAETools model, eliminates explicit algebraic definitions,
+and runs native residual and analytic-Jacobian functions with SUNDIALS IDA. DAETools still solves the initial conditions.
+
+```powershell
+python -m packed_bed packed_bed/examples/default_case/run_compiled.yaml
+```
+
+The first run compiles a model-specific kernel; later runs reuse `.packed_bed_cache` beside the case.
+Set `PACKED_BED_COMPILED_CACHE` to share a cache directory. The backend supports the usual datasets and plots;
+derivative reports, custom DAETools reporters and incidence-matrix output require `solver.backend: daetools`.
+See [the performance guide](docs/performance.md) for supported settings, validation and measured tradeoffs.
+
 **Run a batch.** A batch expands the combinations of named axis values into separate cases.
 
 ```powershell
