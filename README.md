@@ -81,7 +81,7 @@ All relative paths use the directory that contains the referring file.
 | --- | --- |
 | `run.yaml` | File references, geometry, solver settings, output paths, reports, and plots |
 | `chemistry.yaml` | Gas species, reaction families, and reaction IDs |
-| `program.yaml` | Inlet flow, inlet temperature, outlet pressure, and inlet composition |
+| `program.yaml` | Separate inlet channels or a feed stream, plus outlet pressure |
 | `solids.yaml` | Solid species, initial concentrations, voidages, and particle diameters |
 
 Use the complete YAML files in the example directory as templates.
@@ -102,6 +102,73 @@ The simulation horizon limits the compiled program.
 For a flow in gas hourly space velocity, set `inlet_flow.basis: ghsv_per_h`.
 The compiler uses the bed volume, 273.15 K, and 100,000 Pa to convert GHSV to mol/s.
 The manifest retains the declared basis and the compiled values.
+
+**Ramp between feeds.** Set `simulation.program_mode: feed_stream` in `run.yaml`
+to specify one inlet feed program plus the independent outlet-pressure channel.
+The default, `separate_channels`, keeps the existing flow, temperature, and
+composition channels. Each mode requires its own program format; mixing the
+formats is rejected.
+
+The default case includes a complete [feed program](packed_bed/examples/default_case/program_feed_stream.yaml)
+and matching [run configuration](packed_bed/examples/default_case/run_feed_stream.yaml):
+
+```powershell
+python -m packed_bed packed_bed/examples/default_case/run_feed_stream.yaml
+```
+
+This variant uses the original feed compositions, flowrates, temperatures, and
+flow/composition stage durations. Temperature changes with each feed, moving
+the final cooldown five seconds earlier; the independent pressure schedule is
+unchanged. The run keeps the baseline's 1,000-second horizon and writes to
+`output_feed_stream`.
+
+```yaml
+# run.yaml (excerpt)
+simulation:
+  program_mode: feed_stream
+```
+
+For a case selecting `N2` and `H2O`, the corresponding `program.yaml` could be:
+
+```yaml
+feed_stream:
+  basis: mol_per_s
+  initial:
+    flow: 1000.0
+    temperature: 773.15
+    composition: {N2: 1.0, H2O: 0.0}
+  steps:
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        flow: 333.05
+        temperature: 673.15
+        composition: {N2: 0.0, H2O: 1.0}
+    - kind: hold
+      duration_s: 225.0
+outlet_pressure:
+  initial: 3000000.0
+  steps: []
+```
+
+Each ramp target may contain any combination of `flow`, `temperature`, and
+`composition`. Omitted fields retain their previous values, including across
+repeated cycles. A supplied composition must include every selected gas species
+and sum to one. Use a `hold` step to retain the entire feed. Flow and temperature
+must be positive; zero-flow stages are not supported. Set
+`feed_stream.basis: ghsv_per_h` to use the same GHSV conversion as the
+separate-channel mode.
+
+Feed ramps interpolate total flow **F**, species flows **F × y**, and **F × T**.
+The existing one-second smoothing applies to these quantities before dividing
+by total flow to obtain composition and temperature. This avoids species-flow
+overshoot caused by independently ramping total flow and mole fractions. For
+example, halfway from 2736.77 mol/s air to 333.05 mol/s steam, steam contributes
+166.53 mol/s and about 10.85% of the mixture. Temperature is weighted by molar
+flow; this approximates mixing without enforcing an enthalpy balance. Smoothing
+still rounds the transition edges and can change the inlet conditions at time
+zero. Plots, initialization, and both solver backends use these derived conditions;
+the manifest records the underlying flow programs and their ratios.
 
 **Select numerical settings.** The mass and heat schemes are independent.
 Available schemes are `upwind1`, `central`, `linear_upwind2`, `muscl_minmod`, `weno3`, and `weno5`.

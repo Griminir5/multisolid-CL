@@ -8,6 +8,9 @@ if TYPE_CHECKING:
     from packed_bed.config.models import (
         CompositionChannelConfig,
         CompositionRampStep,
+        FeedProgramConfig,
+        FeedRampStep,
+        FeedStreamConfig,
         HoldStep,
         ModelConfig,
         ProgramConfig,
@@ -52,7 +55,39 @@ class CompiledProgram:
         return self.segments[-1].end_time if self.segments else 0.0
 
 
-def sum_step_durations(steps: tuple["HoldStep | ScalarRampStep | CompositionRampStep", ...]) -> float:
+@dataclass(frozen=True)
+class RatioProgram:
+    """Normalize a smoothed species-flow or flow-temperature program by flow.
+
+    Division happens after smoothing so feed transitions conserve molar flow.
+    The denominator is the shared, positive total molar flow program.
+    """
+
+    numerator: CompiledProgram
+    denominator: CompiledProgram
+
+    @staticmethod
+    def _divide(value: ProgramValue, flow: ProgramValue) -> ProgramValue:
+        if isinstance(flow, tuple) or not math.isfinite(flow) or flow <= 0:
+            raise ValueError("RatioProgram requires a positive, finite scalar flow.")
+        return tuple(v / flow for v in value) if isinstance(value, tuple) else value / flow
+
+    @property
+    def initial_value(self) -> ProgramValue:
+        return self._divide(self.numerator.initial_value, self.denominator.initial_value)
+
+    @property
+    def duration_s(self) -> float:
+        return self.numerator.duration_s
+
+    def value_at(self, time_s: float, *, smooth_ramp_width_s: float) -> ProgramValue:
+        return self._divide(
+            self.numerator.value_at(time_s, smooth_ramp_width_s=smooth_ramp_width_s),
+            self.denominator.value_at(time_s, smooth_ramp_width_s=smooth_ramp_width_s),
+        )
+
+
+def sum_step_durations(steps: tuple["HoldStep | ScalarRampStep | CompositionRampStep | FeedRampStep", ...]) -> float:
     return math.fsum(step.duration_s for step in steps)
 
 
@@ -139,7 +174,7 @@ def _evaluate_smoothed_program_value(
 
 def _compile_program_segments(
     initial_value: ProgramValue,
-    steps: tuple["HoldStep | ScalarRampStep | CompositionRampStep", ...],
+    steps: tuple["HoldStep | ScalarRampStep | CompositionRampStep | FeedRampStep", ...],
     *,
     repeat: bool,
     time_horizon: float | None,
@@ -238,20 +273,81 @@ def compile_composition_channel(
     return CompiledProgram(initial_value=initial_value, segments=segments)
 
 
+def compile_feed_stream(
+    channel: "FeedStreamConfig",
+    species_order: tuple[str, ...],
+    *,
+    repeat: bool = False,
+    time_horizon: float | None = None,
+    value_scale: float = 1.0,
+) -> tuple[CompiledProgram, RatioProgram, RatioProgram]:
+    """Ramp F, F*y and F*T together, then derive composition and temperature."""
+    state = channel.initial
+    _require_exact_keys(set(state.composition), species_order, "program.feed_stream.initial.composition")
+
+    def flow_values(feed):
+        flow = feed.flow * value_scale
+        return (flow, *(flow * feed.composition[s] for s in species_order), flow * feed.temperature)
+
+    initial = flow_values(state)
+
+    def resolve_next_value(step_index, step, current_value):
+        nonlocal state
+        if step.kind == "hold":
+            return current_value
+        if step.target.composition is not None:
+            _require_exact_keys(
+                set(step.target.composition), species_order,
+                f"program.feed_stream.steps[{step_index}].target.composition",
+            )
+        # Retain omitted fields from the last feed, including across repetitions.
+        state = state.model_copy(update=step.target.model_dump(exclude_none=True))
+        return flow_values(state)
+
+    segments = _compile_program_segments(
+        initial, channel.steps, repeat=repeat, time_horizon=time_horizon,
+        resolve_next_value=resolve_next_value,
+    )
+
+    def project(select):
+        return CompiledProgram(select(initial), tuple(
+            ProgramSegment(segment.start_time, segment.end_time,
+                           select(segment.start_value), select(segment.end_value))
+            for segment in segments
+        ))
+
+    flow = project(lambda value: value[0])
+    species_flow = project(lambda value: value[1:-1])
+    flow_temperature = project(lambda value: value[-1])
+    return flow, RatioProgram(species_flow, flow), RatioProgram(flow_temperature, flow)
+
+
 def compile_program_channels(
-    config: "ProgramConfig",
+    config: "ProgramConfig | FeedProgramConfig",
     gas_species: tuple[str, ...],
     model: "ModelConfig",
     *,
     repeat: bool,
     time_horizon: float,
-) -> tuple[CompiledProgram, CompiledProgram, CompiledProgram, CompiledProgram]:
+) -> tuple[CompiledProgram, CompiledProgram | RatioProgram, CompiledProgram | RatioProgram, CompiledProgram]:
     """Compile all operating channels once, in their runtime field order."""
 
+    from .config.models import FeedProgramConfig
+
+    flow_channel = config.feed_stream if isinstance(config, FeedProgramConfig) else config.inlet_flow
     inlet_flow_scale = 1.0
-    if config.inlet_flow.basis == "ghsv_per_h":
+    if flow_channel.basis == "ghsv_per_h":
         empty_bed_volume_m3 = math.pi * model.bed_radius_m**2 * model.bed_length_m
         inlet_flow_scale = empty_bed_volume_m3 * NORMAL_MOLAR_DENSITY_MOL_PER_M3 / 3600.0
+
+    if isinstance(config, FeedProgramConfig):
+        return (
+            *compile_feed_stream(
+                config.feed_stream, gas_species, repeat=repeat,
+                time_horizon=time_horizon, value_scale=inlet_flow_scale,
+            ),
+            compile_scalar_channel(config.outlet_pressure, repeat=repeat, time_horizon=time_horizon),
+        )
 
     return (
         compile_scalar_channel(
@@ -284,7 +380,9 @@ __all__ = (
     "DEFAULT_SMOOTH_RAMP_WIDTH_S",
     "NORMAL_MOLAR_DENSITY_MOL_PER_M3",
     "ProgramSegment",
+    "RatioProgram",
     "compile_composition_channel",
+    "compile_feed_stream",
     "compile_program_channels",
     "compile_scalar_channel",
     "sum_step_durations",

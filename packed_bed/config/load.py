@@ -10,11 +10,12 @@ from pydantic import ValidationError
 import yaml
 from yaml.resolver import BaseResolver
 
-from packed_bed.programs import CompiledProgram, compile_program_channels, sum_step_durations
+from packed_bed.programs import CompiledProgram, RatioProgram, compile_program_channels, sum_step_durations
 
 from .models import (
     ChemistryConfig,
     CompositionRampStep,
+    FeedProgramConfig,
     ProgramConfig,
     RunConfig,
     SolidConfig,
@@ -53,11 +54,11 @@ class Case:
     chemistry: ChemistryConfig
     solids: SolidConfig
     run: RunConfig
-    program: ProgramConfig
+    program: ProgramConfig | FeedProgramConfig
     reaction_families: tuple[ReactionFamily, ...]
     inlet_flow_program: CompiledProgram
-    inlet_composition_program: CompiledProgram
-    inlet_temperature_program: CompiledProgram
+    inlet_composition_program: CompiledProgram | RatioProgram
+    inlet_temperature_program: CompiledProgram | RatioProgram
     outlet_pressure_program: CompiledProgram
     input_hashes: dict[str, str] = field(default_factory=dict)
 
@@ -129,7 +130,8 @@ def resolve_case(
     }
     run = _parse_config_model(RunConfig, run_data, "run", paths["run"])
     chemistry = _parse_config_model(ChemistryConfig, chemistry_data, "chemistry", paths["chemistry"])
-    program = _parse_config_model(ProgramConfig, program_data, "program", paths["program"])
+    program_type = FeedProgramConfig if run.simulation.program_mode == "feed_stream" else ProgramConfig
+    program = _parse_config_model(program_type, program_data, "program", paths["program"])
     solids = _parse_config_model(SolidConfig, solids_data, "solids", paths["solids"])
 
     shape_errors = _validate_input_shapes(chemistry, solids, program, run)
@@ -326,7 +328,7 @@ def read_yaml_mapping(path: Path, label: str, *, hashes=None) -> dict[str, Any]:
 def _validate_input_shapes(
     chemistry: ChemistryConfig,
     solids: SolidConfig,
-    program: ProgramConfig,
+    program: ProgramConfig | FeedProgramConfig,
     run: RunConfig,
 ) -> list[str]:
     errors: list[str] = []
@@ -352,35 +354,36 @@ def _validate_input_shapes(
         errors.append("solids.initial_profile.zones must end at run.model.bed_length_m.")
 
     expected_gases = set(chemistry.gas_species)
-    _append_key_mismatch(
-        errors,
-        set(program.inlet_composition.initial),
-        expected_gases,
-        "program.inlet_composition.initial",
-    )
-    for step_index, step in enumerate(program.inlet_composition.steps):
-        if isinstance(step, CompositionRampStep):
-            _append_key_mismatch(
-                errors,
-                set(step.target),
-                expected_gases,
-                f"program.inlet_composition.steps.{step_index}.target",
-            )
+    if isinstance(program, FeedProgramConfig):
+        compositions = [
+            ("program.feed_stream.initial.composition", program.feed_stream.initial.composition),
+            *[(f"program.feed_stream.steps.{i}.target.composition", step.target.composition)
+              for i, step in enumerate(program.feed_stream.steps)
+              if step.kind == "ramp" and step.target.composition is not None],
+        ]
+        channels = (
+            ("program.feed_stream", program.feed_stream),
+            ("program.outlet_pressure", program.outlet_pressure),
+        )
+    else:
+        compositions = [
+            ("program.inlet_composition.initial", program.inlet_composition.initial),
+            *[(f"program.inlet_composition.steps.{i}.target", step.target)
+              for i, step in enumerate(program.inlet_composition.steps)
+              if isinstance(step, CompositionRampStep)],
+        ]
+        channels = (
+            ("program.inlet_flow", program.inlet_flow),
+            ("program.inlet_temperature", program.inlet_temperature),
+            ("program.outlet_pressure", program.outlet_pressure),
+            ("program.inlet_composition", program.inlet_composition),
+        )
+    for path, composition in compositions:
+        _append_key_mismatch(errors, set(composition), expected_gases, path)
 
     if not run.simulation.repeat_program:
-        durations = (
-            ("program.inlet_flow.steps", sum_step_durations(program.inlet_flow.steps)),
-            (
-                "program.inlet_temperature.steps",
-                sum_step_durations(program.inlet_temperature.steps),
-            ),
-            ("program.outlet_pressure.steps", sum_step_durations(program.outlet_pressure.steps)),
-            (
-                "program.inlet_composition.steps",
-                sum_step_durations(program.inlet_composition.steps),
-            ),
-        )
-        for path, duration in durations:
+        for path, channel in channels:
+            duration = sum_step_durations(channel.steps)
             if duration == 0.0 or math.isclose(
                 duration,
                 run.simulation.time_horizon_s,
@@ -390,7 +393,7 @@ def _validate_input_shapes(
                 continue
             difference = duration - run.simulation.time_horizon_s
             errors.append(
-                f"{path} must sum to run.simulation.time_horizon_s "
+                f"{path}.steps must sum to run.simulation.time_horizon_s "
                 f"({run.simulation.time_horizon_s:.16g}) within "
                 f"{_PROGRAM_DURATION_SUM_ABS_TOLERANCE_S:.1e} s, got {duration:.17g} "
                 f"(difference {difference:+.3e} s)."

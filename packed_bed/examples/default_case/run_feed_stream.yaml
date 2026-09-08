@@ -1,0 +1,43 @@
+references:
+  chemistry_file: chemistry.yaml
+  program_file: program_feed_stream.yaml
+  solids_file: solids.yaml
+simulation:
+  system_name: DefaultCaseFeedStream
+  program_mode: feed_stream
+  time_horizon_s: 1000.0
+  reporting_interval_s: 1.0
+  repeat_program: true
+  interior_flow_mode: forward_only
+  mass_scheme: weno3
+  heat_scheme: weno3
+  report_time_derivatives: false
+model:
+  bed_length_m: 6.0
+  bed_radius_m: 0.5
+  axial_cells: 20
+  ambient_temperature_k: 873.15
+  heat_transfer_coefficient_w_per_m2_k: 0.0
+solver:
+  backend: daetools
+  name: superlu
+  threads: 1
+  relative_tolerance: 1.0e-3
+  suppress_algebraic_errors: true
+  max_nonlinear_iterations: 12
+  nonlinear_convergence_coefficient: 1.0
+outputs:
+  directory: output_feed_stream
+  artifacts_directory: output_feed_stream/artifacts
+  requested_plots:
+    - axial_profiles
+    - outlet_composition
+    - outlet_conditions
+  requested_reports:
+    - temperature
+    - pressure
+    - gas_mole_fraction
+    - gas_flux
+    - solid_mole_fraction
+    - heat_balance
+    - mass_balance
