@@ -18,16 +18,21 @@ model:
   ambient_temperature_k: 873.15
   heat_transfer_coefficient_w_per_m2_k: 0.0
 solver:
-  backend: daetools
+  backend: compiled
   name: superlu
   threads: 1
   relative_tolerance: 1.0e-3
   suppress_algebraic_errors: true
   max_nonlinear_iterations: 12
   nonlinear_convergence_coefficient: 1.0
+  # Optional compiled controls; tolerances and physics match run.yaml.
+  scale_residuals: false
+  step_growth_threshold: 2.0
+  nonlinear_refresh_interval: 0
+  vector_exponentials: false
 outputs:
-  directory: output
-  artifacts_directory: output/artifacts
+  directory: output_compiled
+  artifacts_directory: output_compiled/artifacts
   requested_plots:
     - axial_profiles
     - outlet_composition

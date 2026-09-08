@@ -1,6 +1,6 @@
 """Pinned SUNDIALS 7.5 C ABI with native residual and Jacobian callbacks.
 
-The scikit-sundae Windows wheel provides the runtime. Its Python wrapper does
+The scikit-sundae wheel provides the runtime. Its Python wrapper does
 not expose algebraic error suppression or the Newton convergence coefficient;
 this adapter calls the public IDA C API to preserve those case controls.
 No private SUNDIALS structures are accessed.
@@ -36,8 +36,8 @@ class CallbackData(C.Structure):
 
 
 def check_runtime():
-    if platform.system() != "Windows" or C.sizeof(P) != 8:
-        raise RuntimeError("The compiled backend currently supports Windows x64 only.")
+    if platform.system() not in {"Windows", "Linux", "Darwin"} or C.sizeof(P) != 8:
+        raise RuntimeError("The compiled backend requires 64-bit Windows, Linux or macOS.")
     try:
         import sksundae
     except ImportError as exc:
@@ -46,10 +46,15 @@ def check_runtime():
         ) from exc
     if sksundae.__version__ != "1.1.3" or sksundae.SUNDIALS_VERSION != "7.5.0":
         raise RuntimeError(
-            "The compiled backend requires the scikit-sundae 1.1.3 Windows wheel (SUNDIALS 7.5.0)."
+            "The compiled backend requires a scikit-sundae 1.1.3 wheel (SUNDIALS 7.5.0)."
         )
     directory = Path(sksundae.__file__).resolve().parent
-    config = (directory / "py_config.pxi").read_text()
+    try:
+        config = (directory / "py_config.pxi").read_text()
+    except OSError as exc:
+        raise RuntimeError(
+            "Cannot verify the installed SUNDIALS ABI: missing py_config.pxi."
+        ) from exc
     if (
         'SUNDIALS_FLOAT_TYPE = "double"' not in config
         or 'SUNDIALS_INT_TYPE = "int"' not in config
@@ -57,7 +62,40 @@ def check_runtime():
         raise RuntimeError(
             "Unsupported SUNDIALS ABI: expected double precision and 32-bit indices."
         )
-    return directory.parent / "scikit_sundae.libs"
+    folder = (
+        directory / ".dylibs"
+        if platform.system() == "Darwin"
+        else directory.parent / "scikit_sundae.libs"
+    )
+    if not folder.is_dir():
+        raise RuntimeError(
+            f"Bundled SUNDIALS libraries not found in {folder}. "
+            "Install scikit-sundae==1.1.3 using --only-binary=:all:."
+        )
+    return folder
+
+
+def load_runtime_library(folder, module):
+    """Load only the verified wheel's libraries, including its bundled dependencies."""
+    system = platform.system()
+    if system == "Windows":
+        pattern = f"sundials_{module}-*.dll"
+    elif system == "Darwin":
+        pattern = f"libsundials_{module}.*.dylib"
+    else:
+        pattern = f"libsundials_{module}-*.so*"
+    candidates = sorted(folder.glob(pattern))
+    if len(candidates) != 1:
+        raise RuntimeError(
+            f"Expected one SUNDIALS {module} library matching {pattern} in {folder}; "
+            f"found {len(candidates)}. Reinstall the scikit-sundae==1.1.3 wheel."
+        )
+    try:
+        return C.CDLL(str(candidates[0]))
+    except OSError as exc:
+        raise RuntimeError(
+            f"Cannot load SUNDIALS {module} from {candidates[0]}: {exc}"
+        ) from exc
 
 
 class NativeIDA:
@@ -115,7 +153,7 @@ class NativeIDA:
             else ("sunmatrixsparse", "sunlinsolsuperlumt")
         )
         for key in ("core", "nvecserial", "ida", *matrix_modules):
-            self.libs[key] = C.CDLL(str(next(folder.glob(f"sundials_{key}-*.dll"))))
+            self.libs[key] = load_runtime_library(folder, key)
 
         def fn(lib, name, restype, *argtypes):
             f = getattr(self.libs[lib], name)
@@ -449,7 +487,7 @@ struct CallbackData {
     const double* row_scale;
     double* jac_values;
 };
-extern "C" __declspec(dllexport) int residual_callback(double t, Ptr y, Ptr yp, Ptr r, Ptr user) {
+PB_EXPORT int residual_callback(double t, Ptr y, Ptr yp, Ptr r, Ptr user) {
     auto& f=*static_cast<CallbackData*>(user);
     double* residual=f.vec(r);
     evaluate(t,f.vec(y),f.vec(yp),0,residual);
@@ -459,7 +497,7 @@ extern "C" __declspec(dllexport) int residual_callback(double t, Ptr y, Ptr yp, 
     }
     return 0;
 }
-extern "C" __declspec(dllexport) int jacobian_callback(double t,double cj,Ptr y,Ptr yp,Ptr r,Ptr mat,Ptr user,Ptr tmp1,Ptr tmp2,Ptr tmp3) {
+PB_EXPORT int jacobian_callback(double t,double cj,Ptr y,Ptr yp,Ptr r,Ptr mat,Ptr user,Ptr tmp1,Ptr tmp2,Ptr tmp3) {
     auto& f=*static_cast<CallbackData*>(user);
     static const int indices[] = {ROWS};
     static const int pointers[] = {COLS};
@@ -503,7 +541,7 @@ extern "C" __declspec(dllexport) int jacobian_callback(double t,double cj,Ptr y,
         )
     source += """
 using Solve = int (*)(Ptr,double,double*,Ptr,Ptr,int);
-extern "C" __declspec(dllexport) int report_loop(Solve solve,Ptr mem,Ptr yvec,Ptr ypvec,
+PB_EXPORT int report_loop(Solve solve,Ptr mem,Ptr yvec,Ptr ypvec,
  const double* y,const double* yp,int n,int nt,const double* times,
  double* output,double* derivatives,double* reached,int* report) {
     for(int it=0;it<nt;it++) {

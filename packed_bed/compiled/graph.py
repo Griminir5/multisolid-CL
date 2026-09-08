@@ -310,7 +310,7 @@ class Graph:
             visit(n)
             lines.append(f"out[{i}] = {refs[n]};")
         return (
-            f'extern "C" __declspec(dllexport) void {name}(double t, const double* y, const double* yp, double cj, double* out) {{\n'
+            f'PB_EXPORT void {name}(double t, const double* y, const double* yp, double cj, double* out) {{\n'
             + "\n".join(lines)
             + "\n}\n"
         )

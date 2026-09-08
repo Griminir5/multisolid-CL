@@ -42,7 +42,7 @@ struct Content {
     }
 };
 
-static inline void axpy(int n, double alpha, const double *__restrict x, double *__restrict y) {
+static inline void axpy(int n, double alpha, const double *PB_RESTRICT x, double *PB_RESTRICT y) {
     int i = 0;
 #if USE_AVX2
     __m256d a = _mm256_set1_pd(alpha);
@@ -193,7 +193,7 @@ static int destroy(Linear *solver) {
     return 0;
 }
 
-extern "C" __declspec(dllexport) Linear *make_solver(Ptr context, NewEmpty create,
+PB_EXPORT Linear *make_solver(Ptr context, NewEmpty create,
                                                      FreeEmpty release, MatrixCols columns,
                                                      VectorData vector, int n, int upper, int lower,
                                                      int stored_upper, const int *slots,

@@ -289,39 +289,42 @@ def test_vector_exponentials_requires_boolean(tmp_path, value):
 
 
 
-def test_compiled_example_preserves_default_physics():
-    from tools.benchmark_compiled import solver_settings
-
+@pytest.mark.parametrize("filename,solver", (("run_compiled.yaml", "superlu"), ("run_band.yaml", "band")))
+def test_compiled_example_preserves_default_physics(filename, solver):
     directory = Path(__file__).resolve().parents[1] / "packed_bed/examples/default_case"
     original = load_case(directory / "run.yaml")
-    compiled = load_case(directory / "run_compiled.yaml")
+    compiled = load_case(directory / filename)
     assert compiled.run.model == original.run.model
     assert compiled.chemistry == original.chemistry
     assert compiled.solids == original.solids
     assert compiled.program == original.program
-    assert compiled.run.simulation.time_horizon_s == 12000.0
-    assert compiled.run.simulation.reporting_interval_s == 1.0
-    for key, value in solver_settings("compiled", 1e-6).items():
-        assert getattr(compiled.run.solver, key) == value
+    assert compiled.run.simulation == original.run.simulation
+    assert compiled.run.solver.backend == "compiled"
+    assert compiled.run.solver.name == solver
+    controls = {"backend", "name", "step_growth_threshold", "nonlinear_refresh_interval"}
+    assert compiled.run.solver.model_dump(exclude=controls) == original.run.solver.model_dump(exclude=controls)
+    assert compiled.run.solver.nonlinear_refresh_interval == (4 if solver == "band" else 0)
     assert compiled.output_directory != original.output_directory
 
 
-@pytest.mark.parametrize("profile", ("reference", "compiled", "superlu", "band", "gmres"))
+@pytest.mark.parametrize("profile", ("superlu", "compiled_superlu", "compiled_band"))
 def test_benchmark_copies_inputs_and_matches_state_tolerances(tmp_path, profile):
-    from tools.benchmark_compiled import custom_documents, prepare_case
+    from copy import deepcopy
+    from tools.benchmark_solvers import prepare_case, scenarios
 
-    source = Path(__file__).resolve().parents[1] / "packed_bed/examples/default_case/run_compiled.yaml"
+    source = Path(__file__).resolve().parents[1] / "packed_bed/examples/default_case/run.yaml"
     original = source.read_bytes()
-    documents = custom_documents(source)
-    run_file, fingerprint = prepare_case(documents, tmp_path, profile, 1e-6, 1e-11)
+    _, _, documents, _ = next(scenarios("default"))
+    documents["run"]["solver"].update(relative_tolerance=1e-6, concentration_absolute_tolerance=1e-11)
+    before = deepcopy(documents)
+    run_file = prepare_case(documents, tmp_path / profile, profile)
     case = load_case(run_file)
     assert case.run.solver.relative_tolerance == 1e-6
     assert case.run.solver.concentration_absolute_tolerance == 1e-11
-    assert case.output_directory == tmp_path / "output"
-    assert case.run.solver.backend == ("daetools" if profile in ("reference", "gmres") else "compiled")
+    assert case.output_directory == tmp_path / profile / "output"
+    assert case.run.solver.backend == ("daetools" if profile == "superlu" else "compiled")
     assert source.read_bytes() == original
-    _, changed = prepare_case(documents, tmp_path, profile, 1e-5, 1e-11)
-    assert changed != fingerprint
+    assert documents == before
 
 
 def test_load_case_is_side_effect_free(tmp_path: Path) -> None:

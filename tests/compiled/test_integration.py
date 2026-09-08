@@ -8,6 +8,11 @@ from packed_bed.config import load_case
 from packed_bed.programs import compile_program_channels
 
 
+@pytest.fixture(autouse=True)
+def daetools_runtime():
+    pytest.importorskip("daetools.pyDAE")
+
+
 def _small_reactive_case(tmp_path, backend):
     root = Path(__file__).resolve().parents[2]
     case = load_case(root / "packed_bed/examples/default_case/run.yaml")
@@ -166,6 +171,33 @@ def test_compiler_update_invalidates_the_model_cache(native_tools, tmp_path, mon
     assert updated.solver_stats["compiler_version"] == version + "-updated"
     for name, variable in first.reporter.Process.dictVariables.items():
         np.testing.assert_array_equal(variable.Values, updated.reporter.Process.dictVariables[name].Values)
+
+
+def test_scalar_reactor_fallback_matches_detected_cpu(native_tools, tmp_path, monkeypatch):
+    import packed_bed.compiled as compiled
+    from packed_bed.compiled import band
+    from packed_bed.reports import load_dataset
+    from packed_bed.simulation import run_case
+
+    monkeypatch.setenv("PACKED_BED_COMPILED_CACHE", str(tmp_path / "cache"))
+    case = _small_reactive_case(tmp_path, "compiled")
+    case = replace(case, run=case.run.model_copy(update={
+        "model": case.run.model.model_copy(update={"axial_cells": 5}),
+        "solver": case.run.solver.model_copy(update={
+            "name": "band", "vector_exponentials": True,
+        }),
+    }))
+    detected = run_case(case)
+    expected = load_dataset(detected.results_path)
+    monkeypatch.setattr(compiled, "supports_avx2", lambda: False)
+    monkeypatch.setattr(band, "supports_avx2", lambda: False)
+    scalar = run_case(case)
+    actual = load_dataset(scalar.results_path)
+    assert scalar.solver_stats["residual_lanes"] == 1
+    assert scalar.solver_stats["vector_exponentials"] == "scalar libm"
+    assert scalar.solver_stats["linear_solver_implementation"] == "active-range band / scalar"
+    np.testing.assert_allclose(actual.temperature, expected.temperature, rtol=0, atol=0.01)
+    np.testing.assert_allclose(actual.gas_mole_fraction, expected.gas_mole_fraction, rtol=0, atol=1e-4)
 
 
 def test_concentration_tolerance_is_scoped_to_each_case(native_tools, tmp_path):

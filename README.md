@@ -59,6 +59,21 @@ The installed `packed-bed` command accepts the same arguments as `python -m pack
 
 A single run can replace files in its output directory. Use a different output directory to keep an earlier result.
 
+The default case includes three solver configurations with the same physical inputs,
+1,000-second horizon, reports and tolerances. Each uses one numerical thread.
+
+| Run file in `packed_bed/examples/default_case` | Backend / solver | Output directory |
+| --- | --- | --- |
+| `run.yaml` | DAETools / SuperLU baseline | `output` |
+| `run_compiled.yaml` | Compiled / SuperLU_MT | `output_compiled` |
+| `run_band.yaml` | Compiled / band LU | `output_band` |
+
+For example, run `python -m packed_bed packed_bed/examples/default_case/run_band.yaml`.
+The compiled variants require the optional runtime and compiler described below.
+The band configuration uses `step_growth_threshold: 1.25` and
+`nonlinear_refresh_interval: 4` to handle sharp reaction transients. Its tolerances
+match the baseline. Optional vector exponentials and reciprocal diagonals remain disabled.
+
 **Edit the input files.** The run file refers to three other files.
 All relative paths use the directory that contains the referring file.
 
@@ -103,19 +118,47 @@ The IDAS defaults are `suppress_algebraic_errors: false`, `max_nonlinear_iterati
 The default example changes these values and uses `relative_tolerance: 1.0e-3`.
 Compare important results with a stricter tolerance before you use a new solver configuration.
 
-**Use the compiled CPU backend on Windows x64.** Install the optional runtime with
-`python -m pip install -e ".[compiled]"` and the C++ x64 component of Visual Studio Build Tools.
+**Use the compiled CPU backend.** Install the optional runtime with
+`python -m pip install -e ".[compiled]"` and a native C++17 compiler:
+
+| Platform | Compiler |
+| --- | --- |
+| Linux x64 | GCC (`sudo apt install g++` on Debian/Ubuntu) or Clang |
+| Windows x64 | Visual Studio Build Tools with the C++ x64 component |
+| macOS Intel / Apple Silicon | Xcode Command Line Tools (`xcode-select --install`) |
+
+On Linux/macOS, activate the Python environment with `source .venv/bin/activate`.
+The compiler is detected on `PATH`; set `CXX` to a compiler executable name or full path to override it.
+The adapter uses the bundled libraries from the pinned `scikit-sundae==1.1.3` wheel
+(SUNDIALS 7.5.0, double precision, 32-bit indices). Arbitrary system or Conda SUNDIALS
+installations are not interchangeable with this ABI. Wheel availability limits the supported
+platforms; see [the runtime's platform support](https://scikit-sundae.readthedocs.io/en/stable/user_guide/installation.html#platform-support).
+DAETools must also be installed for your Python version and platform.
+
 The compiled backend derives its equations from the DAETools model, eliminates explicit algebraic definitions,
 and runs native residual and analytic-Jacobian functions with SUNDIALS IDA. DAETools still solves the initial conditions.
+Set these entries under `solver` in the case's `run.yaml` (retain any other solver settings):
 
-```powershell
-python -m packed_bed packed_bed/examples/default_case/run_compiled.yaml
+```yaml
+solver:
+  backend: compiled
+  name: superlu  # Also supports superlu_mt and band.
+```
+
+Then run the case normally:
+
+```sh
+python -m packed_bed packed_bed/examples/default_case/run.yaml
 ```
 
 The first run compiles a model-specific kernel; later runs reuse `.packed_bed_cache` beside the case.
-Set `PACKED_BED_COMPILED_CACHE` to share a cache directory. The backend supports the usual datasets and plots;
+Kernels use `.dll`, `.so` or `.dylib` as appropriate; cache keys include the platform, CPU architecture,
+compiler and build flags. Set `PACKED_BED_COMPILED_CACHE` to share a cache directory.
+AVX2 acceleration is detected at runtime; other CPUs use scalar kernels. The optional
+`vector_exponentials: true` also requires FMA and falls back to scalar math when unavailable.
+The backend supports the usual datasets and plots;
 derivative reports, custom DAETools reporters and incidence-matrix output require `solver.backend: daetools`.
-See [the performance guide](docs/performance.md) for supported settings, validation and measured tradeoffs.
+Run `python -m pytest tests/compiled` to check native kernels, solver callbacks and reactor integration.
 
 **Run a batch.** A batch expands the combinations of named axis values into separate cases.
 
@@ -124,9 +167,15 @@ python -m packed_bed batch packed_bed/examples/default_batch_case/batch.yaml --v
 python -m packed_bed batch packed_bed/examples/default_batch_case/batch.yaml --workers 4 --case-timeout-s 600
 ```
 
-The first command validates all four example cases without writes.
+The first command validates all twelve example cases without writes: two programs ×
+two geometries × three solvers (SuperLU baseline, compiled SuperLU, compiled band).
+Running all twelve cases requires the compiled-backend dependencies above.
 The second command runs up to four cases at the same time.
 Each worker uses one numerical thread when the requested worker count exceeds one.
+Keep only the desired entries under the `solver` axis in `batch.yaml` to select solvers.
+The batch retains its 7,200-second horizon and `1e-5` relative tolerance for every solver.
+All three use `concentration_absolute_tolerance: 1e-11` to resolve trace concentrations
+through repeated reaction cycles; the band solver also uses the Newton refresh controls above.
 
 A timeout stops that case. The batch continues with the other cases.
 
@@ -144,6 +193,26 @@ The batch updates this file after each case completes and on a handled interrupt
 A batch refuses to overwrite existing case directories or its summary.
 To run the batch again, select a new output directory. Automatic resume is not available.
 Use `python -m packed_bed batch --help` for the batch options.
+
+**Compare solver timings.** From the repository, run:
+
+```sh
+python -m tools.benchmark_solvers --output untracked/solver_timings --repeats 3
+```
+
+This times the default case and all four batch conditions sequentially, using one numerical
+thread and a fresh Python process for each run. Each solver gets a first run and three repeats;
+compiled repeats must hit the kernel cache. Physics, tolerances and reports stay the same;
+plot rendering is disabled. `--scope default` or `--scope batch` selects one example.
+Use a new output directory for each benchmark. The output contains `summary.csv`, raw
+measurements, environment details, report differences, copied cases and per-run logs.
+The main timing includes initialization, compilation, integration and output writing;
+process startup and imports are recorded separately. Batch timing is the sum of sequential
+case times, so it does not measure the speedup from multiple batch workers.
+For a stricter cross-check, add `--rtol 1e-6 --atol 1e-9`; these overrides apply equally
+to all three solvers. Peak report differences are recorded in `comparisons.json`.
+Measured example timings and numerical differences are in the
+[solver benchmark report](docs/solver_benchmarks.md).
 
 **Select reports and plots.** Reports determine the contents of `results.nc`.
 The [report registry](packed_bed/reports.py) defines the variables, dimensions, and units.

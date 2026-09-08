@@ -1,6 +1,6 @@
 base_case: base_case/run.yaml
 output_directory: output
-workers: 32
+workers: 4
 
 programs:
   high_flow_cycle: programs/high_flow.yaml
@@ -33,3 +33,30 @@ axes:
       - id: long_bed
         geometry: long_bed
 
+  # Keep only the desired value to run one solver across the four physical cases.
+  - id: solver
+    values:
+      - id: superlu
+        patch:
+          run:
+            solver:
+              backend: daetools
+              name: superlu
+      - id: compiled_superlu
+        patch:
+          run:
+            solver:
+              backend: compiled
+              name: superlu
+      - id: compiled_band
+        patch:
+          run:
+            solver:
+              backend: compiled
+              name: band
+              # These controls stabilize the sharp reaction transients.
+              step_growth_threshold: 1.25
+              nonlinear_refresh_interval: 4
+              # Optional arithmetic accelerations remain disabled.
+              vector_exponentials: false
+              band_reciprocals: false

@@ -58,7 +58,7 @@ def emit_model(
             # Jacobian intermediates can contain derivative branch operators.
             vectorize=vectorize and name == "evaluate",
         )
-        helper = helper.replace('extern "C" __declspec(dllexport)', "static")
+        helper = helper.replace("PB_EXPORT", "static")
         helper = re.sub(r"^#include.*\n", "", helper, flags=re.MULTILINE)
         helpers.append(
             f"namespace shared_{name} {{\n"
@@ -94,7 +94,7 @@ def emit_model(
         # keep their existing functions. The caller verifies AVX2 and FMA3.
         source = source.replace(
             "CELL_UNARY(exp)",
-            "static __forceinline CellPacket exp(CellPacket a) {"
+            "static PB_INLINE CellPacket exp(CellPacket a) {"
             "return ::packed_bed_sleef::Sleef_expd4_u10avx2(a.value);}",
         )
         header = Path(__file__).with_name("sleef_exp.hpp").read_text(encoding="utf-8")
@@ -201,7 +201,7 @@ def _emit_model(
         f"static thread_local double time_values[{max(1, len(frontier))}];\n"
     )
     source += graph.emit("update_time", frontier, mapping).replace(
-        'extern "C" __declspec(dllexport)', "static"
+        "PB_EXPORT", "static"
     )
     source += (
         "static void ensure_time(double t) {\n"
@@ -293,9 +293,7 @@ def _emit_model(
             code = re.sub(r"y\[PARAM_(\d+)\]", r"par[\1]", code)
             code = (
                 use_cached_time(code)
-                .replace(
-                    'extern "C" __declspec(dllexport)', "static __declspec(noinline)"
-                )
+                .replace("PB_EXPORT", "static PB_NOINLINE")
                 .replace(
                     "double* out) {", "const int* ix,const double* par,double* out) {"
                 )
@@ -303,7 +301,7 @@ def _emit_model(
             # Each cell writes its assigned outputs directly. The offset table
             # retains arbitrary equation/CSC order without a temporary copy.
             scalar_code = code.replace(
-                "double* out)", "double* __restrict out,const int* offsets)"
+                "double* out)", "double* PB_RESTRICT out,const int* offsets)"
             )
             source += re.sub(r"out\[(\d+)\] =", r"out[offsets[\1]] =", scalar_code)
             metadata["direct_scalar_output_functions"] = (
@@ -315,7 +313,7 @@ def _emit_model(
                 # every lane. Only independent cells are evaluated together.
                 vector_code = code.replace(function + "(", function + "_vec(")
                 vector_code = vector_code.replace(
-                    "double* out)", "double* __restrict out,const int* offsets)"
+                    "double* out)", "double* PB_RESTRICT out,const int* offsets)"
                 )
                 input_stride = max(1, len(dependencies))
                 parameter_stride = max(1, len(constants[cell]))
@@ -408,7 +406,7 @@ def _emit_model(
                 f"shared_{name}::evaluate(t,y,yp,cj,extended+{len(keep)});\ny=extended;\n"
             )
         source += (
-            f'extern "C" __declspec(dllexport) void {name}(double t,const double* y,'
+            f'PB_EXPORT void {name}(double t,const double* y,'
             "const double* yp,double cj,double* out) {\nensure_time(t);\n"
             + preparation
             + "".join(calls)

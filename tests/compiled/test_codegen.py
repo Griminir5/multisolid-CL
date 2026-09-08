@@ -19,7 +19,7 @@ def test_shared_cell_kernels_preserve_distinct_constants_and_time_functions(
     from packed_bed.compiled import _load_kernel
     from packed_bed.compiled.band import supports_avx2
     from packed_bed.compiled.codegen import emit_model
-    from packed_bed.compiled.compiler import compile_kernel
+    from packed_bed.compiled.compiler import compile_kernel, simd_flags
     from packed_bed.compiled.graph import Graph
 
     if vectorize and not supports_avx2():
@@ -68,7 +68,7 @@ def test_shared_cell_kernels_preserve_distinct_constants_and_time_functions(
     ):
         source += graph.emit("reference_" + name, selected, mapping)
     library, _ = compile_kernel(
-        source, tmp_path, extra_flags=("/arch:AVX2",) if vectorize else ()
+        source, tmp_path, extra_flags=simd_flags(avx2=vectorize)
     )
     kernel = _load_kernel(library)
     assert metadata["evaluate_templates"] == (
@@ -108,7 +108,7 @@ def test_shared_neighbor_expressions_preserve_aliases_permutations_and_fresh_inp
     from packed_bed.compiled import _load_kernel
     from packed_bed.compiled.band import supports_avx2
     from packed_bed.compiled.codegen import emit_model
-    from packed_bed.compiled.compiler import compile_kernel
+    from packed_bed.compiled.compiler import compile_kernel, simd_flags
     from packed_bed.compiled.graph import Graph
 
     if vectorize and not supports_avx2():
@@ -197,7 +197,7 @@ def test_shared_neighbor_expressions_preserve_aliases_permutations_and_fresh_inp
     ):
         source += g.emit("reference_" + name, selected, mapping)
     library, _ = compile_kernel(
-        source, tmp_path, extra_flags=("/arch:AVX2",) if vectorize else ()
+        source, tmp_path, extra_flags=simd_flags(avx2=vectorize)
     )
     kernel = _load_kernel(library)
     for name in ("evaluate", "jacobian", "reconstruct"):
@@ -245,7 +245,7 @@ def test_cell_packet_matches_scalar_arithmetic_and_special_values(
 
     from packed_bed.compiled import codegen
     from packed_bed.compiled.band import supports_avx2
-    from packed_bed.compiled.compiler import compile_kernel
+    from packed_bed.compiled.compiler import compile_kernel, simd_flags
 
     if not supports_avx2():
         pytest.skip("This computer cannot execute the AVX2 cell kernel")
@@ -266,7 +266,7 @@ def test_cell_packet_matches_scalar_arithmetic_and_special_values(
     ]
     source = Path(codegen.__file__).with_name("cell.hpp").read_text()
     source += (
-        'extern "C" __declspec(dllexport) void packet(const double* x, const double* y, double* out) {\n'
+        'PB_EXPORT void packet(const double* x, const double* y, double* out) {\n'
         "CellPacket a(_mm256_loadu_pd(x)),b(_mm256_loadu_pd(y));\n"
         + "\n".join(
             f"store_cells(out+{4 * i},{expression});"
@@ -275,7 +275,7 @@ def test_cell_packet_matches_scalar_arithmetic_and_special_values(
         + "\n}\n"
     )
     source += (
-        'extern "C" __declspec(dllexport) void scalar(const double* x, const double* y, double* out) {\n'
+        'PB_EXPORT void scalar(const double* x, const double* y, double* out) {\n'
         "for(int j=0;j<4;++j) {double a=x[j],b=y[j];\n"
         + "\n".join(
             f"out[{4 * i}+j]={expression};" for i, expression in enumerate(expressions)
@@ -283,10 +283,10 @@ def test_cell_packet_matches_scalar_arithmetic_and_special_values(
         + "\n}}\n"
     )
     source += (
-        'extern "C" __declspec(dllexport) void scatter(const double* x,const int* offsets,int stride,double* out) {\n'
+        'PB_EXPORT void scatter(const double* x,const int* offsets,int stride,double* out) {\n'
         "scatter_cells(out,offsets,stride,CellPacket(_mm256_loadu_pd(x)));\n}\n"
     )
-    library, _ = compile_kernel(source, tmp_path, extra_flags=("/arch:AVX2",))
+    library, _ = compile_kernel(source, tmp_path, extra_flags=simd_flags(avx2=True))
     kernel = C.CDLL(str(library))
     for name in ("packet", "scalar"):
         getattr(kernel, name).argtypes = [C.c_void_p] * 3
@@ -373,7 +373,7 @@ def test_vector_exponential_cell_kernel_accuracy_and_scalar_fallback(
     from packed_bed.compiled import _load_kernel
     from packed_bed.compiled.band import supports_avx2
     from packed_bed.compiled.codegen import emit_model
-    from packed_bed.compiled.compiler import compile_kernel
+    from packed_bed.compiled.compiler import compile_kernel, simd_flags
     from packed_bed.compiled.graph import Graph
     from packed_bed.compiled.vector_math import select_vector_exponentials
 
@@ -400,7 +400,7 @@ def test_vector_exponential_cell_kernel_accuracy_and_scalar_fallback(
     source, metadata = emit_model(*arguments, vectorize=True, vector_exponentials=True)
     assert metadata["vectorized_residual_cells"] == 4
     assert metadata["vector_exponentials"] == "SLEEF 3.9.0 AVX2/FMA3 exp_u10"
-    library, _ = compile_kernel(source, tmp_path, extra_flags=("/arch:AVX2",))
+    library, _ = compile_kernel(source, tmp_path, extra_flags=simd_flags(avx2=True, fma=True))
     kernel = _load_kernel(library)
     yp, actual, reference = np.zeros(6), np.empty(6), np.empty(6)
     rng = np.random.default_rng(1006)

@@ -181,7 +181,7 @@ static int release(Nonlinear *s) {
     empty(s);
     return 0;
 }
-extern "C" __declspec(dllexport) Nonlinear *make_solver(Ptr context, Ptr example, int refresh,
+PB_EXPORT Nonlinear *make_solver(Ptr context, Ptr example, int refresh,
                                                         NewEmpty empty, FreeEmpty free_empty,
                                                         Clone clone, Destroy destroy, Scale scale,
                                                         Sum sum, Constant constant) {
@@ -219,8 +219,8 @@ extern "C" __declspec(dllexport) Nonlinear *make_solver(Ptr context, Ptr example
     std::copy(ops, ops + 14, s->ops);
     return s;
 }
-extern "C" __declspec(dllexport) void get_statistics(Nonlinear *s, long long *out) {
+PB_EXPORT void get_statistics(Nonlinear *s, long long *out) {
     auto &c = *static_cast<Content *>(s->content);
     std::copy(c.totals, c.totals + 3, out);
 }
-extern "C" __declspec(dllexport) int free_solver(Nonlinear *s) { return release(s); }
+PB_EXPORT int free_solver(Nonlinear *s) { return release(s); }
