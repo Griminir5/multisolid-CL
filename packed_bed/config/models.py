@@ -146,6 +146,7 @@ class ModelConfig(ConfigModel):
     bed_length_m: PositiveFloat
     bed_radius_m: PositiveFloat
     axial_cells: int = Field(ge=3)
+    gas_voidage_mode: Literal["bed_only", "bed_and_particle"] = "bed_and_particle"
     ambient_temperature_k: PositiveFloat = 873.15
     heat_transfer_coefficient_w_per_m2_k: NonNegativeFloat = 100.0
 

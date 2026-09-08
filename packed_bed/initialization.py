@@ -58,7 +58,11 @@ def calculate_initial_state(
         case.solids, cell_coordinates
     )
     particle_diameter = build_face_scalar_profile(case.solids, face_coordinates, "d_p")
-    gas_fraction = gas_fraction_from_voidages(interparticle_voidage, intraparticle_voidage)
+    gas_fraction = gas_fraction_from_voidages(
+        interparticle_voidage,
+        intraparticle_voidage,
+        mode=case.run.model.gas_voidage_mode,
+    )
 
     def value_at_start(program):
         return program.value_at(0.0, smooth_ramp_width_s=smooth_ramp_width_s)

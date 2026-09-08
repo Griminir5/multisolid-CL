@@ -74,6 +74,21 @@ Use kelvin, pascals, metres, seconds, and mol/s unless a field specifies another
 Each composition must include every selected gas species. The mole fractions must sum to 1.
 Solid zones must cover the bed without gaps or overlaps.
 
+`model.gas_voidage_mode` selects the gas storage volume used for concentrations
+in mol/m³ of bed:
+
+| Value | Gas volume / bed volume |
+| --- | --- |
+| `bed_and_particle` (default) | `e_b + (1 - e_b) * e_p` |
+| `bed_only` | `e_b` |
+
+The selected fraction is used consistently in gas initialization, the equation of
+state, transport and gas energy storage. Solid volume always uses
+`(1 - e_b) * (1 - e_p)`. The gas-phase density remains `P * MW_mix / (R * T)`;
+Ergun still uses interparticle voidage and the solver calculates flow and velocity
+variations across the bed. For example, add `gas_voidage_mode: bed_only` under
+`model:` in `run.yaml` to exclude particle-pore gas storage.
+
 A program channel has an `initial` value and an optional list of `hold` or `ramp` steps.
 Each step has a `duration_s`. Each ramp also has a `target`.
 A channel without steps stays constant.

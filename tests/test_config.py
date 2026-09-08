@@ -145,6 +145,24 @@ def test_interior_flow_mode_defaults_to_forward_only_and_accepts_reversible(
     assert reversible_case.run.simulation.interior_flow_mode == "reversible"
 
 
+@pytest.mark.parametrize("mode", (None, "bed_only", "bed_and_particle"))
+def test_gas_voidage_mode_loads_and_survives_serialization(tmp_path, mode):
+    documents = _case_documents()
+    if mode is not None:
+        documents["run.yaml"]["model"]["gas_voidage_mode"] = mode
+    case = load_case(_write_case(tmp_path, documents))
+    expected = mode or "bed_and_particle"
+    assert case.run.model.gas_voidage_mode == expected
+    assert case.run.model_dump()["model"]["gas_voidage_mode"] == expected
+
+
+def test_unknown_gas_voidage_mode_is_rejected(tmp_path):
+    documents = _case_documents()
+    documents["run.yaml"]["model"]["gas_voidage_mode"] = "bed_and_partcle"
+    with pytest.raises(PackedBedValidationError, match="gas_voidage_mode"):
+        load_case(_write_case(tmp_path, documents))
+
+
 def test_solver_controls_default_to_daetools_values_and_accept_tuning(
     tmp_path: Path,
 ) -> None:

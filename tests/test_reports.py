@@ -309,3 +309,26 @@ def test_empty_report_selection_writes_only_scheduled_time(tmp_path: Path) -> No
     assert dataset.time.values.tolist() == [0.0, 3.0, 6.0, 9.0, 10.0]
     assert not dataset.data_vars
     assert set(dataset.coords) == {"time"}
+
+
+@pytest.mark.parametrize("mode, expected_gas_fraction", [("bed_only", 0.4), ("bed_and_particle", 0.7)])
+def test_initial_profile_artifact_uses_selected_gas_voidage(tmp_path, monkeypatch, mode, expected_gas_fraction):
+    from packed_bed.artifacts import render_initial_solid_profile
+    from packed_bed.plotting.definitions import save_figure
+
+    case, _process = _synthetic_case_and_process(tmp_path)
+    model = case.run.model.model_copy(update={"gas_voidage_mode": mode})
+    case = replace(case, run=case.run.model_copy(update={"model": model}))
+    rendered_fractions = {}
+
+    def capture_fractions(figure, path):
+        for patch in figure.axes[2].patches:
+            rendered_fractions[patch.get_label()] = patch.get_data().values.copy()
+        save_figure(figure, path)
+
+    monkeypatch.setattr("packed_bed.artifacts.save_figure", capture_fractions)
+    paths = render_initial_solid_profile(case, case.artifacts_directory)
+
+    np.testing.assert_allclose(rendered_fractions["gasfrac"], expected_gas_fraction)
+    np.testing.assert_allclose(rendered_fractions["solfrac"], 0.3)
+    assert paths["initial_solid_profile_svg"].is_file()

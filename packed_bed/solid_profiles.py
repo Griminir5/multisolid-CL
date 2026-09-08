@@ -100,11 +100,19 @@ def build_face_scalar_profile(solids_config, face_positions_m, attribute_name):
     return profile
 
 
-def gas_fraction_from_voidages(e_b, e_p):
+def gas_fraction_from_voidages(e_b, e_p, *, mode="bed_and_particle"):
+    """Gas storage volume per bed volume, with optional particle-pore storage."""
+
     e_b = np.asarray(e_b, dtype=float)
     e_p = np.asarray(e_p, dtype=float)
-    return e_b + (1.0 - e_b) * e_p
+    if mode == "bed_only":
+        return np.broadcast_arrays(e_b, e_p)[0]
+    if mode == "bed_and_particle":
+        return e_b + (1.0 - e_b) * e_p
+    raise ValueError(f"Unsupported gas voidage mode '{mode}'.")
 
 
 def solid_fraction_from_voidages(e_b, e_p):
-    return 1.0 - gas_fraction_from_voidages(e_b, e_p)
+    """Solid skeleton fraction, independent of the chosen gas storage model."""
+
+    return (1.0 - np.asarray(e_b, dtype=float)) * (1.0 - np.asarray(e_p, dtype=float))

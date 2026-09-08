@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from packed_bed.config import load_case
@@ -109,14 +110,18 @@ def test_configure_idas_maps_every_per_case_control(monkeypatch) -> None:
 
 
 @pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
-def test_tiny_inert_case_preserves_equation_order_and_executes(tmp_path: Path) -> None:
+@pytest.mark.parametrize("gas_voidage_mode, expected_fraction", (("bed_only", .4), ("bed_and_particle", .7)))
+def test_tiny_inert_case_preserves_equation_order_and_executes(tmp_path: Path, gas_voidage_mode, expected_fraction) -> None:
     from packed_bed.reports import create_dataset_reporter, load_dataset
     from packed_bed.simulation import PackedBedSimulation, execute_simulation
 
     case = _with_reports(
         load_case(_write_inert_case(tmp_path)),
-        ("solid_mole_fraction", "heat_balance", "mass_balance"),
+        ("solid_mole_fraction", "heat_balance", "mass_balance", "gas_concentration", "pressure", "temperature"),
     )
+    case = replace(case, run=case.run.model_copy(update={
+        "model": case.run.model.model_copy(update={"gas_voidage_mode": gas_voidage_mode}),
+    }))
     simulation = PackedBedSimulation(case, PROPERTY_REGISTRY)
     reporter = create_dataset_reporter(case)
     equation_names = ()
@@ -134,7 +139,13 @@ def test_tiny_inert_case_preserves_equation_order_and_executes(tmp_path: Path) -
     )
 
     assert reporter.results_path.is_file()
-    assert "solid_mole_fraction" in load_dataset(reporter.results_path)
+    dataset = load_dataset(reporter.results_path)
+    assert "solid_mole_fraction" in dataset
+    from packed_bed.programs import GAS_CONSTANT_J_PER_MOL_K
+    inferred_fraction = dataset.gas_concentration.sum("gas_species") * GAS_CONSTANT_J_PER_MOL_K * dataset.temperature / dataset.pressure
+    np.testing.assert_allclose(inferred_fraction, expected_fraction, rtol=1e-6)
+    assert float(abs(dataset.mass_balance_error).max()) < 1e-10
+    assert float(abs(dataset.heat_balance_error).max()) < 1e-6
     assert equation_names == EXPECTED_INERT_EQUATIONS
 
 

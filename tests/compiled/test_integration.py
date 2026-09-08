@@ -8,7 +8,7 @@ from packed_bed.config import load_case
 from packed_bed.programs import compile_program_channels
 
 
-def _small_reactive_case(tmp_path, backend):
+def _small_reactive_case(tmp_path, backend, gas_voidage_mode="bed_and_particle"):
     root = Path(__file__).resolve().parents[2]
     case = load_case(root / "packed_bed/examples/default_case/run.yaml")
     simulation = case.run.simulation.model_copy(
@@ -45,7 +45,7 @@ def _small_reactive_case(tmp_path, backend):
                 "simulation": simulation,
                 "solver": solver,
                 "outputs": outputs,
-                "model": case.run.model.model_copy(update={"axial_cells": 3}),
+                "model": case.run.model.model_copy(update={"axial_cells": 3, "gas_voidage_mode": gas_voidage_mode}),
             }
         ),
         inlet_flow_program=programs[0],
@@ -55,16 +55,16 @@ def _small_reactive_case(tmp_path, backend):
     )
 
 
-@pytest.mark.parametrize("linear_solver", ("superlu", "band"))
+@pytest.mark.parametrize("linear_solver, gas_voidage_mode", (("superlu", "bed_and_particle"), ("band", "bed_only")))
 def test_reactive_run_reports_cache_and_tight_reference(
-    native_tools, tmp_path, monkeypatch, linear_solver
+    native_tools, tmp_path, monkeypatch, linear_solver, gas_voidage_mode
 ):
     from packed_bed.reports import load_dataset
     from packed_bed.simulation import run_case
 
     monkeypatch.setenv("PACKED_BED_COMPILED_CACHE", str(tmp_path / "cache"))
-    reference = run_case(_small_reactive_case(tmp_path, "daetools"))
-    case = _small_reactive_case(tmp_path, "compiled")
+    reference = run_case(_small_reactive_case(tmp_path, "daetools", gas_voidage_mode))
+    case = _small_reactive_case(tmp_path, "compiled", gas_voidage_mode)
     case = replace(
         case,
         run=case.run.model_copy(

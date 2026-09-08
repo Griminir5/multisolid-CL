@@ -26,8 +26,6 @@ namespaces = false
 [tool.setuptools.package-data]
 packed_bed = [
     "compiled/*.cpp",
-    "compiled/*.hpp",
-    "compiled/licenses/*.txt",
     "examples/default_case/*.yaml",
     "examples/default_batch_case/batch.yaml",
     "examples/default_batch_case/base_case/*.yaml",

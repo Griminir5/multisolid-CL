@@ -296,7 +296,7 @@ def render_initial_solid_profile(case: Case, output_dir) -> dict[str, Path]:
     )
     authored_edges = zone_edges(case.solids)
     e_b, e_p, bed_basis_concentration = build_cell_profiles(case.solids, cell_centers)
-    gas_fraction = gas_fraction_from_voidages(e_b, e_p)
+    gas_fraction = gas_fraction_from_voidages(e_b, e_p, mode=case.run.model.gas_voidage_mode)
     solid_fraction = solid_fraction_from_voidages(e_b, e_p)
     d_p = build_face_scalar_profile(case.solids, face_positions, "d_p")
 

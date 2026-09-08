@@ -7,6 +7,7 @@ import pytest
 
 from packed_bed.config import PackedBedValidationError, load_case
 from packed_bed.initialization import calculate_initial_state
+from packed_bed.programs import GAS_CONSTANT_J_PER_MOL_K
 from packed_bed.properties import PROPERTY_REGISTRY
 from packed_bed.solid_profiles import build_cell_profiles, build_face_scalar_profile
 from test_config import _case_documents, _write_case
@@ -44,6 +45,40 @@ def test_initial_state_calculation_and_pressure_bracketing(tmp_path: Path, inlet
 def test_daetools_grid_minimum_is_validated_before_initialization(tmp_path: Path) -> None:
     with pytest.raises(PackedBedValidationError, match="model.axial_cells"):
         load_case(_write_inert_case(tmp_path, axial_cells=2))
+
+
+def test_gas_storage_mode_changes_only_gas_inventory_and_its_energy(tmp_path):
+    documents = _case_documents()
+    documents["program.yaml"]["inlet_flow"]["initial"] = 1e-5
+    documents["program.yaml"]["inlet_temperature"]["initial"] = 700.0
+    documents["run.yaml"]["model"]["axial_cells"] = 4
+    profile = documents["solids.yaml"]["initial_profile"]
+    profile["basis"] = "solid"
+    left = profile["zones"][0]
+    left["x_end_m"] = 0.5
+    profile["zones"].append(dict(left, x_start_m=0.5, x_end_m=1.0, e_b=0.5, e_p=0.2))
+    states = {}
+    for mode in ("bed_only", "bed_and_particle"):
+        folder = tmp_path / mode
+        folder.mkdir()
+        documents["run.yaml"]["model"]["gas_voidage_mode"] = mode
+        states[mode] = calculate_initial_state(load_case(_write_case(folder, documents)), PROPERTY_REGISTRY)
+    bed, pores = states["bed_only"], states["bed_and_particle"]
+    np.testing.assert_allclose(bed.gas_fraction, [.4, .4, .5, .5])
+    np.testing.assert_allclose(pores.gas_fraction, [.7, .7, .6, .6])
+    np.testing.assert_allclose(bed.solid_concentration_mol_m3, [[.3, .3, .4, .4]])
+    np.testing.assert_array_equal(bed.solid_concentration_mol_m3, pores.solid_concentration_mol_m3)
+    np.testing.assert_array_equal(bed.gas_density_kg_m3, pores.gas_density_kg_m3)
+    np.testing.assert_array_equal(bed.face_velocity_m_s, pores.face_velocity_m_s)
+    assert bed.inlet_pressure_pa == pores.inlet_pressure_pa
+    for state in states.values():
+        pressure = state.gas_density_kg_m3 * GAS_CONSTANT_J_PER_MOL_K * 700 / PROPERTY_REGISTRY.get_record("N2").mw
+        np.testing.assert_allclose(state.gas_concentration_mol_m3.sum(axis=0), state.gas_fraction*pressure/(GAS_CONSTANT_J_PER_MOL_K*700))
+    removed_gas = pores.gas_concentration_mol_m3 - bed.gas_concentration_mol_m3
+    np.testing.assert_allclose(pores.cell_enthalpy_j_m3-bed.cell_enthalpy_j_m3, removed_gas.T @ bed.gas_enthalpy_j_mol)
+    cell_volume = 3.14159*.01**2*np.diff(bed.face_coordinates_m)
+    assert pores.bed_mass_kg-bed.bed_mass_kg == pytest.approx(float(np.sum(removed_gas[0]*PROPERTY_REGISTRY.get_record("N2").mw*cell_volume)))
+    assert pores.bed_heat_j-bed.bed_heat_j == pytest.approx(float(np.sum((removed_gas.T @ bed.gas_enthalpy_j_mol)*cell_volume)))
 
 
 @pytest.mark.parametrize("basis, expected", (("bed", [1.0, 4.0]), ("solid", [0.3, 1.6])))

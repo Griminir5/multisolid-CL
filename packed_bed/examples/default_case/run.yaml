@@ -15,6 +15,8 @@ model:
   bed_length_m: 6.0
   bed_radius_m: 0.5
   axial_cells: 20
+  # bed_only: e_b; bed_and_particle: e_b + (1-e_b)*e_p (default).
+  gas_voidage_mode: bed_and_particle
   ambient_temperature_k: 873.15
   heat_transfer_coefficient_w_per_m2_k: 0.0
 solver:
