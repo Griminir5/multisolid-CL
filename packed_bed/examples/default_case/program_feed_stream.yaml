@@ -1,0 +1,139 @@
+# Feed-based variant of program.yaml; use with run_feed_stream.yaml.
+# Flow is in mol/s, temperature in K, and composition in mole fractions.
+# Uses the original flow/composition stage timings. Temperature changes with
+# each feed, so the final cooldown starts at 1300 s instead of 1305 s.
+feed_stream:
+  basis: mol_per_s
+  initial:
+    flow: 0.01
+    temperature: 700.0
+    composition:
+      Ar:   0.0000
+      CH4:  0.0000
+      CO:   0.0000
+      CO2:  0.0000
+      H2:   0.0000
+      H2O:  0.0000
+      He:   0.0000
+      N2:   1.0000
+      O2:   0.0000
+  steps:
+    # Oxidation: ramp from the current feed to air.
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        flow: 36.2568
+        temperature: 823.15
+        composition:
+          Ar:   0.0093
+          CH4:  0.0000
+          CO:   0.0000
+          CO2:  0.0004
+          H2:   0.0000
+          H2O:  0.0000
+          He:   0.0000
+          N2:   0.7808
+          O2:   0.2095
+    - kind: hold
+      duration_s: 500.0
+
+    # Purge 1: steam rises to 4.4537 mol/s as air falls to zero.
+    # At the ramp midpoint, steam contributes about 2.2269 mol/s.
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        flow: 4.4537
+        temperature: 673.15
+        composition:
+          Ar:   0.0000
+          CH4:  0.0000
+          CO:   0.0000
+          CO2:  0.0000
+          H2:   0.0000
+          H2O:  1.0000
+          He:   0.0000
+          N2:   0.0000
+          O2:   0.0000
+    - kind: hold
+      duration_s: 180.0
+
+    # First fuel feed.
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        flow: 30.2662
+        temperature: 873.15
+        composition:
+          Ar:   0.0000
+          CH4:  0.2855
+          CO:   0.0048
+          CO2:  0.1624
+          H2:   0.1469
+          H2O:  0.3881
+          He:   0.0000
+          N2:   0.0112
+          O2:   0.0011
+    - kind: hold
+      duration_s: 500.0
+
+    # Second fuel feed: omitted temperature retains 873.15 K.
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        flow: 30.7559
+        composition:
+          Ar:   0.0000
+          CH4:  0.2152
+          CO:   0.0000
+          CO2:  0.1524
+          H2:   0.0005
+          H2O:  0.6270
+          He:   0.0000
+          N2:   0.0035
+          O2:   0.0014
+    - kind: hold
+      duration_s: 100.0
+
+    # Purge 2.
+    - kind: ramp
+      duration_s: 5.0
+      target:
+        flow: 4.4537
+        temperature: 673.15
+        composition:
+          Ar:   0.0000
+          CH4:  0.0000
+          CO:   0.0000
+          CO2:  0.0000
+          H2:   0.0000
+          H2O:  1.0000
+          He:   0.0000
+          N2:   0.0000
+          O2:   0.0000
+    - kind: hold
+      duration_s: 180.0
+
+# Pressure is independent; this schedule is unchanged from program.yaml.
+outlet_pressure:
+  initial: 3100000.0
+  steps:
+    - kind: ramp
+      duration_s: 5.0
+      target: 3080000.0
+    - kind: hold
+      duration_s: 500.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 3100000.0
+    - kind: hold
+      duration_s: 180.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 3090000.0
+    - kind: hold
+      duration_s: 610.0
+    - kind: ramp
+      duration_s: 5.0
+      target: 3100000.0
+    - kind: hold
+      duration_s: 180.0

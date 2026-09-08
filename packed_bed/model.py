@@ -16,7 +16,7 @@ from .axial_schemes import (
 )
 from .config import Case
 from .initialization import CIRCLE_CONSTANT
-from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S
+from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S, RatioProgram
 from .reactions import KineticsContext, ReactionNetwork
 from pyUnits import J, K, Pa, kg, m, mol, s
 
@@ -244,6 +244,18 @@ class PackedBedModel(daeModel):
 
         # Shared mathematical expressions. Equation creation remains below in solver order.
         def smooth_program_expression(default_expression, program, units, component=None):
+            if isinstance(program, RatioProgram):
+                # Smooth molar quantities first, then normalize; never ramp y or T independently.
+                numerator = program.numerator.initial_value
+                if component is not None:
+                    numerator = numerator[component]
+                return smooth_program_expression(
+                    Constant(float(numerator) * units * mol / s),
+                    program.numerator, units * mol / s, component=component,
+                ) / smooth_program_expression(
+                    Constant(float(program.denominator.initial_value) * mol / s),
+                    program.denominator, mol / s,
+                )
             segments = program.segments
             if not segments:
                 return default_expression

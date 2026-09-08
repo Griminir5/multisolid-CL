@@ -5,28 +5,28 @@
 struct CellPacket {
     __m256d value;
     CellPacket() = default;
-    __forceinline CellPacket(double x) : value(_mm256_set1_pd(x)) {}
-    __forceinline CellPacket(__m256d x) : value(x) {}
+    PB_INLINE CellPacket(double x) : value(_mm256_set1_pd(x)) {}
+    PB_INLINE CellPacket(__m256d x) : value(x) {}
 };
-static __forceinline CellPacket operator+(CellPacket a, CellPacket b) {
+static PB_INLINE CellPacket operator+(CellPacket a, CellPacket b) {
     return _mm256_add_pd(a.value, b.value);
 }
-static __forceinline CellPacket operator-(CellPacket a, CellPacket b) {
+static PB_INLINE CellPacket operator-(CellPacket a, CellPacket b) {
     return _mm256_sub_pd(a.value, b.value);
 }
-static __forceinline CellPacket operator*(CellPacket a, CellPacket b) {
+static PB_INLINE CellPacket operator*(CellPacket a, CellPacket b) {
     return _mm256_mul_pd(a.value, b.value);
 }
-static __forceinline CellPacket operator/(CellPacket a, CellPacket b) {
+static PB_INLINE CellPacket operator/(CellPacket a, CellPacket b) {
     return _mm256_div_pd(a.value, b.value);
 }
-static __forceinline CellPacket operator-(CellPacket a) {
+static PB_INLINE CellPacket operator-(CellPacket a) {
     return _mm256_xor_pd(a.value, _mm256_set1_pd(-0.));
 }
-static __forceinline void store_cells(double *output, CellPacket a) {
+static PB_INLINE void store_cells(double *output, CellPacket a) {
     _mm256_storeu_pd(output, a.value);
 }
-static __forceinline void scatter_cells(double *output, const int *offsets, int stride,
+static PB_INLINE void scatter_cells(double *output, const int *offsets, int stride,
                                         CellPacket packet) {
     __m128d lo = _mm256_castpd256_pd128(packet.value);
     __m128d hi = _mm256_extractf128_pd(packet.value, 1);
@@ -35,20 +35,20 @@ static __forceinline void scatter_cells(double *output, const int *offsets, int 
     _mm_store_sd(output + offsets[2 * stride], hi);
     _mm_storeh_pd(output + offsets[3 * stride], hi);
 }
-static __forceinline CellPacket gather_cells(const double *input, const int *indices, int stride) {
+static PB_INLINE CellPacket gather_cells(const double *input, const int *indices, int stride) {
     return _mm256_set_pd(input[indices[3 * stride]], input[indices[2 * stride]],
                          input[indices[stride]], input[indices[0]]);
 }
-static __forceinline CellPacket cell_parameter(const double *input, int offset, int stride) {
+static PB_INLINE CellPacket cell_parameter(const double *input, int offset, int stride) {
     return _mm256_set_pd(input[offset + 3 * stride], input[offset + 2 * stride],
                          input[offset + stride], input[offset]);
 }
-static __forceinline CellPacket fabs(CellPacket a) {
+static PB_INLINE CellPacket fabs(CellPacket a) {
     return _mm256_andnot_pd(_mm256_set1_pd(-0.), a.value);
 }
-static __forceinline CellPacket sqrt(CellPacket a) { return _mm256_sqrt_pd(a.value); }
+static PB_INLINE CellPacket sqrt(CellPacket a) { return _mm256_sqrt_pd(a.value); }
 #define CELL_UNARY(name)                                                                           \
-    static __forceinline CellPacket name(CellPacket a) {                                           \
+    static PB_INLINE CellPacket name(CellPacket a) {                                           \
         double x[4];                                                                               \
         store_cells(x, a);                                                                         \
         for (int i = 0; i < 4; ++i)                                                                \
@@ -56,7 +56,7 @@ static __forceinline CellPacket sqrt(CellPacket a) { return _mm256_sqrt_pd(a.val
         return _mm256_loadu_pd(x);                                                                 \
     }
 #define CELL_BINARY(name)                                                                          \
-    static __forceinline CellPacket name(CellPacket a, CellPacket b) {                             \
+    static PB_INLINE CellPacket name(CellPacket a, CellPacket b) {                             \
         double x[4], y[4];                                                                         \
         store_cells(x, a);                                                                         \
         store_cells(y, b);                                                                         \

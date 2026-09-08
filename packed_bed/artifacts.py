@@ -10,7 +10,7 @@ import numpy as np
 
 from .config import Case
 from .plotting.definitions import pyplot, save_figure
-from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S
+from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S, RatioProgram
 from .solid_profiles import (
     build_cell_profiles,
     build_face_scalar_profile,
@@ -32,6 +32,11 @@ def _smoothed_program_sample_times(programs, *, final_time: float, smooth_ramp_w
     if final_time <= 0.0:
         return np.array([0.0], dtype=float)
 
+    programs = tuple(
+        source
+        for program in programs
+        for source in ((program.numerator, program.denominator) if isinstance(program, RatioProgram) else (program,))
+    )
     times = {0.0, final_time}
     total_segments = sum(len(program.segments) for program in programs)
     baseline_count = max(400, min(2500, 20 * total_segments + 400))

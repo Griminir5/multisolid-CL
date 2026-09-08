@@ -18,7 +18,12 @@ model:
   ambient_temperature_k: 873.15
   heat_transfer_coefficient_w_per_m2_k: 0.0
 solver:
+  backend: daetools
+  name: superlu
+  threads: 1
   relative_tolerance: 1.0e-5
+  # Resolve trace concentrations through the repeated reaction cycles.
+  concentration_absolute_tolerance: 1.0e-11
 outputs:
   directory: output
   artifacts_directory: output/artifacts

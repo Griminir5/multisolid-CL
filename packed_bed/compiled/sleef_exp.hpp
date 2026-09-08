@@ -8,7 +8,7 @@ using vdouble_avx2_sleef=__m256d;
 using vint_avx2_sleef=__m128i;
 using vmask_avx2_sleef=__m256i;
 using vopmask_avx2_sleef=__m256i;
-#define SLEEF_ALWAYS_INLINE __forceinline
+#define SLEEF_ALWAYS_INLINE PB_INLINE
 #define SLEEF_INLINE static inline
 #define SLEEF_CONST
 static SLEEF_ALWAYS_INLINE vdouble_avx2_sleef vcast_vd_d_avx2_sleef(double d) { return _mm256_set1_pd(d); }

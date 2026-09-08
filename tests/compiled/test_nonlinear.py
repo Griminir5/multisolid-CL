@@ -15,11 +15,11 @@ def test_nonlinear_refresh_retains_valid_iterate_and_propagates_errors(
         nonlinear_statistics,
         prepare_nonlinear_library,
     )
-    from packed_bed.compiled.runtime import D, I, L, NativeIDA, P, check_runtime
+    from packed_bed.compiled.runtime import D, I, L, NativeIDA, P, check_runtime, load_runtime_library
 
     folder = check_runtime()
     libs = {
-        name: C.CDLL(str(next(folder.glob(f"sundials_{name}-*.dll"))))
+        name: load_runtime_library(folder, name)
         for name in ("core", "ida", "nvecserial")
     }
 
@@ -120,5 +120,4 @@ def test_nonlinear_refresh_retains_valid_iterate_and_propagates_errors(
         destroy(y)
         destroy(weights)
         assert free_context(C.byref(context)) == 0
-
 

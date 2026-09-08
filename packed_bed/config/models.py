@@ -118,6 +118,44 @@ class ProgramConfig(ConfigModel):
     inlet_composition: CompositionChannelConfig
 
 
+class FeedState(ConfigModel):
+    flow: PositiveFloat
+    temperature: PositiveFloat
+    composition: FractionMapping
+
+
+class FeedRampTarget(ConfigModel):
+    flow: PositiveFloat | None = None
+    temperature: PositiveFloat | None = None
+    composition: FractionMapping | None = None
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "FeedRampTarget":
+        if self.flow is None and self.temperature is None and self.composition is None:
+            raise ValueError("must specify at least one of flow, temperature, or composition; use hold otherwise.")
+        return self
+
+
+class FeedRampStep(ConfigModel):
+    kind: Literal["ramp"]
+    duration_s: PositiveFloat
+    target: FeedRampTarget
+
+
+FeedStep = Annotated[HoldStep | FeedRampStep, Field(discriminator="kind")]
+
+
+class FeedStreamConfig(ConfigModel):
+    basis: Literal["mol_per_s", "ghsv_per_h"] = "mol_per_s"
+    initial: FeedState
+    steps: Annotated[tuple[FeedStep, ...], BeforeValidator(_as_tuple)] = Field(default_factory=tuple)
+
+
+class FeedProgramConfig(ConfigModel):
+    feed_stream: FeedStreamConfig
+    outlet_pressure: ScalarChannelConfig
+
+
 class ReferencesConfig(ConfigModel):
     chemistry_file: ConfigString
     program_file: ConfigString
@@ -129,6 +167,7 @@ class SimulationConfig(ConfigModel):
     time_horizon_s: PositiveFloat
     reporting_interval_s: PositiveFloat
     repeat_program: bool = False
+    program_mode: Literal["separate_channels", "feed_stream"] = "separate_channels"
     interior_flow_mode: Literal["forward_only", "reversible"] = "forward_only"
     mass_scheme: ConfigString
     heat_scheme: ConfigString
@@ -304,6 +343,11 @@ __all__ = (
     "ChemistryConfig",
     "CompositionChannelConfig",
     "CompositionRampStep",
+    "FeedProgramConfig",
+    "FeedRampStep",
+    "FeedRampTarget",
+    "FeedState",
+    "FeedStreamConfig",
     "HoldStep",
     "InletFlowConfig",
     "ModelConfig",

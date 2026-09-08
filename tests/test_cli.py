@@ -52,7 +52,7 @@ def test_batch_validate_only_creates_no_cases_or_manifest(tmp_path: Path, capsys
     exit_code = cli.main(["batch", str(batch_directory / "batch.yaml"), "--validate-only"])
 
     assert exit_code == 0
-    assert capsys.readouterr().out == "Batch validation complete: 4/4 cases passed.\n"
+    assert capsys.readouterr().out == "Batch validation complete: 12/12 cases passed.\n"
     assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == paths_before
     assert not (batch_directory / "output").exists()
 

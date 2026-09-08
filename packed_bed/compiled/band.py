@@ -1,20 +1,37 @@
 """Partial-pivoted band LU with bounded updates and vectorized substitution."""
 
 import ctypes as C
+import platform
+import tempfile
+from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 
 import numpy as np
 
-from .compiler import compile_kernel
+from .compiler import compile_kernel, simd_flags
 from .structure import band_layout
 
 
+@lru_cache(None)
 def supports_avx2():
-    query = C.WinDLL("kernel32").IsProcessorFeaturePresent
-    query.argtypes = [C.c_uint32]
-    query.restype = C.c_int
-    return bool(query(40))  # PF_AVX2_INSTRUCTIONS_AVAILABLE, including OS support.
+    if platform.machine().lower() not in {"amd64", "x86_64"}:
+        return False
+    if platform.system() == "Windows":
+        query = C.WinDLL("kernel32").IsProcessorFeaturePresent
+        query.argtypes = [C.c_uint32]
+        query.restype = C.c_int
+        return bool(query(40))  # Includes OS support for AVX registers.
+    from .vector_math import CPU_SOURCE
+
+    # GCC/Clang's baseline CPU probe checks OS support too; no AVX instructions
+    # execute until this succeeds. The result is shared by this process only.
+    with tempfile.TemporaryDirectory(prefix="packed-bed-cpu-") as temporary:
+        path, _ = compile_kernel(CPU_SOURCE, Path(temporary))
+        library = C.CDLL(str(path))
+        library.has_avx2.argtypes = []
+        library.has_avx2.restype = C.c_int
+        return bool(library.has_avx2())
 
 
 def prepare_band_library(cache_directory, *, vectorize=None, reuse_diagonal=False):
@@ -30,14 +47,14 @@ def prepare_band_library(cache_directory, *, vectorize=None, reuse_diagonal=Fals
     path, compilation = compile_kernel(
         source,
         cache_directory,
-        extra_flags=("/arch:AVX2",) if vectorize else (),
+        extra_flags=simd_flags(avx2=vectorize),
     )
     library = C.CDLL(str(path))
     library.make_solver.argtypes = [C.c_void_p] * 5 + [C.c_int] * 4 + [C.c_void_p] * 3
     library.make_solver.restype = C.c_void_p
     metadata = {
         "linear_solver_implementation": "active-range band / "
-        + ("AVX2" if vectorize else "SSE2")
+        + ("AVX2" if vectorize else "scalar")
         + (" / reciprocal diagonal" if reuse_diagonal else ""),
         "linear_diagonal_reciprocals": reuse_diagonal,
         "linear_kernel_sha256": compilation["kernel_sha256"],

@@ -6,11 +6,30 @@ from time import perf_counter
 from .compiler import compile_kernel
 
 CPU_SOURCE = """
+#if defined(_MSC_VER)
 #include <intrin.h>
-extern "C" __declspec(dllexport) int has_fma3() {
+PB_EXPORT int has_fma3() {
     int registers[4]; __cpuid(registers, 1);
     return (registers[2] & (1 << 12)) != 0;
 }
+#else
+PB_EXPORT int has_avx2() {
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_cpu_init();
+    return __builtin_cpu_supports("avx2") != 0;
+#else
+    return 0;
+#endif
+}
+PB_EXPORT int has_fma3() {
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_cpu_init();
+    return __builtin_cpu_supports("fma") != 0;
+#else
+    return 0;
+#endif
+}
+#endif
 """
 
 

@@ -17,7 +17,7 @@ from scipy.sparse import csc_matrix
 
 from .band import supports_avx2
 from .codegen import emit_model
-from .compiler import compile_kernel
+from .compiler import compile_kernel, library_suffix, platform_identity, simd_flags
 from .graph import export_model
 from .runtime import NativeIDA, callback_source, check_runtime
 from .structure import (
@@ -52,8 +52,9 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
     # invalidates the cache for custom kinetics/property hooks and changed inputs.
     digest = hashlib.sha256()
     # A model-cache hit skips compile_kernel, so it must check the installed
-    # compiler too. Otherwise an MSVC update could keep loading an old binary.
+    # compiler too. Otherwise a compiler update could keep loading an old binary.
     toolchain, compiler_version = compiler_identity()
+    digest.update(platform_identity().encode())
     digest.update(str(toolchain).encode())
     digest.update(compiler_version.encode())
     sources = list(Path(__file__).parent.glob("*.py")) + list(
@@ -113,11 +114,13 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
     if cache_index.is_file():
         cached = json.loads(cache_index.read_text())
         filename = cached["library"]
+        suffix = library_suffix()
         # The JSON contains data and a local content-addressed filename only.
         if (
-            len(filename) != 68
-            or filename[-4:] != ".dll"
-            or any(c not in "0123456789abcdef" for c in filename[:-4])
+            not isinstance(filename, str)
+            or len(filename) != 64 + len(suffix)
+            or not filename.endswith(suffix)
+            or any(c not in "0123456789abcdef" for c in filename[:64])
         ):
             raise ValueError("Invalid compiled kernel cache filename.")
         library_path = cache_directory / filename
@@ -196,9 +199,10 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
     library_path, compilation = compile_kernel(
         source,
         cache_directory,
-        extra_flags=("/arch:AVX2",)
-        if generation_metadata["residual_lanes"] == 4
-        else (),
+        extra_flags=simd_flags(
+            avx2=generation_metadata["residual_lanes"] == 4,
+            fma=vector_exponentials,
+        ),
     )
     metadata = {
         **compilation,
@@ -225,7 +229,7 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
         "library": library_path.name,
         "keep": keep,
         # CPU probe timings and capabilities belong to this process, not the
-        # reusable model. Recompute them even when loading the same DLL.
+        # reusable model. Recompute them even when loading the same library.
         "metadata": {
             key: value
             for key, value in metadata.items()

@@ -15,21 +15,26 @@ model:
   bed_length_m: 6.0
   bed_radius_m: 0.5
   axial_cells: 20
-  # bed_only: e_b; bed_and_particle: e_b + (1-e_b)*e_p (default).
-  gas_voidage_mode: bed_and_particle
   ambient_temperature_k: 873.15
   heat_transfer_coefficient_w_per_m2_k: 0.0
 solver:
-  backend: daetools
-  name: superlu
+  backend: compiled
+  name: band
   threads: 1
   relative_tolerance: 1.0e-3
   suppress_algebraic_errors: true
   max_nonlinear_iterations: 12
   nonlinear_convergence_coefficient: 1.0
+  # Refresh a stale Jacobian before retrying difficult reaction transients.
+  # Tolerances and physics match run.yaml.
+  scale_residuals: false
+  step_growth_threshold: 1.25
+  nonlinear_refresh_interval: 4
+  vector_exponentials: false
+  band_reciprocals: false
 outputs:
-  directory: output
-  artifacts_directory: output/artifacts
+  directory: output_band
+  artifacts_directory: output_band/artifacts
   requested_plots:
     - axial_profiles
     - outlet_composition

@@ -1,9 +1,10 @@
 references:
   chemistry_file: chemistry.yaml
-  program_file: program.yaml
+  program_file: program_feed_stream.yaml
   solids_file: solids.yaml
 simulation:
-  system_name: DefaultCase
+  system_name: DefaultCaseFeedStream
+  program_mode: feed_stream
   time_horizon_s: 1000.0
   reporting_interval_s: 1.0
   repeat_program: true
@@ -15,8 +16,6 @@ model:
   bed_length_m: 6.0
   bed_radius_m: 0.5
   axial_cells: 20
-  # bed_only: e_b; bed_and_particle: e_b + (1-e_b)*e_p (default).
-  gas_voidage_mode: bed_and_particle
   ambient_temperature_k: 873.15
   heat_transfer_coefficient_w_per_m2_k: 0.0
 solver:
@@ -28,8 +27,8 @@ solver:
   max_nonlinear_iterations: 12
   nonlinear_convergence_coefficient: 1.0
 outputs:
-  directory: output
-  artifacts_directory: output/artifacts
+  directory: output_feed_stream
+  artifacts_directory: output_feed_stream/artifacts
   requested_plots:
     - axial_profiles
     - outlet_composition
