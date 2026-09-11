@@ -7,6 +7,7 @@ from importlib import import_module
 import os
 from pathlib import Path
 from time import perf_counter
+from typing import Callable
 from types import SimpleNamespace
 import traceback
 
@@ -211,6 +212,7 @@ def execute_simulation(
     *,
     data_reporter=None,
     after_initialize=None,
+    on_status: Callable[[str], None] | None = None,
 ):
     """Initialize, run, finalize, and flush reports through one execution path."""
 
@@ -260,11 +262,15 @@ def execute_simulation(
     initialized = False
     returned_reporter = reporter
     try:
+        if on_status is not None:
+            on_status("initialising")
         simulation.Initialize(solver, reporter, log)
         initialized = True
         if after_initialize is not None:
             after_initialize(simulation, solver)
         simulation.SolveInitial()
+        if on_status is not None:
+            on_status("running")
         if compiled:
             from .compiled import integrate
 
@@ -290,6 +296,8 @@ def execute_simulation(
             simulation.Finalize()
 
     finish = getattr(returned_reporter, "finish", None)
+    if on_status is not None:
+        on_status("writing_results")
     if finish is not None:
         finish()
     return returned_reporter
@@ -301,8 +309,12 @@ def run_case(
     artifact_paths: dict[str, Path] | None = None,
     *,
     retain_reporter: bool = False,
+    on_status: Callable[[str], None] | None = None,
 ) -> RunResult:
-    """Run one resolved case and write its dataset and manifest."""
+    """Run one resolved case and write its dataset and manifest.
+
+    Optional status callbacks run synchronously; exceptions fail the run.
+    """
 
     if property_registry is None:
         property_registry = PROPERTY_REGISTRY
@@ -314,6 +326,8 @@ def run_case(
     result = RunResult(case=case, output_directory=case.output_directory)
     started_at = perf_counter()
     try:
+        if on_status is not None:
+            on_status("preparing")
         simulation = PackedBedSimulation(case, property_registry)
         dataset_reporter = create_dataset_reporter(case)
         after_initialize = None
@@ -333,6 +347,7 @@ def run_case(
             simulation,
             data_reporter=dataset_reporter,
             after_initialize=after_initialize,
+            on_status=on_status,
         )
         result = replace(
             result,

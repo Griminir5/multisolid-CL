@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multisolid-cl-ui"
+version = "0.1.0"
+description = "A small desktop application for MultiSolid packed-bed simulations"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = "GPL-3.0-only"
+dependencies = ["multisolid-cl==0.1.0", "PyQt6", "matplotlib"]
+
+[project.gui-scripts]
+packed-bed-ui = "packed_bed_ui.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["packed_bed_ui*"]
+namespaces = false

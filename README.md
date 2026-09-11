@@ -4,6 +4,12 @@
 The model uses DAETools. YAML files specify the species, solids, operating program, geometry, solver, and outputs.
 Each run writes an xarray dataset in NetCDF format and a JSON manifest.
 
+A small PyQt6 desktop client now lives in [desktop/](desktop/README.md).
+It supports projects with multiple cases, draft run settings, shared previews,
+and Run case / Run all execution. Each case keeps one latest run; rerunning
+replaces its results, and input edits mark retained results stale. See its README for setup and the remaining work
+toward [PLAN.md](PLAN.md).
+
 **Install the package.** Use Python 3.11 or 3.12. The commands below use PowerShell from the repository directory.
 
 1. Create an environment.
@@ -253,7 +259,8 @@ The first command validates all twelve example cases without writes: two program
 two geometries × three solvers (SuperLU baseline, compiled SuperLU, compiled band).
 Running all twelve cases requires the compiled-backend dependencies above.
 The second command runs up to four cases at the same time.
-Each worker uses one numerical thread when the requested worker count exceeds one.
+Each case keeps its own `solver.threads` setting, including in concurrent batches.
+The shipped examples use one numerical thread per case.
 Keep only the desired entries under the `solver` axis in `batch.yaml` to select solvers.
 The batch retains its 7,200-second horizon and `1e-5` relative tolerance for every solver.
 All three use `concentration_absolute_tolerance: 1e-11` to resolve trace concentrations

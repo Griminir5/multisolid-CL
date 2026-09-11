@@ -407,12 +407,6 @@ def _write_case_files(cases: tuple[ExpandedBatchCase, ...]) -> None:
             path.write_text(yaml.safe_dump(getattr(case, name), sort_keys=False), encoding="utf-8")
 
 
-def _force_single_threaded_cases(cases: tuple[ExpandedBatchCase, ...]) -> None:
-    for case in cases:
-        solver = _require_mapping(case.run.get("solver"), "run.solver")
-        solver["threads"] = 1
-
-
 def _check_output_collisions(
     document: BatchDocument,
     cases: tuple[ExpandedBatchCase, ...],
@@ -515,8 +509,12 @@ def _run_case_worker(
 
 
 @contextmanager
-def _single_threaded_worker_environment():
-    limits = {**_SINGLE_THREAD_ENVIRONMENT,
+def _worker_environment(threads: int):
+    if threads == 0:
+        yield
+        return
+    limits = {**{key: str(threads) if value == "1" else value
+                  for key, value in _SINGLE_THREAD_ENVIRONMENT.items()},
               "MKL_THREADING_LAYER": os.environ.get("MKL_THREADING_LAYER", "GNU")}
     previous = {name: os.environ.get(name) for name in limits}
     os.environ.update(limits)
@@ -565,7 +563,7 @@ def _apply_case_result(record: BatchCaseRecord, payload: tuple | str) -> None:
         record.status = "success"
 
 
-def _run_cases_in_processes(
+def run_cases_in_processes(
     cases: tuple[Case, ...],
     records: tuple[BatchCaseRecord, ...],
     *,
@@ -574,13 +572,39 @@ def _run_cases_in_processes(
     generate_artifacts_fn: Callable[[Case], dict[str, Path]] | None,
     run_case_fn: Callable[..., RunResult] | None,
     checkpoint: Callable[[], None],
+    case_worker=None,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> None:
+    """Schedule explicit cases, preserving their thread limits and reaping every child."""
+    workers = _coerce_workers(workers)
+    if len(cases) != len(records):
+        raise ValueError("Each case must have exactly one execution record.")
     context = mp.get_context("spawn")
     pending = iter(zip(cases, records))
     active: list[_ActiveCaseWorker] = []
     exhausted = False
     try:
         while active or not exhausted:
+            if cancel_requested is not None and cancel_requested():
+                for worker in active:
+                    # Preserve results already returned before cancellation arrived.
+                    if not worker.process.is_alive():
+                        if worker.payload is None:
+                            try:
+                                worker.payload = worker.result_queue.get(timeout=0.1)
+                            except Empty:
+                                pass
+                        _apply_case_result(worker.record, worker.payload if worker.payload is not None else
+                                           f"Batch case worker exited with code {worker.process.exitcode}.")
+                    _terminate_process(worker.process)
+                    worker.record.runtime_s = perf_counter() - worker.started_at
+                    _close_worker(worker)
+                active.clear()
+                for record in records:
+                    if record.status in ("pending", "validation_passed", "running"):
+                        record.status, record.error = "cancelled", "Execution cancelled."
+                checkpoint()
+                return
             while len(active) < workers and not exhausted:
                 try:
                     case, record = next(pending)
@@ -590,10 +614,9 @@ def _run_cases_in_processes(
 
                 record.status = "running"
                 started_at = perf_counter()
-                single_threaded = case.run.solver.threads == 1
                 result_queue = context.Queue(maxsize=1)
                 process = context.Process(
-                    target=_run_case_worker,
+                    target=case_worker or _run_case_worker,
                     args=(
                         case.run_path,
                         generate_artifacts_fn,
@@ -605,10 +628,7 @@ def _run_cases_in_processes(
                 active.append(worker)
                 try:
                     # Apply limits before the child imports NumPy or DAETools.
-                    if single_threaded:
-                        with _single_threaded_worker_environment():
-                            process.start()
-                    else:
+                    with _worker_environment(case.run.solver.threads):
                         process.start()
                 except Exception as exc:
                     _terminate_process(process)
@@ -626,6 +646,7 @@ def _run_cases_in_processes(
             now = perf_counter()
             for worker in tuple(active):
                 elapsed = now - worker.started_at
+                worker.record.runtime_s = elapsed
                 alive = worker.process.is_alive()
                 # Drain before joining: a large payload can keep the child's queue feeder alive.
                 if worker.payload is None:
@@ -659,6 +680,8 @@ def _run_cases_in_processes(
                 made_progress = True
                 checkpoint()
 
+            if cancel_requested is not None:
+                checkpoint()
             if active and not made_progress:
                 active[0].process.join(_PROCESS_POLL_INTERVAL_S)
     except BaseException:
@@ -667,6 +690,31 @@ def _run_cases_in_processes(
             worker.record.runtime_s = perf_counter() - worker.started_at
             _close_worker(worker)
         raise
+
+
+def run_case_sequence(
+    records: tuple[BatchCaseRecord, ...],
+    *,
+    execute: Callable[[BatchCaseRecord], tuple | str],
+    checkpoint: Callable[[], None],
+) -> None:
+    """Run explicit cases sequentially, recording failures and continuing.
+
+    Used for in-process CLI execution. Execution owns input preparation;
+    this loop owns ordering, elapsed times, and terminal case states.
+    """
+    for record in records:
+        record.status = "running"
+        checkpoint()
+        started = perf_counter()
+        try:
+            _apply_case_result(record, execute(record))
+        except Exception as exc:
+            record.status = "simulation_failed"
+            record.error = str(exc)
+        finally:
+            record.runtime_s = perf_counter() - started
+        checkpoint()
 
 
 def run_batch_file(
@@ -688,8 +736,6 @@ def run_batch_file(
         else document.spec.case_timeout_s
     )
     expanded_cases = expand_batch_cases(document)
-    if requested_workers > 1:
-        _force_single_threaded_cases(expanded_cases)
     effective_workers = min(requested_workers, len(expanded_cases))
     records = tuple(
         BatchCaseRecord(
@@ -755,23 +801,17 @@ def run_batch_file(
             generate_artifacts_fn = generate_artifacts
         cases = tuple(case for case in resolved_cases if case is not None)
         if effective_workers > 1 or timeout_s is not None:
-            _run_cases_in_processes(
+            run_cases_in_processes(
                 cases, records, workers=effective_workers, timeout_s=timeout_s,
                 generate_artifacts_fn=generate_artifacts_fn, run_case_fn=run_case_fn,
                 checkpoint=checkpoint,
             )
         else:
-            for record in records:
-                record.status = "running"
-                start = perf_counter()
-                try:
-                    payload = _run_case_direct(
-                        record.run_yaml_path, generate_artifacts_fn, run_case_fn,
-                    )
-                    _apply_case_result(record, payload)
-                finally:
-                    record.runtime_s = perf_counter() - start
-                checkpoint()
+            run_case_sequence(
+                records,
+                execute=lambda record: _run_case_direct(record.run_yaml_path, generate_artifacts_fn, run_case_fn),
+                checkpoint=checkpoint,
+            )
     except BaseException as exc:
         for record in records:
             if record.status in ("running", "validation_passed"):

@@ -9,10 +9,11 @@ description = "DAETools packed-bed reactor simulation"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = {file = "LICENSE"}
-dependencies = ["numpy", "scipy", "xarray", "pydantic>=2", "PyYAML", "matplotlib", "PyQt6", "PyQt6-WebEngine"]
+dependencies = ["numpy", "scipy", "xarray", "pydantic>=2", "PyYAML", "matplotlib"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
+plotter = ["PyQt6", "PyQt6-WebEngine"]
 graph = ["pygraphviz"]
 compiled = ["scikit-sundae==1.1.3"]
 
@@ -35,4 +36,5 @@ packed_bed = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "desktop/tests"]
+pythonpath = ["desktop"]

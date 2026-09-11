@@ -388,15 +388,24 @@ def test_batch_execution_uses_resolved_case_plot_selection_and_artifacts(tmp_pat
     assert not (tmp_path / "output" / "manifest.csv").exists()
 
 
-def test_parallel_batch_runs_single_threaded_cases_in_overlapping_processes(
-    tmp_path: Path,
+@pytest.mark.parametrize("threads", [0, 1, 3])
+def test_parallel_batch_preserves_case_threads_in_overlapping_processes(
+    tmp_path: Path, threads, monkeypatch,
 ) -> None:
-    batch_path = _write_two_case_batch(tmp_path, workers=2)
+    limits = ("BLIS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS",
+              "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")
+    for name in limits:
+        monkeypatch.setenv(name, "2")
+    batch_path = _write_conditions(tmp_path, {
+        "first": {"run": {"solver": {"threads": threads}}},
+        "second": {"run": {"solver": {"threads": threads}}},
+    }, workers=2)
 
     run = partial(_parallel_fake_run, barrier=get_context("spawn").Barrier(2))
     result = run_batch_file(batch_path, run_case_fn=run)
 
     assert result.workers == 2
+    assert all(os.environ[name] == "2" for name in limits)
     assert [record.status for record in result.records] == ["success", "success"]
     worker_details = [
         json.loads((record.output_directory / "worker.json").read_text(encoding="utf-8"))
@@ -404,7 +413,7 @@ def test_parallel_batch_runs_single_threaded_cases_in_overlapping_processes(
     ]
     assert len({details["pid"] for details in worker_details}) == 2
     assert all(
-        value == "1"
+        value == str(threads or 2)
         for details in worker_details
         for value in details["thread_limits"].values()
     )
@@ -413,7 +422,7 @@ def test_parallel_batch_runs_single_threaded_cases_in_overlapping_processes(
     )
     for record in result.records:
         materialized_run = yaml.safe_load(record.run_yaml_path.read_text(encoding="utf-8"))
-        assert materialized_run["solver"]["threads"] == 1
+        assert materialized_run["solver"]["threads"] == threads
 
 
 def test_parallel_case_timeouts_kill_each_worker_and_continue(tmp_path: Path) -> None:

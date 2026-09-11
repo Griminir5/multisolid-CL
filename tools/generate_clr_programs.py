@@ -19,7 +19,7 @@ SCALAR_RAMP_PROBABILITIES = {
     "outlet_pressure": 0.20,
 }
 
-# Integer bin boundaries are lower-inclusive. If one bin's upper boundary is
+# Integer bin boundaries are [a,b). If one bin's upper boundary is
 # the next bin's lower boundary, that shared boundary belongs to the next bin.
 N_STEP_BINS = ((4, 10), (10, 20), (20, 100))
 N_STEP_BIN_WEIGHTS = np.array((0.6, 0.3, 0.1), dtype=float)
