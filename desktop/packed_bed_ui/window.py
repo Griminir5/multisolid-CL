@@ -100,19 +100,16 @@ class MainWindow(QMainWindow):
         self.case_page = QWidget()
         case_layout = QVBoxLayout(self.case_page)
         editor_actions = QHBoxLayout()
-        back = QPushButton("← Cases")
+        back = QPushButton("← Back to project")
         back.clicked.connect(self._show_cases)
         editor_actions.addWidget(back)
-        self.run_button = QPushButton("Run case")
-        self.run_button.clicked.connect(self._start_selected)
-        editor_actions.addWidget(self.run_button)
+        self.case_result = QLabel()
+        editor_actions.addWidget(self.case_result, 1)
         for label, action in (("Open case folder", self._show_case_folder), ("Open latest run log", self._show_log)):
             button = QPushButton(label)
             button.clicked.connect(action)
             editor_actions.addWidget(button)
-        self.case_result = QLabel()
         case_layout.addLayout(editor_actions)
-        case_layout.addWidget(self.case_result)
         self.editor = CaseEditor()
         self.editor.changed.connect(self._editor_changed)
         case_layout.addWidget(self.editor)
@@ -347,10 +344,13 @@ class MainWindow(QMainWindow):
         if not self.editor.save():
             return
         self._refresh_cases()
+        if self.project is not None:
+            self.setWindowTitle(f"{self.project.metadata['name']} — MultiSolid")
         self.pages.setCurrentWidget(self.home)
 
     def _show_case(self, case):
         if self.editor.set_case(case):
+            self.setWindowTitle(f"{case.name} — {self.project.metadata['name']} — MultiSolid")
             self._editor_changed()
             self.pages.setCurrentWidget(self.case_page)
 
@@ -372,12 +372,11 @@ class MainWindow(QMainWindow):
         if self.editor.case is None:
             return
         state = self.editor.case.state()
-        self.run_button.setEnabled(state["inputs"] == "Ready" and not self.editor.dirty and not self.runner.active)
-        self.case_result.setText(f"Latest result: {self._result_label(state)}. Running replaces the previous results.")
-
-    def _start_selected(self):
-        if self.editor.case is not None:
-            self._start_cases([self.editor.case])
+        if self.runner.active and self.editor.case.id in self.runner.job.get("cases", {}):
+            state.update(self.runner.job["cases"][self.editor.case.id])
+            if state.get("state") != "queued":
+                state["stale"] = False
+        self.case_result.setText(self._result_label(state))
 
     def _run_all(self):
         self._start_cases([case for case in self.project.cases if case.metadata.get("included", True)])
@@ -406,6 +405,8 @@ class MainWindow(QMainWindow):
 
     def _run_status(self, job):
         self._refresh_cases()
+        self._editor_changed()
+        self.editor.update_results()
         self.cancel_button.setEnabled(self.runner.active and not self.runner.cancelling)
         complete = sum(value["state"] in ("completed", "failed", "cancelled") for value in job.get("cases", {}).values())
         state = "cancelling" if self.runner.active and self.runner.cancelling else job.get("state", "queued")

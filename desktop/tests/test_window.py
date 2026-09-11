@@ -41,24 +41,25 @@ def test_editor_saves_invalid_drafts_and_keeps_other_cases_unchanged(qt_app, tmp
 
     project = Project.create(tmp_path / "project")
     case = project.add_case_from_files(source_case)
+    case.documents["run"]["simulation"]["repeat_program"] = True
     other = project.duplicate_case(case, "Other")
     window = MainWindow()
     window._set_project(project)
     window._show_case(case)
-    assert window.run_button.isEnabled()
+    assert case.state()["inputs"] == "Ready"
     field = window.editor.fields[("simulation", "time_horizon_s")]
     field.setText("unfinished")
     window.editor.queue_edit()
-    assert not window.run_button.isEnabled()
+    assert window.editor.dirty
     wait_until(qt_app, lambda: not window.editor.dirty)
     assert "cannot run" in window.editor.validation.text()
-    assert not window.run_button.isEnabled()
+    assert case.state()["inputs"] in {"Underdefined", "Invalid"}
     assert not window.editor.figures[0].axes
     reopened = Project.open(project.root)
     assert reopened.cases[0].documents["run"]["simulation"]["time_horizon_s"] == "unfinished"
     assert reopened.cases[1].resolve().run.simulation.time_horizon_s == 0.01
     window._show_case(other)
-    assert window.run_button.isEnabled()
+    assert other.state()["inputs"] == "Ready"
     window.close()
 
 
@@ -118,6 +119,7 @@ def test_unsaved_draft_blocks_close_and_project_switch(qt_app, tmp_path, source_
 
     project = Project.create(tmp_path / "project")
     case = project.add_case_from_files(source_case)
+    case.documents["run"]["simulation"]["repeat_program"] = True
     other = Project.create(tmp_path / "other")
     window = MainWindow()
     window._set_project(project)
@@ -136,7 +138,6 @@ def test_unsaved_draft_blocks_close_and_project_switch(qt_app, tmp_path, source_
         assert window.project is project
         assert not window.close()
         assert window.editor.dirty
-        assert not window.run_button.isEnabled()
     assert window.close()
     assert Project.open(project.root).cases[0].documents["run"]["simulation"]["time_horizon_s"] == 0.02
 

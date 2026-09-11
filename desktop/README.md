@@ -29,15 +29,16 @@ previews do not need DAETools. Execution needs DAETools with SuperLU.
 3. Project actions are in the top **Project** menu. Each case row shows its name,
    input readiness, latest result, and icon actions: **Run**, **Duplicate**, **Edit**,
    **Delete**. Hover for tooltips. Double-click a case to edit it; press F2 on its
-   name to rename it. **Cases** returns to the list. Delete asks before removing
+   name to rename it. **← Back to project** returns to the list. Delete asks before removing
    the case and its latest results.
-4. Edit the duration (s), recording interval (s), axial cell count, and numerical
-   thread count. All shipped examples use one numerical thread. Drafts
-   save after a short pause. Invalid values disable execution, and each case
-   keeps its own settings. Full chemistry, program, and solids forms are pending;
-   these still use the YAML inputs. An empty draft therefore needs those inputs
-   filled in before it can run.
-5. **Run case** executes one case. **Run all included cases** runs the checked
+4. The case editor has five tabs: **General**, **Chemistry**, **Bed**, **Program**,
+   and **Results**. General contains numerical and solver settings and requested
+   reports/plots. Chemistry selects species and collapsible reaction families
+   beside a fitted reaction graph. Bed edits geometry and material zones above
+   the numerical preview. Program edits initial values and timed hold/ramp steps
+   beside its preview. Drafts save after a short pause, including incomplete
+   values. Hover over a validation message for its full details.
+5. **Run** in the project case list executes one case. **Run all included cases** runs the checked
    cases as one batch, continuing after individual failures. **Maximum workers**
    sets the number of simultaneous cases and is saved with the project. Each case
    keeps its own thread setting; increasing workers never changes case inputs. All included cases
@@ -45,7 +46,9 @@ previews do not need DAETools. Execution needs DAETools with SuperLU.
    out. Elapsed time updates while a case is active and freezes when it finishes.
    **Cancel execution** stops and reaps active workers and cancels the queue.
 6. Open a case's folder for its latest NetCDF, manifest, and existing CLI plots.
-   **Open latest run log** opens its solver log.
+   **Open latest run log** opens its solver log. General's plot rows have **Show**
+   buttons that open separate windows when retained NetCDF results are available,
+   including stale results. The Results tab is a placeholder pending its design.
 
 A rerun replaces the previous snapshot, logs, status, and outputs when that
 case starts, even if the new attempt fails or is cancelled. Invalid preflight
@@ -53,10 +56,29 @@ and cases cancelled before starting keep their previous results. **Duplicate
 case** first if you want to retain a separate comparison; the copy starts with
 no results.
 
-The two preview tabs use the engine's actual smoothed programs, feed mixing,
+The Bed and Program previews use the engine's actual smoothed programs, feed mixing,
 repetition, GHSV conversion, and sampled solid profiles. Plot toolbars support
 zoom, pan, and image saving. Advanced scientific settings survive import/save;
 an unsupported solver blocks execution rather than being silently replaced.
+The backend dropdown disables Compiled, and the solver dropdown identifies
+choices unavailable in the current desktop runtime. Advanced solver settings
+open in a separate dialog.
+
+For a non-repeating program, the horizon is calculated from the longest channel
+and is disabled in General. Every non-empty channel must have the same duration;
+a program with no timed steps needs a hold or ramp to define its horizon. Cyclic
+programs allow an editable horizon. Switching program modes preserves each mode's
+inlet steps in case metadata; a mode opened for the first time copies the initial
+feed values and starts with no inlet steps. Outlet pressure is shared and stays
+in the same pane. Switching flow basis converts existing numeric flows using the
+bed geometry and the engine's GHSV reference conditions.
+
+Adding species leaves new composition fractions and solid loadings blank for the
+user to fill. Removing species removes their entries from compositions and zones.
+Reaction families expose an **+ Species** action for their declared requirements.
+A new zone splits the final zone's extent and starts with blank material values.
+The first zone starts at zero and the final zone ends at the bed length. Changing
+a multi-zone bed's length offers fixed or proportionally scaled internal boundaries.
 
 ## Cases from a batch
 
@@ -116,7 +138,12 @@ after an interrupted session marks unfinished retained runs as Interrupted.
 | --- | --- |
 | `packed_bed_ui/window.py` | Welcome screen, project case list, navigation, and actions |
 | `packed_bed_ui/case_list.py` | Collapsible study groups, case status, inclusion, and icon actions |
-| `packed_bed_ui/editor.py` | The selected case's small form and interactive previews |
+| `packed_bed_ui/editor.py` | Five-tab editor, autosave, numerical previews, and retained plot windows |
+| `packed_bed_ui/general.py` | Numerical/solver settings and report/plot selections |
+| `packed_bed_ui/chemistry.py` | Species lists, reaction families, and a native Qt network graph |
+| `packed_bed_ui/bed.py` | Geometry, material zones, and reactor boundary rules |
+| `packed_bed_ui/program_editor.py` | Program modes, hold/ramp tables, feed targets, timing, and flow conversion |
+| `packed_bed_ui/editor_widgets.py` | Shared selection lists, tables, and preview canvases |
 | `packed_bed_ui/project.py` | Project/case storage, imports, migration, readiness, and run preparation |
 | `packed_bed_ui/execution.py` | Start, monitor, and stop the project's worker with Qt |
 | `packed_bed_ui/worker.py` | Verify/activate snapshots, collect logs, publish status, call the shared engine loop |
