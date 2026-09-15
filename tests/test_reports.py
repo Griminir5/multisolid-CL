@@ -4,6 +4,7 @@ from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
+from xml.etree import ElementTree
 
 import numpy as np
 import pytest
@@ -243,6 +244,30 @@ def test_netcdf_only_plots_continue_after_one_failure(tmp_path: Path, monkeypatc
     assert plotted.errors == {"outlet_composition": "synthetic plot failure"}
     assert plotted.paths["axial_profiles"].is_file()
     assert load_dataset(results_path).identical(dataset)
+
+
+@pytest.mark.parametrize("plot_id", PLOT_REGISTRY)
+def test_plots_export_svg_with_valid_glyph_references(tmp_path: Path, plot_id: str) -> None:
+    case, process = _synthetic_case_and_process(tmp_path)
+    spec = PLOT_REGISTRY[plot_id]
+    dataset = extract_dataset(process, _with_outputs(case, reports=spec.required_reports))
+    path = tmp_path / spec.filename
+
+    spec.render(dataset, path)
+
+    root = ElementTree.parse(path).getroot()
+    namespace = {"svg": "http://www.w3.org/2000/svg"}
+    assert root.tag == "{http://www.w3.org/2000/svg}svg"
+    assert bool(root.findall(".//svg:image", namespace)) == (plot_id == "axial_profiles")
+    paths = root.findall(".//svg:path", namespace)
+    assert paths
+    assert all(node.get("d", "").strip() for node in paths)
+    identifiers = {node.get("id") for node in root.iter() if node.get("id")}
+    references = root.findall(".//svg:use", namespace)
+    assert references
+    for node in references:
+        target = node.attrib["{http://www.w3.org/1999/xlink}href"]
+        assert target.startswith("#") and target[1:] in identifiers
 
 
 def test_netcdf_round_trip_manifest_preserves_input_snapshot(tmp_path: Path) -> None:
