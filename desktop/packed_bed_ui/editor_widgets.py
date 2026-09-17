@@ -6,7 +6,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolb
 from matplotlib.figure import Figure
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QHeaderView,
+    QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
     QSizePolicy, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -52,6 +52,29 @@ def action_button(text, callback, *, tooltip=None):
     button.setToolTip(tooltip or text)
     button.clicked.connect(callback)
     return button
+
+
+def row(*widgets):
+    layout = QHBoxLayout()
+    for widget in widgets:
+        layout.addWidget(widget)
+    return layout
+
+
+def dialog_buttons(dialog, standard=QDialogButtonBox.StandardButton.Save, *, accept=None, label=None):
+    buttons = QDialogButtonBox(standard if standard == QDialogButtonBox.StandardButton.Close
+                              else standard | QDialogButtonBox.StandardButton.Cancel)
+    buttons.accepted.connect(accept or dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    if label:
+        buttons.button(standard).setText(label)
+    return buttons
+
+
+def message(text=""):
+    label = QLabel(text)
+    label.setWordWrap(True)
+    return label
 
 
 def table(headers):

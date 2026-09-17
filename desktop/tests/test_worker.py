@@ -110,3 +110,30 @@ def test_real_project_worker_matches_engine_and_reruns_replace_results(tmp_path,
                     np.testing.assert_array_equal(actual[name], reference[name])
         assert not list(project.root.glob("cases/*/.pending-*"))
         assert not list(project.root.glob("cases/*/.previous-run"))
+
+
+@pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
+def test_real_successful_baseline_generates_runs_and_rebuilds_study(tmp_path, source_case):
+    pytest.importorskip("PyQt6.QtCore")
+    from packed_bed_ui.studies import Factor
+    from packed_bed_ui.study_store import baseline_eligibility
+
+    project = Project.create(tmp_path / "project")
+    baseline = project.add_case_from_files(source_case, "Benchmark")
+    assert run_project_job(project.prepare_execution([baseline])) == 0
+    assert baseline_eligibility(baseline).eligible
+    study = project.study_store.create("Cell sweep", baseline)
+    study.factors = [Factor("cells", "axial_cells", [3, 4])]
+    project.study_store.save_study(study)
+    cases = project.study_store.apply_preview(project.study_store.preview(study))
+    assert run_project_job(project.prepare_execution(project.cases, max_workers=2)) == 0
+    for case in cases:
+        assert case.state()["state"] == "completed"
+        assert not case.state()["stale"]
+        assert (case.run_folder / "output/results.nc").exists()
+    study.factors[0].values = [3, 5]
+    project.study_store.save_study(study)
+    replacements = project.study_store.apply_preview(project.study_store.preview(study))
+    assert all(not case.root.exists() for case in cases)
+    assert all(not case.run_folder.exists() for case in replacements)
+    assert baseline.state()["state"] == "completed"

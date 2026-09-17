@@ -321,7 +321,7 @@ def test_study_groups_keep_selection_and_collapse_during_live_updates(qt_app, tm
     assert list(window.table.buttons[first.id]) == ["Run", "Duplicate", "Edit", "Delete"]
     assert all(not button.icon().isNull() for button in window.table.buttons[first.id].values())
     buttons = {button.text(): button for button in window.home.findChildren(QPushButton)}
-    assert not buttons["New Parameter Study"].isEnabled()
+    assert buttons["New Parameter Study"].isEnabled()
     assert buttons["Import Parameter Study"].isEnabled()
     window.max_workers.setValue(3)
     assert Project.open(project.root).metadata["max_workers"] == 3

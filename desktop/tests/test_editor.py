@@ -38,7 +38,7 @@ def test_five_tabs_and_toolbar(qt_app, tmp_path):
     assert [window.editor.tabs.tabText(i) for i in range(5)] == ["General", "Chemistry", "Bed", "Program", "Results"]
     buttons = [window.case_page.layout().itemAt(0).layout().itemAt(i).widget()
                for i in range(window.case_page.layout().itemAt(0).layout().count())]
-    assert [button.text() for button in buttons if isinstance(button, QPushButton)] == [
+    assert [button.text() for button in buttons if isinstance(button, QPushButton) and not button.isHidden()] == [
         "← Back to project", "Open case folder", "Open latest run log",
     ]
     assert window.case_result.text() == "Not run"
@@ -315,8 +315,10 @@ def test_new_empty_draft_can_be_completed_through_controls(qt_app, tmp_path):
     editor.close()
 
 
-def test_plot_opens_from_retained_data_even_with_invalid_current_inputs(editing, qt_app):
+@pytest.mark.parametrize("plot_id", ["outlet_composition", "outlet_conditions", "axial_profiles"])
+def test_plot_opens_from_retained_data_even_with_invalid_current_inputs(editing, qt_app, plot_id):
     import xarray as xr
+    from PyQt6.QtCore import qInstallMessageHandler
     from PyQt6.QtSvgWidgets import QSvgWidget
 
     editor, case = editing
@@ -327,18 +329,35 @@ def test_plot_opens_from_retained_data_even_with_invalid_current_inputs(editing,
     dataset = xr.Dataset({
         "inlet_composition": (("time", "gas_species"), [[1.0], [1.0]]),
         "outlet_composition": (("time", "gas_species"), [[1.0], [1.0]]),
-    }, coords={"time": [0.0, 1.0], "gas_species": ["N2"]})
+        "outlet_temperature": ("time", [300.0, 310.0]),
+        "pressure_drop": ("time", [100.0, 110.0]),
+        "outlet_flow": ("time", [1e-8, 2e-8]),
+        "temperature": (("time", "x_cell"), [[300.0, 300.0], [320.0, 310.0]]),
+        "pressure": (("time", "x_cell"), [[100100.0, 100000.0], [100110.0, 100000.0]]),
+    }, coords={"time": [0.0, 1.0], "gas_species": ["N2"], "x_cell": [0.25, 0.75]})
     path = folder / "results.nc"
     dataset.to_netcdf(path, engine="scipy")
     original = path.read_bytes()
     editor.fields[("simulation", "reporting_interval_s")].setText("invalid")
     editor.save()
-    editor.general.plots.set_values(["outlet_composition"])
+    editor.general.plots.set_values([plot_id])
     assert editor.general.plots.show_buttons[0].isEnabled()
-    editor.show_plot("outlet_composition")
-    qt_app.processEvents()
+    svg_warnings = []
+
+    def collect_messages(_kind, context, message):
+        if context.category == "qt.svg":
+            svg_warnings.append(message)
+
+    previous_handler = qInstallMessageHandler(collect_messages)
+    try:
+        editor.general.plots.show_buttons[0].click()
+        qt_app.processEvents()
+    finally:
+        qInstallMessageHandler(previous_handler)
+
     assert len(editor.plot_windows) == 1
     assert editor.plot_windows[0].findChild(QSvgWidget).renderer().isValid()
+    assert not svg_warnings
     assert path.read_bytes() == original
     assert case.state()["stale"]
     editor.plot_windows[0].close()

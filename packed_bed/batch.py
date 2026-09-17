@@ -263,11 +263,36 @@ def _merge_mapping(target: dict[str, Any], patch: dict[str, Any]) -> None:
             target[key] = deepcopy(patch_value)
 
 
-def _apply_patch(documents: dict[str, dict[str, Any]], patch: BatchPatch) -> None:
-    for name in ("run", "chemistry", "program", "solids"):
-        values = getattr(patch, name)
-        if values:
-            _merge_mapping(documents[name], values)
+def apply_case_patch(documents: dict[str, dict[str, Any]], patch: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Return patched documents; mappings merge recursively and lists replace wholesale."""
+    result = deepcopy(documents)
+    for name, values in patch.items():
+        if name not in ("run", "chemistry", "program", "solids"):
+            raise BatchValidationError(f"Unknown case document: {name}")
+        _merge_mapping(result[name], values)
+    return result
+
+
+def iter_selections(factors):
+    """Yield the Cartesian product of named value sequences, preserving display order."""
+    names = tuple(factors)
+    for values in itertools.product(*(factors[name] for name in names)):
+        yield dict(zip(names, values))
+
+
+def apply_batch_value(documents, value, programs, geometries, solids):
+    """Apply one legacy axis value in its established program/geometry/patch order."""
+    result = deepcopy(documents)
+    if value.program is not None:
+        result["program"] = deepcopy(programs[value.program])
+    if value.geometry is not None:
+        preset = geometries[value.geometry]
+        _merge_mapping(_require_mapping(result["run"].get("model"), "run.model"), preset.model)
+        if value.geometry in solids:
+            result["solids"] = deepcopy(solids[value.geometry])
+    if value.patch is not None:
+        result = apply_case_patch(result, value.patch.model_dump())
+    return result
 
 
 def _safe_slug(value: str, *, max_length: int = 64) -> str:
@@ -323,10 +348,6 @@ def expand_batch_cases(document: BatchDocument) -> tuple[ExpandedBatchCase, ...]
         for name, preset in document.spec.geometries.items()
         if preset.solids_file is not None
     }
-    axis_value_groups = [
-        tuple((axis, axis_value) for axis_value in axis.values)
-        for axis in document.spec.axes
-    ]
     case_root = _contained_path(
         document.output_directory,
         document.output_directory / "cases",
@@ -334,7 +355,8 @@ def expand_batch_cases(document: BatchDocument) -> tuple[ExpandedBatchCase, ...]
     )
     cases: list[ExpandedBatchCase] = []
 
-    for axis_values in itertools.product(*axis_value_groups):
+    for selection in iter_selections({axis.id: axis.values for axis in document.spec.axes}):
+        axis_values = [(axis, selection[axis.id]) for axis in document.spec.axes]
         case_id = "__".join(
             f"{_safe_slug(axis.id)}-{_safe_slug(value.id)}" for axis, value in axis_values
         )
@@ -345,16 +367,8 @@ def expand_batch_cases(document: BatchDocument) -> tuple[ExpandedBatchCase, ...]
         selections = {axis.id: axis_value.id for axis, axis_value in axis_values}
 
         for _axis, axis_value in axis_values:
-            if axis_value.program is not None:
-                documents["program"] = deepcopy(program_presets[axis_value.program])
-            if axis_value.geometry is not None:
-                preset = document.spec.geometries[axis_value.geometry]
-                model = _require_mapping(documents["run"].get("model"), "run.model")
-                _merge_mapping(model, preset.model)
-                if axis_value.geometry in geometry_solids:
-                    documents["solids"] = deepcopy(geometry_solids[axis_value.geometry])
-            if axis_value.patch is not None:
-                _apply_patch(documents, axis_value.patch)
+            documents = apply_batch_value(documents, axis_value, program_presets,
+                                         document.spec.geometries, geometry_solids)
 
         _force_case_run_fields(documents["run"], case_id)
         case_directory = _contained_path(
@@ -850,6 +864,9 @@ __all__ = (
     "BatchValidationError",
     "ExpandedBatchCase",
     "GeometryPreset",
+    "apply_batch_value",
+    "apply_case_patch",
+    "iter_selections",
     "expand_batch_cases",
     "load_batch_spec",
     "run_batch_file",

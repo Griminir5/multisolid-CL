@@ -1,14 +1,15 @@
 """Five-tab case authoring, autosave and engine-backed previews."""
 
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtSvgWidgets import QSvgWidget
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QLabel, QLineEdit,
-    QMessageBox, QSizePolicy, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QAbstractButton, QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QLabel, QLineEdit,
+    QMessageBox, QSizePolicy, QSpinBox, QTabWidget, QTreeWidget, QVBoxLayout, QWidget,
 )
 
 from packed_bed.plotting import PLOT_REGISTRY
@@ -20,19 +21,41 @@ from .chemistry import ChemistryPage
 from .editor_widgets import choices, display, number, select_value
 from .general import GeneralPage
 from .program_editor import ProgramPage
+from .inputs import get_value, input_readiness, resolve_documents, set_value
 
 
-class CaseEditor(QWidget):
+@dataclass
+class InputSession:
+    documents: dict
+    metadata: dict
+    on_change: object = None
+
+    def save(self):
+        if self.on_change:
+            self.on_change(self.documents, self.metadata)
+
+    def resolve(self):
+        return resolve_documents(self.documents)
+
+    def validate_for_run(self):
+        readiness, message = input_readiness(self.documents)
+        if readiness != "Ready":
+            raise ValueError(message)
+
+
+class InputEditor(QWidget):
     changed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.case = None
+        self.read_only = False
         self.dirty = False
         self.loading = False
         self.bindings = []
         self.fields = {}
         self.plot_windows = []
+        self.frozen_controls = []
         self.debounce = QTimer(self)
         self.debounce.setSingleShot(True)
         self.debounce.setInterval(350)
@@ -55,19 +78,8 @@ class CaseEditor(QWidget):
         self.chemistry = ChemistryPage(self)
         self.bed = BedPage(self)
         self.program = ProgramPage(self)
-        self.results = QWidget()
-        results_layout = QVBoxLayout(self.results)
-        results_layout.addStretch()
-        self.results_status = QLabel()
-        self.results_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.results_status.setWordWrap(True)
-        results_layout.addWidget(self.results_status)
-        hint = QLabel("The Results workspace is awaiting its layout.\nRequested plots can be opened from General.")
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        results_layout.addWidget(hint)
-        results_layout.addStretch()
         for title, page in (("General", self.general), ("Chemistry", self.chemistry),
-                            ("Bed", self.bed), ("Program", self.program), ("Results", self.results)):
+                            ("Bed", self.bed), ("Program", self.program)):
             self.tabs.addTab(page, title)
         layout.addWidget(self.tabs, 1)
         self.validation = QLabel()
@@ -80,23 +92,16 @@ class CaseEditor(QWidget):
         self.canvases = [self.program.preview.canvas, self.bed.preview.canvas]
 
     def get(self, path, default=None):
-        value = self.case.documents if self.case is not None else {}
-        for key in path:
-            if not isinstance(value, dict) or key not in value:
-                return default
-            value = value[key]
-        return value
+        return get_value(self.case.documents, path, default) if self.case else default
 
     def put(self, path, value):
-        if self.loading or self.case is None:
+        if self.loading or self.read_only or self.case is None:
             return
-        target = self.case.documents
-        for key in path[:-1]:
-            if key in target and not isinstance(target[key], dict):
-                self.validation.setText(f"Cannot edit {'.'.join(path)}: {key} must be a mapping.")
-                return
-            target = target.setdefault(key, {})
-        target[path[-1]] = value
+        try:
+            set_value(self.case.documents, path, value)
+        except ValueError as exc:
+            self.validation.setText(f"Cannot edit {'.'.join(path)}: {exc}")
+            return
         self.queue_edit()
 
     def field(self, form, path, label, *, kind="text", options=None, default=None, bounds=(0, 1000000), checked_values=None):
@@ -130,26 +135,16 @@ class CaseEditor(QWidget):
             form.addRow(label, widget)
         return widget
 
-    def set_case(self, case):
+    def set_documents(self, documents, metadata=None, on_change=None, *, read_only=False):
+        return self.set_case(InputSession(deepcopy(documents), deepcopy(metadata or {}), on_change), read_only=read_only)
+
+    def set_case(self, case, *, read_only=False):
         if not self.save():
             return False
+        self.restore_controls()
         self.case = case
+        self.read_only = read_only
         self.dirty = False
-        # A new empty draft starts with numerical defaults, leaving physical inputs blank.
-        if not case.documents["chemistry"] and not case.documents["solids"] and not case.documents["program"]:
-            case.documents["run"]["simulation"].update({
-                "system_name": "Case_" + case.id, "time_horizon_s": 0.0, "reporting_interval_s": 1.0,
-                "mass_scheme": "weno3", "heat_scheme": "weno3", "report_time_derivatives": False,
-                "repeat_program": False,
-            })
-            case.documents["run"]["model"].setdefault("axial_cells", 20)
-            case.documents["run"]["solver"].update({"backend": "daetools", "name": "superlu", "relative_tolerance": 1e-3})
-            case.documents["run"]["outputs"].update({"requested_reports": [], "requested_plots": []})
-            case.documents["chemistry"].update({"gas_species": [], "reaction_families": [], "reaction_ids": []})
-            case.documents["solids"].update({"solid_species": [], "initial_profile": {"basis": "bed", "zones": []}})
-            case.documents["program"].update({key: {"initial": {} if key == "inlet_composition" else "", "steps": []}
-                                             for key in ("inlet_flow", "inlet_temperature", "inlet_composition", "outlet_pressure")})
-            self.dirty = True
         self.loading = True
         for widget, path, default, checked_values in self.bindings:
             value = self.get(path, default)
@@ -168,21 +163,49 @@ class CaseEditor(QWidget):
         self.general.load()
         self.chemistry.load()
         self.bed.load()
-        self.loading = False
         self.program.load()
-        old_zones = deepcopy(self.get(("solids", "initial_profile", "zones"), []))
-        self.bed.anchor_zones()
-        if old_zones != self.get(("solids", "initial_profile", "zones"), []):
-            self.queue_edit()
-            self.bed.load_zones()
+        self.loading = False
+        if self.read_only:
+            self.freeze_controls()
         self.tabs.setCurrentIndex(0)
         self.refresh()
         if self.dirty:
             self.debounce.start()
         return True
 
+    def restore_controls(self):
+        for restore, value in reversed(self.frozen_controls):
+            try:
+                restore(value)
+            except RuntimeError:
+                pass  # A page rebuild already discarded this control.
+        self.frozen_controls.clear()
+
+    def freeze_controls(self):
+        def freeze(setter, original, value):
+            self.frozen_controls.append((setter, original))
+            setter(value)
+
+        def freeze_item(item):
+            freeze(item.setFlags, item.flags(), item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable & ~Qt.ItemFlag.ItemIsEditable)
+            for i in range(item.childCount()):
+                freeze_item(item.child(i))
+        for page in (self.general, self.chemistry, self.bed, self.program):
+            for widget in page.findChildren(QWidget):
+                if any(preview.isAncestorOf(widget) for preview in (self.bed.preview, self.program.preview)):
+                    continue  # Plot navigation remains interactive during inspection.
+                if isinstance(widget, (QLineEdit, QSpinBox)):
+                    freeze(widget.setReadOnly, widget.isReadOnly(), True)
+                elif isinstance(widget, (QComboBox, QAbstractButton)):
+                    freeze(widget.setEnabled, widget.isEnabled(), False)
+                if isinstance(widget, QAbstractItemView):
+                    freeze(widget.setEditTriggers, widget.editTriggers(), QAbstractItemView.EditTrigger.NoEditTriggers)
+                if isinstance(widget, QTreeWidget):
+                    for i in range(widget.topLevelItemCount()):
+                        freeze_item(widget.topLevelItem(i))
+
     def queue_edit(self):
-        if self.loading or self.case is None:
+        if self.loading or self.read_only or self.case is None:
             return
         self.dirty = True
         self.debounce.start()
@@ -194,13 +217,13 @@ class CaseEditor(QWidget):
 
     def save(self):
         self.debounce.stop()
-        if self.case is None or not self.dirty:
+        if self.read_only or self.case is None or not self.dirty:
             return True
         # The reactor endpoints remain tied to its geometry, even during invalid edits.
         self.bed.anchor_zones()
         try:
             self.case.save()
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             self.validation.setText(f"Draft could not be saved: {exc}")
             return False
         self.dirty = False
@@ -209,6 +232,8 @@ class CaseEditor(QWidget):
         return True
 
     def set_species(self, phase, values):
+        if self.read_only:
+            return
         path = ("chemistry", "gas_species") if phase == "gas" else ("solids", "solid_species")
         previous = self.get(path, [])
         removed, added = set(previous) - set(values), set(values) - set(previous)
@@ -258,9 +283,71 @@ class CaseEditor(QWidget):
                 for preview in (self.program.preview, self.bed.preview):
                     preview.clear("Preview unavailable while inputs are incomplete or invalid. See the validation message below.")
         else:
-            self.validation.setText("Inputs ready · changes save automatically")
+            self.validation.setText("Inputs ready · read-only" if self.read_only else "Inputs ready · changes save automatically")
             self.validation.setToolTip("Structural checks passed. Previews use the engine's smoothing, feed mixing and cycle carry-over.")
         self.update_results()
+
+    def update_results(self):
+        self.general.plots.set_results_available(False)
+
+    def show_plot(self, plot_id):
+        pass
+
+    def _draw_preview(self, case, preview):
+        axes = self.figures[0].subplots(4, 1, sharex=True)
+        for axis, values, label in zip(axes, (
+            preview.flow_mol_s, preview.temperature_k, preview.pressure_pa,
+        ), ("Inlet flow\n(mol/s)", "Temperature\n(K)", "Outlet pressure\n(Pa)")):
+            axis.plot(preview.time_s, values, color="#317c89")
+            axis.set_ylabel(label, fontsize=9)
+        axes[3].plot(preview.time_s, preview.mole_fractions, label=case.chemistry.gas_species)
+        axes[3].legend(loc="upper right", fontsize=8, ncols=3)
+        axes[3].set(ylabel="Mole fraction", xlabel="Time (s)", ylim=(-0.02, 1.02))
+        for axis in axes:
+            axis.grid(alpha=0.2)
+            axis.tick_params(labelsize=8)
+        axes = self.figures[1].subplots(1, 3)
+        for name, values in zip(case.solids.solid_species, preview.solid_concentrations_mol_m3_bed):
+            axes[0].stairs(values, preview.face_positions_m, label=name)
+        axes[0].set(ylabel="Concentration (mol/m³ bed)", title="Solid concentrations")
+        if case.solids.solid_species:
+            axes[0].legend(fontsize=8)
+        axes[1].stairs(preview.interparticle_voidage, preview.face_positions_m, label="Interparticle")
+        axes[1].stairs(preview.particle_voidage, preview.face_positions_m, label="Particle")
+        axes[1].set(ylabel="Voidage (fraction)", ylim=(0, 1), title="Voidages")
+        axes[1].legend(fontsize=8)
+        axes[2].plot(preview.face_positions_m, preview.particle_diameter_m, marker=".")
+        axes[2].set(ylabel="Particle diameter (m)", title="Particle size")
+        for axis in axes:
+            axis.set_xlabel("Axial position (m)")
+            for boundary in preview.zone_edges_m:
+                axis.axvline(boundary, color="grey", linestyle="--", alpha=0.4)
+            axis.grid(alpha=0.2)
+            axis.tick_params(labelsize=8)
+        for widget in (self.program.preview, self.bed.preview):
+            widget.draw()
+
+
+class CaseEditor(InputEditor):
+    """Project persistence and retained results around the shared input controls."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.results = QWidget()
+        results_layout = QVBoxLayout(self.results)
+        results_layout.addStretch()
+        self.results_status = QLabel()
+        self.results_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.results_status.setWordWrap(True)
+        results_layout.addWidget(self.results_status)
+        hint = QLabel("The Results workspace is awaiting its layout.\nRequested plots can be opened from General.")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        results_layout.addWidget(hint)
+        results_layout.addStretch()
+        self.tabs.addTab(self.results, "Results")
+
+    def set_case(self, case):
+        return super().set_case(case, read_only=bool(case.metadata.get("study_id")))
 
     def update_results(self):
         if self.case is None:
@@ -305,37 +392,3 @@ class CaseEditor(QWidget):
         self.plot_windows.append(dialog)
         dialog.destroyed.connect(lambda: self.plot_windows.remove(dialog))
         dialog.show()
-
-    def _draw_preview(self, case, preview):
-        axes = self.figures[0].subplots(4, 1, sharex=True)
-        for axis, values, label in zip(axes, (
-            preview.flow_mol_s, preview.temperature_k, preview.pressure_pa,
-        ), ("Inlet flow\n(mol/s)", "Temperature\n(K)", "Outlet pressure\n(Pa)")):
-            axis.plot(preview.time_s, values, color="#317c89")
-            axis.set_ylabel(label, fontsize=9)
-        axes[3].plot(preview.time_s, preview.mole_fractions, label=case.chemistry.gas_species)
-        axes[3].legend(loc="upper right", fontsize=8, ncols=3)
-        axes[3].set(ylabel="Mole fraction", xlabel="Time (s)", ylim=(-0.02, 1.02))
-        for axis in axes:
-            axis.grid(alpha=0.2)
-            axis.tick_params(labelsize=8)
-        axes = self.figures[1].subplots(1, 3)
-        for name, values in zip(case.solids.solid_species, preview.solid_concentrations_mol_m3_bed):
-            axes[0].stairs(values, preview.face_positions_m, label=name)
-        axes[0].set(ylabel="Concentration (mol/m³ bed)", title="Solid concentrations")
-        if case.solids.solid_species:
-            axes[0].legend(fontsize=8)
-        axes[1].stairs(preview.interparticle_voidage, preview.face_positions_m, label="Interparticle")
-        axes[1].stairs(preview.particle_voidage, preview.face_positions_m, label="Particle")
-        axes[1].set(ylabel="Voidage (fraction)", ylim=(0, 1), title="Voidages")
-        axes[1].legend(fontsize=8)
-        axes[2].plot(preview.face_positions_m, preview.particle_diameter_m, marker=".")
-        axes[2].set(ylabel="Particle diameter (m)", title="Particle size")
-        for axis in axes:
-            axis.set_xlabel("Axial position (m)")
-            for boundary in preview.zone_edges_m:
-                axis.axvline(boundary, color="grey", linestyle="--", alpha=0.4)
-            axis.grid(alpha=0.2)
-            axis.tick_params(labelsize=8)
-        for widget in (self.program.preview, self.bed.preview):
-            widget.draw()

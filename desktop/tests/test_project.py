@@ -140,7 +140,7 @@ def test_legacy_project_migration_keeps_only_latest_run_in_new_case_and_backs_up
     assert input_hashes(root / "inputs") == hashes
     assert (root / "runs/zzz-first/result.txt").read_text() == "1"
     assert read_json(root / "project-v1.json")["format_version"] == 1
-    assert read_json(root / "project.json")["format_version"] == 2
+    assert read_json(root / "project.json")["format_version"] == 3
     assert len(Project.open(root).cases) == 1
 
 
@@ -181,7 +181,15 @@ def test_mixed_project_has_two_independent_plus_nine_generated_cases(tmp_path, s
              ]}
     path = source / "study.yaml"
     path.write_text(yaml.safe_dump(batch))
-    added = project.add_cases_from_batch(path)
+    study = project.import_study(path)
+    assert len(project.cases) == 2
+    with pytest.raises(ValueError, match="successful, unchanged"):
+        project.study_store.apply_preview(project.study_store.preview(study))
+    job = read_json(project.prepare_execution([base]))
+    folder = activate_snapshot(base.root / f".pending-{job['attempt_id']}")
+    write_json(folder / "status.json", {"state": "completed"})
+    study = project.study_store.replace_baseline(study, base)
+    added = project.study_store.apply_preview(project.study_store.preview(study))
     assert len(added) == 9
     assert len(project.cases) == 11
     assert len({tuple(c.metadata["selections"].values()) for c in added}) == 9

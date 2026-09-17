@@ -1,6 +1,7 @@
 """Hold/ramp program tables with initial states and structured feed targets."""
 
 from copy import deepcopy
+from uuid import uuid4
 import math
 
 from PyQt6.QtWidgets import (
@@ -16,16 +17,7 @@ from .editor_widgets import Preview, action_button, cell, choices, display, numb
 CHANNELS = ("inlet_flow", "inlet_temperature", "inlet_composition", "outlet_pressure")
 
 
-def program_duration(program):
-    """The longest authored channel defines the non-cyclic horizon; errors stay visible."""
-    try:
-        durations = [math.fsum(float(step["duration_s"]) for step in channel.get("steps", []))
-                     for channel in program.values() if isinstance(channel, dict)]
-        if any(not math.isfinite(duration) or duration < 0 for duration in durations):
-            return None
-        return max(durations, default=0.0)
-    except (KeyError, TypeError, ValueError, OverflowError):
-        return None
+from .inputs import program_duration, ensure_step_ids
 
 
 class ChannelTable(QGroupBox):
@@ -124,6 +116,10 @@ class ChannelTable(QGroupBox):
         self.write(channel, rebuild=False)
 
     def add_step(self):
+        if self.page.editor.read_only:
+            return
+        ids = ensure_step_ids(self.page.editor.case.documents["program"], self.page.editor.case.metadata)
+        ids.setdefault(self.key, []).append(uuid4().hex)
         channel = deepcopy(self.channel())
         channel.setdefault("steps", []).append({"kind": "hold", "duration_s": ""})
         self.write(channel)
@@ -131,6 +127,10 @@ class ChannelTable(QGroupBox):
         self.table.editItem(self.table.item(len(channel["steps"]), 1))
 
     def remove_step(self, index):
+        if self.page.editor.read_only:
+            return
+        ids = ensure_step_ids(self.page.editor.case.documents["program"], self.page.editor.case.metadata)
+        ids[self.key].pop(index)
         channel = deepcopy(self.channel())
         channel["steps"].pop(index)
         self.write(channel)
@@ -294,15 +294,15 @@ class ProgramPage(QWidget):
         for channel in self.channels.values():
             channel.load()
         self.loading = False
-        self.update_horizon()
+        self.update_horizon(update_documents=False)
 
     def change_repeat(self, checked):
-        if self.loading:
+        if self.loading or self.editor.read_only:
             return
         self.editor.put(("run", "simulation", "repeat_program"), checked)
         self.update_horizon()
 
-    def update_horizon(self):
+    def update_horizon(self, *, update_documents=True):
         if self.editor.case is None:
             return
         repeat = self.editor.get(("run", "simulation", "repeat_program"), False)
@@ -313,8 +313,10 @@ class ProgramPage(QWidget):
         duration = program_duration(self.editor.get(("program",), {}))
         if not repeat:
             value = duration if duration is not None else ""
-            if value != self.editor.get(("run", "simulation", "time_horizon_s")):
+            if update_documents and not self.editor.loading and value != self.editor.get(("run", "simulation", "time_horizon_s")):
                 self.editor.put(("run", "simulation", "time_horizon_s"), value)
+            if not update_documents or self.editor.read_only:
+                value = self.editor.get(("run", "simulation", "time_horizon_s"), "")
             field.blockSignals(True)
             field.setText(display(value))
             field.blockSignals(False)
@@ -329,7 +331,7 @@ class ProgramPage(QWidget):
         self.timing.setVisible(bool(self.timing.text()))
 
     def change_mode(self):
-        if self.loading or self.editor.case is None:
+        if self.loading or self.editor.read_only or self.editor.case is None:
             return
         mode = self.mode.currentData()
         previous = self.editor.get(("run", "simulation", "program_mode"), "separate_channels")
@@ -337,6 +339,8 @@ class ProgramPage(QWidget):
             return
         program = deepcopy(self.editor.get(("program",), {}))
         saved = self.editor.case.metadata.setdefault("program_modes", {})
+        mode_ids = self.editor.case.metadata.setdefault("program_step_ids", {})
+        mode_ids[previous] = deepcopy(ensure_step_ids(program, self.editor.case.metadata))
         saved[previous] = {key: value for key, value in program.items() if key != "outlet_pressure"}
         if mode in saved:
             replacement = deepcopy(saved[mode])
@@ -354,11 +358,15 @@ class ProgramPage(QWidget):
             replacement["inlet_flow"]["basis"] = feed.get("basis", "mol_per_s")
         replacement["outlet_pressure"] = program.get("outlet_pressure", {"initial": "", "steps": []})
         self.editor.put(("program",), replacement)
+        pressure_ids = self.editor.case.metadata.get("step_ids", {}).get("outlet_pressure", [])
+        self.editor.case.metadata["step_ids"] = deepcopy(mode_ids.get(mode, {}))
+        self.editor.case.metadata["step_ids"]["outlet_pressure"] = pressure_ids
+        ensure_step_ids(replacement, self.editor.case.metadata)
         self.editor.put(("run", "simulation", "program_mode"), mode)
         self.load()
 
     def change_basis(self):
-        if self.loading or self.editor.case is None:
+        if self.loading or self.editor.read_only or self.editor.case is None:
             return
         key = "feed_stream" if self.mode.currentData() == "feed_stream" else "inlet_flow"
         channel = deepcopy(self.editor.get(("program", key), {}))

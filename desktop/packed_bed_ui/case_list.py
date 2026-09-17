@@ -67,25 +67,40 @@ class CaseList(QTreeWidget):
         self.setColumnWidth(3, 260)
         self.header().setStretchLastSection(False)
         self.items, self.groups, self.buttons = {}, {}, {}
+        self.group_buttons = {}
         self.itemChanged.connect(self._item_changed)
         self.itemDoubleClicked.connect(self._double_clicked)
 
     def set_project(self, project):
+        expansion = {key: group.isExpanded() for key, group in self.groups.items()}
         self.blockSignals(True)
         self.clear()
         self.items, self.groups, self.buttons = {}, {}, {}
+        self.group_buttons = {}
         studies = {study["id"]: study for study in project.metadata.get("studies", [])}
+        for study_id, study in studies.items():
+            group = QTreeWidgetItem(self)
+            group.setData(0, Qt.ItemDataRole.UserRole, ("study", study_id))
+            group.setText(1, study["name"])
+            group.setExpanded(expansion.get(study_id, True))
+            self.groups[study_id] = group
+            button = QToolButton()
+            button.setText("Edit study")
+            button.setToolTip("Inspect variations or rebuild generated cases")
+            button.setAccessibleName(f"Edit study {study['name']}")
+            button.clicked.connect(lambda _, key=study_id: self.action.emit("Study", key))
+            self.setItemWidget(group, 4, button)
+            self.group_buttons[study_id] = button
+        independent_index = 0
         for case in project.cases:
             study_id = case.metadata.get("study_id")
-            if study_id and study_id not in self.groups:
-                group = QTreeWidgetItem(self)
-                group.setData(0, Qt.ItemDataRole.UserRole, ("study", study_id))
-                group.setText(1, studies.get(study_id, {}).get("name", "Parameter study"))
-                group.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable)
-                group.setExpanded(True)
-                self.groups[study_id] = group
             parent = self.groups.get(study_id, self)
-            item = QTreeWidgetItem(parent)
+            if parent is self:
+                item = QTreeWidgetItem()
+                self.insertTopLevelItem(independent_index, item)
+                independent_index += 1
+            else:
+                item = QTreeWidgetItem(parent)
             item.setData(0, Qt.ItemDataRole.UserRole, ("case", case.id))
             item.setText(1, case.name)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEditable)
@@ -139,17 +154,28 @@ class CaseList(QTreeWidget):
             for label, button in self.buttons[case.id].items():
                 button.setAccessibleName(f"{label} {case.name}")
                 button.setEnabled(not active and (label != "Run" or state["inputs"] == "Ready"))
-        for group in self.groups.values():
+        for study_id, group in self.groups.items():
+            entry = next((entry for entry in project.metadata.get("studies", []) if entry["id"] == study_id), {})
+            group.setText(1, f"{entry.get('name', 'Study')} ({group.childCount()} cases)")
+            self.group_buttons[study_id].setEnabled(not active)
             children = [group.child(i) for i in range(group.childCount())]
             checks = {child.checkState(0) for child in children}
-            group.setCheckState(0, next(iter(checks)) if len(checks) == 1 else Qt.CheckState.PartiallyChecked)
+            group.setCheckState(0, next(iter(checks)) if len(checks) == 1 else Qt.CheckState.PartiallyChecked if checks else Qt.CheckState.Unchecked)
             flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-            group.setFlags(flags if active else flags | Qt.ItemFlag.ItemIsUserCheckable)
+            group.setFlags(flags if active or not children else flags | Qt.ItemFlag.ItemIsUserCheckable)
             values = [states[child.data(0, Qt.ItemDataRole.UserRole)[1]] for child in children]
             group.setText(2, ", ".join(f"{count} {label.lower()}" for label, count in Counter(value["inputs"] for value in values).items()))
             group.setText(3, ", ".join(f"{count} {label.lower()}" for label, count in Counter(
                 STATE_LABELS.get(value["state"], value["state"]) + (" — stale" if value.get("stale") else "")
                 for value in values).items()))
+            study = project.study_store.studies.get(study_id)
+            if study:
+                if project.study_store.needs_update(study_id):
+                    group.setText(2, "Needs rebuild")
+                elif not study.provenance:
+                    group.setText(2, "Baseline needs a successful run")
+                elif not children:
+                    group.setText(2, "Draft · no generated cases")
             group.setToolTip(3, group.text(3))
         self.blockSignals(False)
 
@@ -163,5 +189,4 @@ class CaseList(QTreeWidget):
 
     def _double_clicked(self, item, column):
         kind, key = item.data(0, Qt.ItemDataRole.UserRole)
-        if kind == "case":
-            self.action.emit("Edit", key)
+        self.action.emit("Edit" if kind == "case" else "Study", key)

@@ -80,27 +80,79 @@ A new zone splits the final zone's extent and starts with blank material values.
 The first zone starts at zero and the final zone ends at the bed length. Changing
 a multi-zone bed's length offers fixed or proportionally scaled internal boundaries.
 
-## Cases from a batch
+## Parameter studies
 
-**Import Parameter Study** expands an existing engine `batch.yaml` into this
-project's case list. It copies the base inputs, referenced programs and solid
-configurations, and the batch rule into `studies/`, keeping references portable.
-No simulations run during import, and the source files remain untouched. Study
-cases appear under a collapsible group with a summary of their status. The group
-checkbox includes or excludes all its cases. Collapsing it preserves selection.
+Run the intended baseline case successfully first. **New Parameter Study** accepts
+only a case whose latest run succeeded, whose current inputs are ready, and whose
+successful snapshot still matches those inputs. The study copies those inputs as
+a fixed baseline, records the successful attempt, and does not copy results.
+**Inspect baseline** is read-only; **Replace baseline** selects another successful
+case. Subsequent changes to the source case do not change the saved baseline.
 
-A batch specifying three programs and three solid configurations produces nine
-cases. Alongside independently authored Benchmark and Exploratory cases, the
-project has 11 cases that can be run together. The saved rule and reusable input
-files do not add extra simulations.
+The study workspace contains variations beside a live case preview:
 
-The creation/import buttons sit below the case list. **New Parameter Study** is
-disabled: its builder is deferred for separate design. Reusable input editors and
-regeneration are also pending. Imported generated cases are
-editable materialized copies with origin metadata; changes to those copies do
-not change the retained batch rule. Importing another batch adds new cases.
-Batch worker/time-limit settings are retained in the copied rule; the starter's
-Run all uses the project’s Maximum workers setting and has no timeout control.
+- **Add variation** selects a named parameter with units, or a reusable program or
+  bed configuration. Numerical variations accept value lists or linearly spaced
+  ranges. Program fields include initial values, selected step durations, and ramp
+  targets. Step references survive earlier-step deletion and never move silently
+  to another step.
+- **All combinations** produces the Cartesian product. **Explicit case rows**
+  specifies individual pairings, with definition dropdowns and numeric cells.
+  The row table supports spreadsheet copy/paste, duplicate, move, remove, and
+  undo/redo. Blank cells remain unfinished.
+- Length sweeps scale all solid-zone boundaries proportionally. Program and bed
+  replacements cannot overlap numerical variations inside the replaced inputs.
+  Timing, species, compositions, geometry, and solver choices use engine validation.
+- Inspect a preview row for the same program and bed plots available in the case
+  editor. Invalid scientific inputs can become draft cases; ambiguous or unfinished
+  variation rules must be repaired before generation. Previews are cancellable.
+- **Create N cases** writes cases without running them. Generated inputs are
+  read-only; use **Edit study** or **Duplicate as independent case**.
+
+For example, three programs × three bed configurations produce nine cases. With
+independent Benchmark and Exploratory cases, the project has 11 cases. Benchmark
+must have succeeded before it is selected as the study baseline. Definitions and
+the copied baseline do not add simulations to the count.
+
+### Rebuilding a study
+
+Autosave stores the study rule without changing its generated cases. Changing the
+baseline, variations, or a referenced definition marks the study **Needs rebuild**
+and all its generated cases **Needs update**. Those cases cannot run until rebuilt;
+existing results remain inspectable. Reverting the changes clears this requirement.
+Renaming a study or definition does not require a rebuild.
+
+**Replace X cases with Y** deletes **every** previous generated case in that study,
+including its inputs, snapshots, logs, and results, then creates fresh cases with
+new identities, generated names, and default inclusion. Even unchanged combinations
+are replaced. The preview states the case and result counts before this action.
+There are no archived cases or restoration. Rebuilds preserve independent cases,
+other studies, the fixed baseline, and the reusable-definition library.
+
+### Reusable definitions and imports
+
+Use **Project → Reusable definitions…**, or create/edit definitions while choosing
+a study variation. Programs contain the operating program, its mode and repetition
+setting. Bed configurations contain length, radius, ambient temperature, heat-transfer
+coefficient (U), gas voidage mode, flow reversibility, and solids. The existing input
+controls edit these definitions with explicit **Save / Cancel**. Inherited inputs
+provide preview context. Unused definitions remain in the library; deleting a
+referenced definition is blocked until its study references are removed.
+
+Older bed definitions continue inheriting any settings they do not yet contain.
+Editing and saving them captures these settings from the displayed inputs. A bed
+variation cannot be combined with a numerical sweep of a setting that bed owns.
+
+**Import Parameter Study** copies an engine `batch.yaml` and its referenced inputs
+into a pending study. Use **Add baseline as independent case**, run that case
+successfully, then select it with **Replace baseline** before generating cases.
+The original source files are preserved. Exactly representable rules become native
+editable studies; other rules remain advanced imported studies with their original
+axis order and patch behavior, available for inspection and generation. Advanced
+rules retain the original preset ownership of companion settings.
+
+Batch worker/time-limit settings remain in the portable original rule. Desktop
+execution uses the project's Maximum workers setting and each case's thread count.
 
 ## Storage and code
 
@@ -115,7 +167,11 @@ project/
       status.json
       worker.log
       output/                    # NetCDF, engine manifest, and plots
-  studies/<study-id>/             # imported batch rule and referenced inputs
+  studies/<study-id>/
+    study.json                   # rule, fixed-baseline provenance, stable step targets
+    baseline/                    # four copied scientific documents
+    batch.yaml                   # portable original rule, for imported studies
+  definitions/<definition-id>/   # metadata plus program.yaml or solids.yaml
   execution.json                 # latest Run case / Run all queue status
   execution.log                  # worker startup diagnostics
 ```
@@ -124,8 +180,16 @@ Prepared snapshots briefly live in `.pending-<attempt>` beside a case's `run/`.
 Once validated, a snapshot replaces that case's run folder; `.previous-run` is a
 short-lived backup during the directory swap. Recovery completes an interrupted
 swap. Attempt identities distinguish worker events; they are not run history.
-Input/metadata files use atomic replacement. Full multi-file draft recovery and
-project archives remain pending.
+Input/metadata files use atomic replacement. Study and definition writes use a staged directory transaction. Rebuilding commits
+project metadata only after staging the complete replacement case set. Before that
+commit, recovery restores old cases; after it, recovery deletes temporary backups.
+Recovery runs before loading case inputs. General case-draft recovery and project
+archives remain pending.
+
+The project format is 3; the run-snapshot format remains 1. Format-2 projects retain
+all existing cases/results and gain study metadata, with a `project-v2.json` backup.
+Legacy studies require successful-baseline verification before their next generation.
+Their materialized cases remain usable until a study edit requires rebuilding.
 
 Original format-1 starter projects migrate on opening: their inputs become one
 independent case, and their latest run is copied into its run slot. The original
@@ -138,7 +202,13 @@ after an interrupted session marks unfinished retained runs as Interrupted.
 | --- | --- |
 | `packed_bed_ui/window.py` | Welcome screen, project case list, navigation, and actions |
 | `packed_bed_ui/case_list.py` | Collapsible study groups, case status, inclusion, and icon actions |
-| `packed_bed_ui/editor.py` | Five-tab editor, autosave, numerical previews, and retained plot windows |
+| `packed_bed_ui/editor.py` | Shared input controls, read-only inspection, case autosave, and retained plots |
+| `packed_bed_ui/studies.py` | Parameter catalogue, pure expansion, validation, and generation signatures |
+| `packed_bed_ui/study_store.py` | Baseline eligibility, persistence/imports, and transactional complete rebuilds |
+| `packed_bed_ui/study_editor.py` | Study workspace, variation dialogs, and cancellable previews |
+| `packed_bed_ui/study_tables.py` | Preview and explicit-row models, spreadsheet paste, and definition dropdowns |
+| `packed_bed_ui/definition_editor.py` | Reusable-definition library and shared inspection dialogs |
+| `packed_bed_ui/inputs.py` | Explicit draft initialization, input validation, timing, and zone scaling |
 | `packed_bed_ui/general.py` | Numerical/solver settings and report/plot selections |
 | `packed_bed_ui/chemistry.py` | Species lists, reaction families, and a native Qt network graph |
 | `packed_bed_ui/bed.py` | Geometry, material zones, and reactor boundary rules |
@@ -149,6 +219,11 @@ after an interrupted session marks unfinished retained runs as Interrupted.
 | `packed_bed_ui/worker.py` | Verify/activate snapshots, collect logs, publish status, call the shared engine loop |
 | `../packed_bed/batch.py` | Shared case scheduling, concurrency, thread limits, and worker cleanup |
 | `../packed_bed/preview.py` | Scientific preview arrays without Qt or plotting imports |
+
+Study selectors and the project library share `DefinitionList` and its editing actions.
+Both the workspace and storage use `preview_study()`; its lazy mode lets Qt consume
+one captured preview incrementally. Shared document access, scientific fingerprint
+inputs, timing, and scaling live in `inputs.py`.
 
 `ProjectCase.resolve()` uses the engine's `resolve_case()`. Workers load the
 snapshots and call `run_case()` with its optional status callback. The UI and
@@ -168,6 +243,7 @@ python -m pip wheel --no-deps --no-build-isolation ./desktop
 ```
 
 Tests cover multi-case projects, the mixed 11-case example, portable imports,
-invalid drafts, staleness, replacement, migration, interrupted execution,
+invalid drafts, successful-baseline eligibility, complete study rebuilds, reusable
+definitions, spreadsheet editing, staleness, transaction recovery, migration, interrupted execution,
 project locking, and real DAETools runs compared with direct engine results.
 Qt checks run offscreen; real solver checks skip when DAETools is absent.

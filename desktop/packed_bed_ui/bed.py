@@ -84,6 +84,8 @@ class BedPage(QWidget):
         self.loading = False
 
     def anchor_zones(self):
+        if self.editor.read_only:
+            return
         zones = self.editor.get(("solids", "initial_profile", "zones"), [])
         if zones:
             zones[0]["x_start_m"] = 0.0
@@ -133,7 +135,7 @@ class BedPage(QWidget):
         self.load_zones()
 
     def resize_zones(self):
-        if self.editor.loading:
+        if self.editor.loading or self.editor.read_only:
             return
         length = self.editor.get(("run", "model", "bed_length_m"))
         previous = self.previous_length

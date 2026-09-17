@@ -18,12 +18,18 @@ import yaml
 from packed_bed.config import Case, load_case, resolve_case
 from packed_bed.config.load import read_yaml_mapping
 
+from .inputs import scientific_documents
+
 
 DOCUMENTS = ("run", "chemistry", "program", "solids")
 REFERENCES = {f"{name}_file": f"{name}.yaml" for name in DOCUMENTS[1:]}
-PROJECT_VERSION = 2
+PROJECT_VERSION = 3
 SNAPSHOT_VERSION = 1
 TERMINAL_STATES = {"completed", "failed", "cancelled", "interrupted"}
+
+
+class NeedsStudyUpdate(ValueError):
+    pass
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -70,13 +76,7 @@ def portable_documents(documents: dict[str, dict]) -> dict[str, dict]:
 
 def scientific_fingerprint(documents: dict[str, dict], extensions: list) -> str:
     """Ignore file destinations, YAML formatting, and project display names."""
-    values = deepcopy(documents)
-    values["run"].pop("references", None)
-    outputs = values["run"].get("outputs", {})
-    if isinstance(outputs, dict):
-        outputs.pop("directory", None)
-        outputs.pop("artifacts_directory", None)
-    payload = yaml.safe_dump({"inputs": values, "extensions": extensions}, sort_keys=True)
+    payload = yaml.safe_dump({"inputs": scientific_documents(documents), "extensions": extensions}, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
@@ -116,6 +116,9 @@ class ProjectCase:
         )
 
     def validate_for_run(self) -> Case:
+        study_id = self.metadata.get("study_id")
+        if study_id and self.project.study_store.needs_update(study_id):
+            raise NeedsStudyUpdate("This study changed. Open Edit study and rebuild its generated cases before running.")
         case = self.resolve()
         if self.project.metadata.get("extensions"):
             raise ValueError("This project requires extensions. Extension loading is not available in the starter yet.")
@@ -124,7 +127,11 @@ class ProjectCase:
 
     def save(self) -> None:
         """Save incomplete drafts without altering this case's latest results."""
-        write_documents(self.root / "inputs", self.documents)
+        if self.metadata.get("study_id"):
+            if self.documents != read_documents(self.root / "inputs"):
+                raise ValueError("Generated inputs are read-only. Edit the study or duplicate this case.")
+        else:
+            write_documents(self.root / "inputs", self.documents)
         self.project.save()
 
     def fingerprint(self) -> str:
@@ -138,7 +145,7 @@ class ProjectCase:
             message = str(exc)
             errors = exc.__cause__.errors() if isinstance(exc.__cause__, ValidationError) else []
             missing = any(error["type"] == "missing" or error.get("input") in (None, "") for error in errors)
-            readiness = "Underdefined" if missing else "Invalid"
+            readiness = "Needs update" if isinstance(exc, NeedsStudyUpdate) else "Underdefined" if missing else "Invalid"
         result = {"state": "not_run", "elapsed_s": 0.0}
         stale = False
         if self.run_folder.exists():
@@ -182,12 +189,19 @@ class Project:
     metadata: dict
     cases: list[ProjectCase] = field(default_factory=list)
 
+    @property
+    def study_store(self):
+        from .study_store import StudyStore
+        if not hasattr(self, "_study_store"):
+            self._study_store = StudyStore(self)
+        return self._study_store
+
     @classmethod
     def create(cls, destination: str | Path, name: str | None = None) -> Project:
         root = Path(destination).resolve()
         root.mkdir(parents=True, exist_ok=False)
         project = cls(root, {"format_version": PROJECT_VERSION, "name": name or root.name,
-                             "cases": [], "extensions": [], "studies": [], "max_workers": 1})
+                             "cases": [], "extensions": [], "studies": [], "definitions": [], "max_workers": 1})
         try:
             project.save()
         except Exception:
@@ -200,10 +214,13 @@ class Project:
         root = Path(path).resolve()
         if root.is_file():
             root = root.parent
+        from .study_store import recover_study_transaction
+        recover_study_transaction(root)
         metadata = read_json(root / "project.json")
+        old_version = metadata.get("format_version")
         if metadata.get("format_version") == 1:
             return cls._migrate(root, metadata)
-        if metadata.get("format_version") != PROJECT_VERSION:
+        if metadata.get("format_version") not in (2, PROJECT_VERSION):
             raise ValueError("Unsupported project format. Open it with a compatible application version.")
         if not isinstance(metadata.get("cases"), list) or not isinstance(metadata.get("extensions", []), list):
             raise ValueError("Project cases and extensions must be lists.")
@@ -219,6 +236,11 @@ class Project:
             if not folder.resolve().is_relative_to(root):
                 raise ValueError("Case folders must stay inside the project.")
             project.cases.append(ProjectCase(project, entry, read_documents(folder / "inputs")))
+        if old_version == 2:
+            backup = root / "project-v2.json"
+            if not backup.exists():
+                write_json(backup, metadata)
+            project.study_store.migrate_v2()
         return project
 
     @classmethod
@@ -256,14 +278,16 @@ class Project:
 
     def save(self) -> None:
         write_json(self.root / "project.json", self.metadata)
+        if hasattr(self, "_study_store"):
+            self._study_store.invalidate()
 
     def add_case(self, name: str, documents: dict[str, dict] | None = None, *, origin="Independent") -> ProjectCase:
         if not name.strip():
             raise ValueError("Enter a case name.")
         entry = {"id": uuid4().hex, "name": name.strip(), "included": True, "origin": origin}
         if documents is None:
-            documents = {name: {} for name in DOCUMENTS}
-            documents["run"] = {"simulation": {}, "model": {}, "solver": {"threads": 1}}
+            from .inputs import empty_documents
+            documents = empty_documents(entry["id"])
         case = ProjectCase(self, entry, portable_documents(documents))
         write_documents(case.root / "inputs", case.documents)
         self.metadata["cases"].append(entry)
@@ -285,60 +309,9 @@ class Project:
     def duplicate_case(self, case: ProjectCase, name: str) -> ProjectCase:
         return self.add_case(name, case.documents)
 
-    def add_cases_from_batch(self, batch_path: str | Path, *, name: str | None = None) -> list[ProjectCase]:
-        """Import expanded cases and retain a portable copy of their generation rule."""
-        from packed_bed.batch import expand_batch_cases, load_batch_spec
-        from packed_bed.config.load import resolve_path
-
-        document = load_batch_spec(batch_path)
-        study_id = uuid4().hex
-        folder = self.root / "studies" / study_id
-        folder.mkdir(parents=True)
-        entries = []
-        study = {"id": study_id, "name": name or Path(batch_path).stem}
-        try:
-            spec = document.spec.model_dump(mode="json")
-            base_path = resolve_path(document.base_dir, document.spec.base_case)
-            run = read_yaml_mapping(base_path, "run")
-            base = {"run": run, **{
-                name: read_yaml_mapping(resolve_path(base_path.parent, run["references"][f"{name}_file"]), name)
-                for name in DOCUMENTS[1:]
-            }}
-            write_documents(folder / "base", portable_documents(base))
-            spec["base_case"] = "base/run.yaml"
-            spec["output_directory"] = "unused-output"
-            for index, (name, source) in enumerate(document.spec.programs.items()):
-                destination = f"program-{index}.yaml"
-                write_text(folder / destination, yaml.safe_dump(read_yaml_mapping(resolve_path(document.base_dir, source), name)))
-                spec["programs"][name] = destination
-            for index, (name, preset) in enumerate(document.spec.geometries.items()):
-                if preset.solids_file is not None:
-                    destination = f"solids-{index}.yaml"
-                    write_text(folder / destination, yaml.safe_dump(read_yaml_mapping(resolve_path(document.base_dir, preset.solids_file), name)))
-                    spec["geometries"][name]["solids_file"] = destination
-            write_text(folder / "batch.yaml", yaml.safe_dump(spec, sort_keys=False))
-            for expanded in expand_batch_cases(load_batch_spec(folder / "batch.yaml")):
-                entry = {"id": uuid4().hex, "name": " / ".join(expanded.selections.values()),
-                         "included": True, "origin": study["name"], "study_id": study_id,
-                         "selections": expanded.selections}
-                case = ProjectCase(self, entry, portable_documents({name: getattr(expanded, name) for name in DOCUMENTS}))
-                write_documents(case.root / "inputs", case.documents)
-                entries.append(case)
-            self.cases.extend(entries)
-            self.metadata["cases"].extend(case.metadata for case in entries)
-            self.metadata.setdefault("studies", []).append(study)
-            self.save()
-        except Exception:
-            for case in entries:
-                if case in self.cases:
-                    self.cases.remove(case)
-                    self.metadata["cases"].remove(case.metadata)
-                shutil.rmtree(case.root)
-            if study in self.metadata.get("studies", []):
-                self.metadata["studies"].remove(study)
-            shutil.rmtree(folder)
-            raise
-        return entries
+    def import_study(self, batch_path: str | Path, *, name: str | None = None):
+        """Import a pending study. Generation requires a successful baseline case."""
+        return self.study_store.import_batch(batch_path, name)
 
     def delete_case(self, case: ProjectCase) -> None:
         """Remove this case and its latest run, rolling back if metadata cannot save."""
