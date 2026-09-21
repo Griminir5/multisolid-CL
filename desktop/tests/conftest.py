@@ -36,8 +36,11 @@ def source_case(tmp_path):
 
 
 @pytest.fixture
-def qt_app(monkeypatch):
+def qt_app(monkeypatch, tmp_path):
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     widgets = pytest.importorskip("PyQt6.QtWidgets")
+    from PyQt6.QtCore import QSettings
+    monkeypatch.setattr("packed_bed_ui.navigation.QSettings", lambda *_: QSettings(
+        str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
     app = widgets.QApplication.instance() or widgets.QApplication([])
     yield app

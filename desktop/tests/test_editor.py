@@ -35,7 +35,7 @@ def test_five_tabs_and_toolbar(qt_app, tmp_path):
     case = project.add_case_from_files("packed_bed/examples/default_case/run.yaml", "Benchmark")
     window._set_project(project)
     window._show_case(case)
-    assert [window.editor.tabs.tabText(i) for i in range(5)] == ["General", "Chemistry", "Bed", "Program", "Results"]
+    assert [window.editor.tabs.tabText(i) for i in range(5)] == ["General", "Chemistry", "Bed", "Program", "Report"]
     buttons = [window.case_page.layout().itemAt(0).layout().itemAt(i).widget()
                for i in range(window.case_page.layout().itemAt(0).layout().count())]
     assert [button.text() for button in buttons if isinstance(button, QPushButton) and not button.isHidden()] == [
@@ -241,7 +241,9 @@ def test_modes_preserve_steps_and_shared_outlet_across_reopen(editing, qt_app):
     pressure_geometry = editor.program.channels["outlet_pressure"].geometry()
     editor.program.mode.setCurrentIndex(editor.program.mode.findData("feed_stream"))
     qt_app.processEvents()
-    assert editor.program.channels["outlet_pressure"].geometry() == pressure_geometry
+    pressure = editor.program.channels["outlet_pressure"]
+    assert pressure.geometry().bottomLeft() == pressure_geometry.bottomLeft()
+    assert pressure.width() == pressure_geometry.width()
     assert set(case.documents["program"]) == {"feed_stream", "outlet_pressure"}
     assert case.documents["program"]["feed_stream"]["initial"]["composition"] == {"N2": 1}
     editor.program.channels["outlet_pressure"].table.item(0, 2).setText("110000")
@@ -266,6 +268,47 @@ def test_flow_basis_converts_physical_flow_in_both_modes(editing):
         assert case.resolve().inlet_flow_program.value_at(0, smooth_ramp_width_s=1) == pytest.approx(flow)
 
 
+@pytest.mark.parametrize("mode", ["separate_channels", "feed_stream"])
+def test_collapsing_channels_reclaims_space_and_preserves_inputs(editing, qt_app, mode):
+    from packed_bed_ui.editor import InputEditor
+    editor, case = editing
+    page = editor.program
+    page.mode.setCurrentIndex(page.mode.findData(mode))
+    assert editor.save()
+    original = deepcopy(case.documents)
+    editor.resize(1150, 850)
+    editor.tabs.setCurrentWidget(page)
+    editor.show()
+    qt_app.processEvents()
+    pressure = page.channels["outlet_pressure"]
+    inlet = page.channels["feed_stream" if mode == "feed_stream" else "inlet_flow"]
+    height = inlet.table.height()
+    pressure.toggle.click()
+    qt_app.processEvents()
+    assert pressure.table.isHidden()
+    assert inlet.table.height() > height
+    page.load()
+    assert pressure.table.isHidden()
+    pressure.toggle.click()
+    qt_app.processEvents()
+    assert not pressure.table.isHidden()
+    assert pressure.table.item(0, 2).text() == "100000"
+    assert case.documents == original
+    assert not editor.dirty
+
+    inspection = InputEditor()
+    inspection.set_documents(original, read_only=True)
+    pressure = inspection.program.channels["outlet_pressure"]
+    assert pressure.toggle.isEnabled()
+    pressure.toggle.click()
+    assert pressure.table.isHidden()
+    pressure.toggle.click()
+    assert not pressure.table.isHidden()
+    assert inspection.case.documents == original
+    assert not inspection.dirty
+    inspection.close()
+
+
 def test_feed_partial_target_survives_editing_other_fields(qt_app, tmp_path):
     from packed_bed_ui.editor import CaseEditor
 
@@ -287,6 +330,7 @@ def test_new_empty_draft_can_be_completed_through_controls(qt_app, tmp_path):
     case = project.add_case("Draft")
     editor = CaseEditor()
     editor.set_case(case)
+    editor.fields[("simulation", "time_horizon_s")].setText("10")
     editor.fields[("simulation", "reporting_interval_s")].setText("1")
     editor.bed.length.setText("1")
     editor.fields[("model", "bed_radius_m")].setText(".01")
@@ -295,19 +339,19 @@ def test_new_empty_draft_can_be_completed_through_controls(qt_app, tmp_path):
     editor.bed.add_zone()
     for col, value in ((2, ".4"), (3, ".5"), (4, ".001"), (5, "1")):
         editor.bed.zones.item(0, col).setText(value)
-    for key, value in (("inlet_flow", "1e-8"), ("inlet_temperature", "300"), ("outlet_pressure", "100000")):
-        channel = editor.program.channels[key]
-        channel.table.item(0, 2).setText(value)
-    # Composition fields are edited through the same modal used for a feed target.
+    assert editor.program.mode.currentData() == "feed_stream"
+    editor.program.channels["outlet_pressure"].table.item(0, 2).setText("100000")
     from PyQt6.QtCore import QTimer
     from PyQt6.QtWidgets import QLineEdit
-    def composition():
+    def feed():
         dialog = qt_app.activeModalWidget()
+        dialog.findChild(QLineEdit, "flow").setText("1e-8")
+        dialog.findChild(QLineEdit, "temperature").setText("300")
         dialog.findChild(QLineEdit, "N2").setText("1")
         dialog.accept()
-    QTimer.singleShot(0, composition)
-    editor.program.channels["inlet_composition"].edit_state(0)
-    channel = editor.program.channels["inlet_flow"]
+    QTimer.singleShot(0, feed)
+    channel = editor.program.channels["feed_stream"]
+    channel.edit_state(0)
     channel.add_step()
     channel.table.item(1, 1).setText("10")
     assert editor.save()

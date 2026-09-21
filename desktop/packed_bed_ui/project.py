@@ -127,12 +127,14 @@ class ProjectCase:
 
     def save(self) -> None:
         """Save incomplete drafts without altering this case's latest results."""
+        changed = self.documents != read_documents(self.root / "inputs")
         if self.metadata.get("study_id"):
-            if self.documents != read_documents(self.root / "inputs"):
+            if changed:
                 raise ValueError("Generated inputs are read-only. Edit the study or duplicate this case.")
+        if changed:
+            self.project.study_store.save_case(self)
         else:
-            write_documents(self.root / "inputs", self.documents)
-        self.project.save()
+            self.project.save()
 
     def fingerprint(self) -> str:
         return scientific_fingerprint(self.documents, self.project.metadata.get("extensions", []))
@@ -188,6 +190,16 @@ class Project:
     root: Path
     metadata: dict
     cases: list[ProjectCase] = field(default_factory=list)
+    on_edit: object = field(default=None, repr=False, compare=False)
+
+    @property
+    def drafts(self):
+        from .recovery import Drafts
+        return Drafts(self)
+
+    def edited(self):
+        if self.on_edit is not None:
+            self.on_edit()
 
     @property
     def study_store(self):
@@ -280,11 +292,14 @@ class Project:
         write_json(self.root / "project.json", self.metadata)
         if hasattr(self, "_study_store"):
             self._study_store.invalidate()
+        self.edited()
 
-    def add_case(self, name: str, documents: dict[str, dict] | None = None, *, origin="Independent") -> ProjectCase:
+    def add_case(self, name: str, documents: dict[str, dict] | None = None, *, origin="Independent", report=None) -> ProjectCase:
         if not name.strip():
             raise ValueError("Enter a case name.")
         entry = {"id": uuid4().hex, "name": name.strip(), "included": True, "origin": origin}
+        if report is not None:
+            entry["report"] = deepcopy(report)
         if documents is None:
             from .inputs import empty_documents
             documents = empty_documents(entry["id"])
@@ -307,7 +322,7 @@ class Project:
         return self.add_case(name or resolved.run.simulation.system_name, documents)
 
     def duplicate_case(self, case: ProjectCase, name: str) -> ProjectCase:
-        return self.add_case(name, case.documents)
+        return self.add_case(name, case.documents, report=case.metadata.get("report"))
 
     def import_study(self, batch_path: str | Path, *, name: str | None = None):
         """Import a pending study. Generation requires a successful baseline case."""

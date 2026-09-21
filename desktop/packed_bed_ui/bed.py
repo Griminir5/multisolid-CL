@@ -26,7 +26,6 @@ class BedPage(QWidget):
         self.zones.itemChanged.connect(self.edit_zone)
         zones_layout.addWidget(self.zones, 1)
         zones_layout.addWidget(action_button("+ Add zone", self.add_zone))
-        top.addWidget(group, 162)
         options, form = form_panel("Bed settings")
         # Compact labels beside fields leave room for the bed preview at ordinary window sizes.
         form.setRowWrapPolicy(form.RowWrapPolicy.WrapLongRows)
@@ -45,6 +44,7 @@ class BedPage(QWidget):
         editor.field(form, ("run", "simulation", "interior_flow_mode"), "Reversible flow", kind="check",
                      default="forward_only", checked_values=("forward_only", "reversible"))
         top.addWidget(options, 100)
+        top.addWidget(group, 162)
         layout.addLayout(top, 1)
         self.preview = Preview()
         layout.addWidget(self.preview, 1)

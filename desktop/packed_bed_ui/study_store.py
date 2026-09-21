@@ -195,6 +195,19 @@ class StudyStore:
         # Once metadata commits, the replacement is authoritative even if cleanup is interrupted.
         self._adopt_metadata(metadata)
         recover_study_transaction(root)
+        self.project.edited()
+
+    def save_case(self, case):
+        # Reuse the existing folder transaction so a crash cannot save only some
+        # of the four YAML documents. The retained run folder is never replaced.
+        metadata = deepcopy(case.metadata)
+        try:
+            self._commit({f"cases/{case.id}/inputs": _documents(case.documents)}, self.project.metadata)
+        except Exception:
+            # Transaction rollback reloads saved metadata; keep the editor's draft.
+            case.metadata.clear()
+            case.metadata.update(metadata)
+            raise
 
     def _adopt_metadata(self, metadata):
         self.project.metadata = metadata
@@ -239,6 +252,15 @@ class StudyStore:
     def create(self, name, case):
         return self.replace_baseline(Study(uuid4().hex, name.strip(), {}), case)
 
+    def delete_study(self, study_id):
+        _identity(study_id)
+        metadata = deepcopy(self.project.metadata)
+        metadata["studies"] = [entry for entry in metadata["studies"] if entry["id"] != study_id]
+        removed = [case.id for case in self.project.cases if case.metadata.get("study_id") == study_id]
+        metadata["cases"] = [entry for entry in metadata["cases"] if entry["id"] not in removed]
+        folders = {f"studies/{study_id}": None, **{f"cases/{ident}": None for ident in removed}}
+        self._commit(folders, metadata, removed)
+
     def replace_baseline(self, study, case):
         if case.project is not self.project or not any(case is member for member in self.project.cases):
             raise StudyError("Select a case belonging to this project.")
@@ -251,7 +273,8 @@ class StudyStore:
         study.provenance = {"case_id": case.id, "case_name": case.name,
                             "attempt_id": snapshot["attempt_id"], "fingerprint": case.fingerprint(),
                             "extensions": deepcopy(snapshot.get("extensions", []))}
-        study.editor_metadata = {"step_ids": new_step_ids(study.baseline["program"])}
+        study.editor_metadata = {"step_ids": new_step_ids(study.baseline["program"]),
+                                 "report": deepcopy(case.metadata.get("report"))}
         self.save_study(study, _replace_baseline=True)
         return study
 
@@ -286,12 +309,21 @@ class StudyStore:
         metadata = deepcopy(self.project.metadata)
         metadata["cases"] = [entry for entry in metadata["cases"] if entry["id"] not in preview.delete_ids]
         folders = {f"cases/{ident}": None for ident in current.delete_ids}
+        report = study.editor_metadata.get("report")
+        # Studies created before report inheritance can still copy their source's layout.
+        if "report" not in study.editor_metadata:
+            source = next((case for case in self.project.cases if case.id == study.provenance.get("case_id")), None)
+            report = deepcopy(source.metadata.get("report")) if source is not None else None
+            study.editor_metadata["report"] = report
+            folders[f"studies/{study.id}"] = self._study_files(study)
         new_ids = []
         for candidate in preview.candidates:
             ident = uuid4().hex
             new_ids.append(ident)
             entry = {"id": ident, "name": candidate.name, "included": True, "origin": study.name,
                      "study_id": study.id, "selections": candidate.selections}
+            if report is not None:
+                entry["report"] = deepcopy(report)
             metadata["cases"].append(entry)
             folders[f"cases/{ident}"] = _documents(portable_documents(candidate.documents), "inputs/")
         next(entry for entry in metadata["studies"] if entry["id"] == study.id)["generation_signature"] = current.signature

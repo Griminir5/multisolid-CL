@@ -20,11 +20,14 @@ previews do not need DAETools. Execution needs DAETools with SuperLU.
 
 ## Use the starter
 
-1. At launch, choose **Create new project** or **Open existing project**.
-   Creating a project creates a new folder and an empty case list. Opening one
-   resumes it in place.
-2. Inside the project, use **New Case** to start from an example or an empty
-   draft. **Import Case** copies a `run.yaml` and its referenced inputs
+1. At launch, choose **Create new project**, **Open existing project**, or a recent
+   project. Creation asks for a name and parent location and shows the resulting
+   folder. It starts with `MultiSolid` in the OS Documents location (home if that
+   location is unavailable), and remembers a custom parent chosen for creation.
+   The folder is created on submission; existing folders cannot be overwritten
+   or merged. Opening a project resumes it in place.
+2. Inside the project, use **New Case** to start from an empty draft in **Feed** mode with a repeating
+   program and relative tolerance `1e-5`. **Import Case** copies a `run.yaml` and its referenced inputs
    into this project, preserving the original files.
 3. Project actions are in the top **Project** menu. Each case row shows its name,
    input readiness, latest result, and icon actions: **Run**, **Duplicate**, **Edit**,
@@ -32,11 +35,13 @@ previews do not need DAETools. Execution needs DAETools with SuperLU.
    name to rename it. **← Back to project** returns to the list. Delete asks before removing
    the case and its latest results.
 4. The case editor has five tabs: **General**, **Chemistry**, **Bed**, **Program**,
-   and **Results**. General contains numerical and solver settings and requested
+   and **Report**. General contains numerical and solver settings and requested
    reports/plots. Chemistry selects species and collapsible reaction families
-   beside a fitted reaction graph. Bed edits geometry and material zones above
+   beside a fitted reaction graph. Bed places settings on the left and material zones on the right above
    the numerical preview. Program edits initial values and timed hold/ramp steps
-   beside its preview. Drafts save after a short pause, including incomplete
+   beside its preview, ordered as flow, temperature, composition, and pressure.
+   Target headers show the units. Click a channel's arrow to collapse its settings
+   and give the other channels more room. Drafts save after a short pause, including incomplete
    values. Hover over a validation message for its full details.
 5. **Run** in the project case list executes one case. **Run all included cases** runs the checked
    cases as one batch, continuing after individual failures. **Maximum workers**
@@ -48,13 +53,33 @@ previews do not need DAETools. Execution needs DAETools with SuperLU.
 6. Open a case's folder for its latest NetCDF, manifest, and existing CLI plots.
    **Open latest run log** opens its solver log. General's plot rows have **Show**
    buttons that open separate windows when retained NetCDF results are available,
-   including stale results. The Results tab is a placeholder pending its design.
+   including stale results. Report configures and exports Excel workbooks.
 
 A rerun replaces the previous snapshot, logs, status, and outputs when that
 case starts, even if the new attempt fails or is cancelled. Invalid preflight
 and cases cancelled before starting keep their previous results. **Duplicate
 case** first if you want to retain a separate comparison; the copy starts with
 no results.
+
+Recent projects appear on the launch screen and in **Project → Recent projects**,
+with names, locations, and last-interaction times. The small index lives in the
+user's system settings, independently of project folders. Opening, editing, or
+starting execution updates recency; result writes and status polling do not.
+Unavailable folders are omitted, with availability checked in the background.
+Use **Open existing project** once to register a moved or externally copied project.
+Opening elsewhere does not change the preferred parent for new projects.
+
+Case inputs, Report definitions, and study edits save after a short pause, including
+unfinished values. Saving, switching projects, and closing flush pending edits,
+including active table cells. If saving fails, the draft stays in the editor and
+navigation is blocked with the failure reason in the status bar.
+
+Edits also write a small recovery checkpoint in the project's `.drafts/` folder
+before the autosave delay. After an interruption, opening the project offers
+**Recover drafts**, **Discard drafts** (keep the saved inputs), or **Cancel**.
+Recovery reassesses input readiness and staleness. It preserves retained snapshots
+and results, and never resumes a solver. Case saves reuse the study transaction
+mechanism so an interrupted save cannot leave a mixture of old and new YAML files.
 
 The Bed and Program previews use the engine's actual smoothed programs, feed mixing,
 repetition, GHSV conversion, and sampled solid profiles. Plot toolbars support
@@ -80,6 +105,48 @@ A new zone splits the final zone's extent and starts with blank material values.
 The first zone starts at zero and the final zone ends at the bed length. Changing
 a multi-zone bed's length offers fixed or proportionally scaled internal boundaries.
 
+## Excel reports
+
+**Report** opens on the first user worksheet, starting with a blank sheet for a new
+configuration. Name it and choose what its rows represent
+(time by default, or any available coordinate axis). **Add columns…** selects a
+quantity and values for its other axes. Three species at three positions create
+nine columns; remove, reorder, or rename individual columns after adding them.
+Every column heading includes the value unit. Hover over a preview heading to
+read its full definition.
+
+Coordinates and available quantities always follow the current case inputs.
+Row selections support All, First, Last, and Selected values. **All** columns
+regenerate when the grid changes; surviving columns keep their labels and order,
+and manually removed positions stay excluded. First/Last follows the endpoint.
+Manually selected coordinates that no longer exist are removed with a notice;
+unfinished inputs preserve selections until coordinates can be calculated again.
+Missing quantities remain visible for repair. When results exist, the preview
+shows recorded values and coordinates from the retained run, limited to 20 rows
+and 12 columns; export contains the full selection. Case information also shows
+the retained run's inputs and provenance. Before a run, the preview shows expected
+coordinates and headers and explains why value cells are empty. Editing controls
+continue to follow current inputs, including when retained results are stale.
+
+Older saved reports stored every generated coordinate as an exact selection.
+Re-add those columns with **All** to enable automatic grid updates; the old format
+does not record whether they were originally selected individually or with All.
+
+**Export workbook…** writes native Excel Tables, with the header row and first
+column frozen. The fixed first sheet, **Case information**, contains the retained
+run's settings, provenance, and an exact dictionary of the exported columns.
+Stale or partial results can be exported when the selected data and their input
+snapshot are available. No data are interpolated or silently dropped. Export
+can be cancelled and only replaces an existing workbook after success.
+
+Reports autosave with the project independently of scientific inputs. Editing a
+report does not make results stale, and reports remain editable on generated
+study cases. Duplicating a case copies its report definition without results.
+**Save as template…** writes a portable JSON layout. **Apply template…** previews
+its sheets, sizes, and any compatibility issues before replacing the current
+configuration. Each applied template is an independent editable copy. Templates
+contain no results, case identity, or run provenance.
+
 ## Parameter studies
 
 Run the intended baseline case successfully first. **New Parameter Study** accepts
@@ -88,6 +155,13 @@ successful snapshot still matches those inputs. The study copies those inputs as
 a fixed baseline, records the successful attempt, and does not copy results.
 **Inspect baseline** is read-only; **Replace baseline** selects another successful
 case. Subsequent changes to the source case do not change the saved baseline.
+The baseline also retains a copy of its report configuration. Every generation
+or rebuild copies that layout independently into each fresh case, with All axes
+resolved against that case's inputs. Existing studies capture their source report
+on their first rebuild after this feature is added, if the source is still available.
+Study rows have edit and delete icons. Deleting a study asks for confirmation,
+then removes its generated cases and results while keeping independent cases
+and reusable definitions.
 
 The study workspace contains variations beside a live case preview:
 

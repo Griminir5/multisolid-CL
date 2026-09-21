@@ -36,6 +36,79 @@ def test_window_opens_on_welcome_then_project_case_list(qt_app, tmp_path, source
     window.close()
 
 
+def test_new_case_starts_empty_with_feed_repeat_and_tolerance_defaults(qt_app, tmp_path, monkeypatch):
+    from PyQt6.QtWidgets import QComboBox, QDialog, QLineEdit
+    from packed_bed_ui.window import MainWindow
+
+    window = MainWindow()
+    project = Project.create(tmp_path / "project")
+    window._set_project(project)
+    def create(dialog):
+        assert not dialog.findChildren(QComboBox)
+        dialog.findChild(QLineEdit).setText("Fresh")
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(QDialog, "exec", create)
+    window._new_case()
+    case, = project.cases
+    assert case.name == "Fresh"
+    assert case.documents["run"]["solver"]["relative_tolerance"] == 1e-5
+    assert case.documents["run"]["simulation"]["repeat_program"] is True
+    assert case.documents["run"]["simulation"]["program_mode"] == "feed_stream"
+    assert window.editor.program.mode.currentData() == "feed_stream"
+    assert set(case.documents["program"]) == {"feed_stream", "outlet_pressure"}
+    assert not case.documents["chemistry"]["gas_species"]
+    assert not case.documents["solids"]["initial_profile"]["zones"]
+    assert case.state()["inputs"] == "Underdefined"
+    top = window.editor.bed.layout().itemAt(0).layout()
+    assert top.itemAt(0).widget().title() == "Bed settings"
+    assert top.itemAt(1).widget().title() == "Material zones"
+    window.close()
+    reopened = Project.open(project.root).cases[0]
+    assert reopened.documents["run"]["simulation"]["program_mode"] == "feed_stream"
+
+
+def test_study_icon_actions_and_delete_cancel_then_confirm(qt_app, tmp_path, source_case, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+    from packed_bed_ui.studies import Factor
+    from packed_bed_ui.window import MainWindow
+
+    project = Project.create(tmp_path / "project")
+    base = project.add_case_from_files(source_case)
+    job = read_json(project.prepare_execution([base]))
+    activate_snapshot(base.root / f".pending-{job['attempt_id']}")
+    write_json(base.run_folder / "status.json", {"state": "completed"})
+    study = project.study_store.create("Sweep", base)
+    study.factors = [Factor("cells", "axial_cells", [3])]
+    project.study_store.save_study(study)
+    generated, = project.study_store.apply_preview(project.study_store.preview(study))
+    window = MainWindow()
+    window._set_project(project)
+    buttons = window.table.group_buttons[study.id]
+    assert set(buttons) == {"Edit", "Delete"}
+    assert all(not button.text() and not button.icon().isNull() for button in buttons.values())
+    buttons["Edit"].click()
+    assert window.pages.currentWidget() is window.study_editor
+    window.runner.active = True
+    window._set_running(True)
+    assert all(not button.isEnabled() for button in window.table.group_buttons[study.id].values())
+    window.runner.active = False
+    window._set_running(False)
+    window._show_case(generated)
+    assert not window.edit_study_button.text() and not window.edit_study_button.icon().isNull()
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Cancel)
+    buttons["Delete"].click()
+    assert study.id in project.study_store.studies
+    assert generated.root.exists()
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes)
+    buttons["Delete"].click()
+    assert study.id not in project.study_store.studies
+    assert project.cases == [base]
+    assert window.editor.case is None and window.editor.report.case is None
+    assert window.study_editor.study is None
+    assert window.pages.currentWidget() is window.home
+    window.close()
+
+
 def test_editor_saves_invalid_drafts_and_keeps_other_cases_unchanged(qt_app, tmp_path, source_case):
     from packed_bed_ui.window import MainWindow
 

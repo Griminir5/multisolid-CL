@@ -4,9 +4,10 @@ from copy import deepcopy
 from uuid import uuid4
 import math
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout, QGroupBox,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from packed_bed.programs import NORMAL_MOLAR_DENSITY_MOL_PER_M3
@@ -22,11 +23,23 @@ from .inputs import program_duration, ensure_step_ids
 
 class ChannelTable(QGroupBox):
     def __init__(self, page, key, title):
-        super().__init__(title)
+        super().__init__()
         self.page, self.editor, self.key = page, page.editor, key
         self.loading = False
+        self.setStyleSheet("QGroupBox { margin-top: 0; padding-top: 0; }")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
+        self.toggle = QToolButton()
+        self.toggle.setText(title)
+        self.toggle.setCheckable(True)
+        self.toggle.setChecked(True)
+        self.toggle.setArrowType(Qt.ArrowType.DownArrow)
+        self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.toggle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.toggle.setStyleSheet("QToolButton { font-weight: 600; border: none; text-align: left; }")
+        self.toggle.setToolTip("Collapse channel")
+        layout.addWidget(self.toggle)
         self.table = table(["Step", "Duration (s)", "Target", ""])
         self.table.setMinimumHeight(72)
         self.table.verticalHeader().setDefaultSectionSize(29)
@@ -38,6 +51,15 @@ class ChannelTable(QGroupBox):
         self.table.setColumnWidth(3, 32)
         self.table.itemChanged.connect(self.edit_item)
         layout.addWidget(self.table)
+        self.toggle.toggled.connect(self.set_expanded)
+
+    def set_expanded(self, expanded):
+        self.table.setVisible(expanded)
+        self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        self.toggle.setToolTip("Collapse channel" if expanded else "Expand channel")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding,
+                           QSizePolicy.Policy.Expanding if expanded else QSizePolicy.Policy.Fixed)
+        self.page.update_channel_layout()
 
     def channel(self):
         return self.editor.get(("program", self.key), {})
@@ -61,19 +83,20 @@ class ChannelTable(QGroupBox):
             cell(self.table, row, 1, step.get("duration_s", ""))
             self.target_cell(row, step.get("target", ""), hold=step.get("kind") == "hold")
             self.table.setCellWidget(row, 3, action_button("×", lambda _, index=index: self.remove_step(index),
-                                                         tooltip=f"Remove step {row} from {self.title()}"))
+                                                         tooltip=f"Remove step {row} from {self.toggle.text()}"))
         self.table.setSpan(len(steps) + 1, 0, 1, 4)
         self.table.setCellWidget(len(steps) + 1, 0, action_button("+ Add step", self.add_step))
         self.loading = False
         self.update_title()
 
     def update_title(self):
-        unit = "GHSV (h⁻¹)" if self.page.flow_basis.currentData() == "ghsv_per_h" else "mol/s"
-        title = {"inlet_flow": f"Inlet flow · {unit}", "inlet_temperature": "Inlet temperature · K",
-                 "inlet_composition": "Inlet composition · mole fractions", "outlet_pressure": "Outlet pressure · Pa",
-                 "feed_stream": f"Feed · {unit}, K, mole fractions"}[self.key]
+        flow_unit = "h⁻¹" if self.page.flow_basis.currentData() == "ghsv_per_h" else "mol/s"
+        title, unit = {"inlet_flow": ("Inlet flow", flow_unit), "inlet_temperature": ("Inlet temperature", "K"),
+                       "inlet_composition": ("Inlet composition", "mole fractions"), "outlet_pressure": ("Outlet pressure", "Pa"),
+                       "feed_stream": ("Feed", f"{flow_unit}, K, mole fractions")}[self.key]
         duration = program_duration({self.key: self.channel()})
-        self.setTitle(title + (f" · {duration:g} s" if duration is not None else " · unfinished timing"))
+        self.toggle.setText(title + (f" · {duration:g} s" if duration is not None else " · unfinished timing"))
+        self.table.horizontalHeaderItem(2).setText(f"Target ({unit})")
 
     def target_cell(self, row, value, hold=False):
         self.table.removeCellWidget(row, 2)
@@ -87,7 +110,7 @@ class ChannelTable(QGroupBox):
             except (ValueError, TypeError):
                 summary = "Unfinished composition"
             if self.key == "feed_stream":
-                summary = f"{display(value.get('flow', 'retain'))} · {display(value.get('temperature', 'retain'))} K · {summary}"
+                summary = f"{display(value.get('flow', 'retain'))} · {display(value.get('temperature', 'retain'))} · {summary}"
             button = action_button(summary + "  …", lambda _, row=row: self.edit_state(row),
                                    tooltip="Edit feed values" if self.key == "feed_stream" else "Edit species mole fractions")
             self.table.setCellWidget(row, 2, button)
@@ -261,20 +284,13 @@ class ProgramPage(QWidget):
         self.note.setWordWrap(True)
         form.addWidget(self.note, 2, 0, 1, 3)
         controls.addWidget(options)
-        self.inlets = QStackedWidget()
-        independent = QWidget()
-        independent_layout = QVBoxLayout(independent)
-        independent_layout.setContentsMargins(0, 0, 0, 0)
+        self.channel_layout = QVBoxLayout()
         self.channels = {}
-        for key in CHANNELS[:-1]:
+        for key in (*CHANNELS[:-1], "feed_stream", "outlet_pressure"):
             self.channels[key] = ChannelTable(self, key, key)
-            independent_layout.addWidget(self.channels[key], 1)
-        self.inlets.addWidget(independent)
-        self.channels["feed_stream"] = ChannelTable(self, "feed_stream", "Feed")
-        self.inlets.addWidget(self.channels["feed_stream"])
-        controls.addWidget(self.inlets, 3)
-        self.channels["outlet_pressure"] = ChannelTable(self, "outlet_pressure", "Outlet pressure")
-        controls.addWidget(self.channels["outlet_pressure"], 1)
+            self.channel_layout.addWidget(self.channels[key], 1)
+        self.channel_layout.addStretch(0)
+        controls.addLayout(self.channel_layout, 1)
         self.timing = QLabel()
         self.timing.setWordWrap(True)
         controls.addWidget(self.timing)
@@ -283,16 +299,26 @@ class ProgramPage(QWidget):
         self.flow_basis.currentIndexChanged.connect(self.change_basis)
         self.repeat.toggled.connect(self.change_repeat)
 
+    def update_channel_layout(self):
+        active = ("feed_stream", "outlet_pressure") if self.mode.currentData() == "feed_stream" else CHANNELS
+        expanded = False
+        for index, (key, channel) in enumerate(self.channels.items()):
+            channel.setVisible(key in active)
+            stretch = (3 if key == "feed_stream" else 1) if key in active and channel.toggle.isChecked() else 0
+            self.channel_layout.setStretch(index, stretch)
+            expanded = expanded or bool(stretch)
+        self.channel_layout.setStretch(len(self.channels), 0 if expanded else 1)
+
     def load(self):
         self.loading = True
         mode = self.editor.get(("run", "simulation", "program_mode"), "separate_channels")
         select_value(self.mode, mode)
-        self.inlets.setCurrentIndex(1 if mode == "feed_stream" else 0)
         key = "feed_stream" if mode == "feed_stream" else "inlet_flow"
         select_value(self.flow_basis, self.editor.get(("program", key, "basis"), "mol_per_s"))
         self.repeat.setChecked(self.editor.get(("run", "simulation", "repeat_program"), False) is True)
         for channel in self.channels.values():
             channel.load()
+        self.update_channel_layout()
         self.loading = False
         self.update_horizon(update_documents=False)
 

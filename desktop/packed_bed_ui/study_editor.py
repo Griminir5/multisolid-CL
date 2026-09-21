@@ -347,6 +347,10 @@ class StudyEditor(QWidget):
         self.stop_preview()
         self.render(reset_rows=reset_rows)
         self.debounce.start()
+        try:
+            self.store.project.drafts.write("study", self.study.id, self.study.rule())
+        except (OSError, ValueError) as exc:
+            self.issue.setText(f"Recovery copy could not be saved: {exc}")
 
     def rename(self, text):
         if self.loading or self.study is None:
@@ -361,6 +365,7 @@ class StudyEditor(QWidget):
             return True
         try:
             self.store.save_study(self.study)
+            self.store.project.drafts.clear("study", self.study.id)
         except (ValueError, OSError) as exc:
             self.saved.setText("Could not save")
             self.issue.setText(str(exc))

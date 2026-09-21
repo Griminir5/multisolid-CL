@@ -126,12 +126,15 @@ class DefinitionDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
         factor = self.workspace.study.factors[index.column()]
         if not factor.target.startswith("definition:"):
-            return QLineEdit(parent)  # Keep unfinished text and full precision; never clamp with a spin box.
+            editor = QLineEdit(parent)  # Keep unfinished text and full precision.
+            editor.textEdited.connect(lambda: self.commitData.emit(editor))
+            return editor
         combo = QComboBox(parent)
         combo.addItem("Select definition…", "")
         for definition in self.workspace.store.definitions.values():
             if definition.kind == factor.target.split(":")[1]:
                 combo.addItem(definition.name, definition.id)
+        combo.activated.connect(lambda: self.commitData.emit(combo))
         return combo
 
     def setEditorData(self, editor, index):

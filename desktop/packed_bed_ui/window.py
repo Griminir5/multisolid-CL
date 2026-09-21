@@ -1,32 +1,33 @@
 """Project-first navigation: a case list and a separate selected-case editor."""
 
-from importlib.resources import files
 from pathlib import Path
 
 from PyQt6.QtCore import QLockFile, Qt, QUrl
 from PyQt6.QtGui import QDesktopServices, QKeySequence
 from PyQt6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox,
-    QPushButton, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+    QHeaderView, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox,
+    QPushButton, QSpinBox, QStackedWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from .case_list import CaseList, result_label
+from .case_list import CaseList, icon_button, result_label
 from .editor import CaseEditor
 from .execution import RunController
 from .project import Project
 from .study_editor import StudyEditor, choose_baseline
 from .definition_editor import DefinitionLibrary
+from .navigation import NewProjectDialog, ProjectLocations, display_timestamp
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, settings=None):
         super().__init__()
         self.setWindowTitle("MultiSolid")
         self.resize(1150, 850)
         self.project = None
         self.project_lock = None
         self.closing = False
+        self.locations = ProjectLocations(self, settings)
         self.runner = RunController(self)
         self.runner.changed.connect(self._run_status)
         self.runner.finished.connect(self._run_finished)
@@ -42,6 +43,23 @@ class MainWindow(QMainWindow):
             button = QPushButton(label)
             button.clicked.connect(action)
             welcome_layout.addWidget(button, alignment=Qt.AlignmentFlag.AlignHCenter)
+        welcome_layout.addWidget(QLabel("Recent projects"))
+        self.recent_list = QTreeWidget()
+        self.recent_list.setAccessibleName("Recent projects")
+        self.recent_list.setHeaderLabels(["Name", "Last interaction", "Folder path"])
+        self.recent_list.setRootIsDecorated(False)
+        self.recent_list.setAlternatingRowColors(True)
+        self.recent_list.setUniformRowHeights(True)
+        self.recent_list.setStyleSheet("QTreeView::item { padding: 6px 8px; }")
+        self.recent_list.setColumnWidth(0, 260)
+        self.recent_list.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.recent_list.header().setStretchLastSection(True)
+        self.recent_list.headerItem().setToolTip(1, "Date and time in your local time zone.")
+        self.recent_list.itemClicked.connect(lambda item, _: self.open_project(item.data(0, Qt.ItemDataRole.UserRole)))
+        self.recent_list.itemActivated.connect(lambda item, _: self.open_project(item.data(0, Qt.ItemDataRole.UserRole)))
+        welcome_layout.addWidget(self.recent_list)
+        self.recent_empty = QLabel("No recent projects available.")
+        welcome_layout.addWidget(self.recent_empty)
         welcome_layout.addStretch()
         self.pages.addWidget(self.welcome)
 
@@ -54,7 +72,7 @@ class MainWindow(QMainWindow):
         self.project_actions = []
         for label, callback, shortcut in (
             ("Create New Project…", self._new_project, QKeySequence.StandardKey.New),
-            ("Open Project…", self._open, QKeySequence.StandardKey.Open),
+            ("Open Existing Project…", self._open, QKeySequence.StandardKey.Open),
             ("Save Project", self._save_project, QKeySequence.StandardKey.Save),
             ("Close Project", self._close_project, QKeySequence.StandardKey.Close),
             ("Open Project Folder", self._show_project_folder, None),
@@ -64,6 +82,8 @@ class MainWindow(QMainWindow):
             if shortcut is not None:
                 action.setShortcut(shortcut)
             self.project_actions.append(action)
+        self.recent_menu = menu.addMenu("Recent projects")
+        self.recent_menu.aboutToShow.connect(self.locations.refresh)
         self.case_count = QLabel()
         layout.addWidget(self.case_count)
         self.table = CaseList()
@@ -123,8 +143,8 @@ class MainWindow(QMainWindow):
         self.study_editor.rebuilt.connect(self._study_rebuilt)
         self.study_editor.open_case.connect(self._show_case)
         self.pages.addWidget(self.study_editor)
-        self.edit_study_button = QPushButton("Edit study")
-        self.edit_study_button.clicked.connect(lambda: self._show_study(self.editor.case.metadata["study_id"]))
+        self.edit_study_button = icon_button(
+            self, "Edit", lambda: self._show_study(self.editor.case.metadata["study_id"]), "Edit study")
         editor_actions.addWidget(self.edit_study_button)
         self.independent_button = QPushButton("Duplicate as independent case")
         self.independent_button.clicked.connect(lambda: self._case_action("Duplicate", self.editor.case.id))
@@ -136,11 +156,66 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(False)
         self.statusBar().addPermanentWidget(self.cancel_button)
         self._update_project_actions()
+        self.locations.changed.connect(self._refresh_recents)
+        self._refresh_recents()
+        self.locations.refresh()
         self.statusBar().showMessage("Create or open a project to begin.")
 
     def _save_editors(self):
-        self.study_editor.finish_cell_edit()
-        return self.editor.save() and self.study_editor.save()
+        control = QApplication.focusWidget()
+        if control is not None and self.isAncestorOf(control):
+            control.clearFocus()  # Commit delegates and editingFinished before saving.
+        saved = self.editor.save() and self.study_editor.save()
+        if not saved:
+            reason = self.editor.validation.text() if self.editor.dirty else (
+                self.editor.report.save_note.text() if self.editor.report.dirty else self.study_editor.issue.text())
+            self.statusBar().showMessage(f"Navigation cannot complete until the draft is saved. {reason}")
+        return saved
+
+    def _refresh_recents(self):
+        self.recent_list.clear()
+        self.recent_menu.clear()
+        entries = self.locations.visible()
+        for entry in entries:
+            values = [entry["name"], display_timestamp(entry["last_interaction"]), entry["path"]]
+            item = QTreeWidgetItem(values)
+            item.setData(0, Qt.ItemDataRole.UserRole, entry["path"])
+            for column, value in enumerate(values):
+                item.setToolTip(column, value)
+            self.recent_list.addTopLevelItem(item)
+            action = self.recent_menu.addAction(" · ".join(values).replace("&", "&&"))
+            action.triggered.connect(lambda _, path=entry["path"]: self.open_project(path))
+        self.recent_empty.setVisible(not entries)
+        if not entries:
+            self.recent_menu.addAction("No recent projects available").setEnabled(False)
+
+    def _remember_project(self):
+        if self.project is not None:
+            self.locations.remember(self.project)
+
+    def _recover_drafts(self, project):
+        drafts = project.drafts.pending()
+        if not drafts:
+            return True
+        prompt = QMessageBox(self)
+        prompt.setWindowTitle("Recover unfinished drafts")
+        prompt.setText(f"‘{project.metadata['name']}’ has {len(drafts)} unsaved recovery draft(s).")
+        prompt.setInformativeText("Recover these edits or keep the saved inputs. Retained run snapshots and results are preserved.")
+        prompt.setDetailedText("\n".join(f"{draft['name']} — {draft['updated_at']}" for draft in drafts))
+        recover = prompt.addButton("Recover drafts", QMessageBox.ButtonRole.AcceptRole)
+        discard = prompt.addButton("Discard drafts", QMessageBox.ButtonRole.DestructiveRole)
+        prompt.addButton(QMessageBox.StandardButton.Cancel)
+        prompt.setDefaultButton(recover)
+        prompt.exec()
+        if prompt.clickedButton() is recover:
+            for draft in drafts:
+                project.drafts.apply(draft)
+        elif prompt.clickedButton() is discard:
+            for draft in drafts:
+                project.drafts.discard(draft)
+        else:
+            return False
+        return True
 
     def _new_study(self):
         if not self._save_editors():
@@ -171,6 +246,8 @@ class MainWindow(QMainWindow):
         if self.editor.case is not None and self.editor.case.id not in ids:
             self.editor.debounce.stop()
             self.editor.case, self.editor.dirty = None, False
+            self.editor.report.debounce.stop()
+            self.editor.report.case, self.editor.report.dirty = None, False
         for ident in list(self.runner.job.get("cases", {})):
             if ident not in ids:
                 self.runner.job["cases"].pop(ident)
@@ -189,12 +266,12 @@ class MainWindow(QMainWindow):
                 self.study_editor.begin_preview()
 
     def _new_project(self):
-        if not self._save_editors():
+        if self.runner.active or not self._save_editors():
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Create new project — choose a new folder", "New project")
-        if path:
+        dialog = NewProjectDialog(self.locations, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             try:
-                self._set_project(Project.create(path))
+                self._set_project(dialog.project)
             except (ValueError, OSError) as exc:
                 self._error(exc)
 
@@ -204,26 +281,36 @@ class MainWindow(QMainWindow):
             self.open_project(path)
 
     def open_project(self, path):
+        if self.runner.active:
+            self._error("Wait for the current execution or cancel it before switching projects.")
+            return
         if not self._save_editors():
             return
         root = Path(path).resolve()
         if root.is_file():
             root = root.parent
-        if self.project is not None and root == self.project.root:
-            try:
-                self._set_project(Project.open(root), self.project_lock)
-            except (ValueError, OSError) as exc:
-                self._error(exc)
-            return
-        lock = QLockFile(str(root / ".desktop.lock"))
-        lock.setStaleLockTime(0)
-        if not lock.tryLock(0):
-            self._error("This project is already open in another window, or its folder is not writable.")
-            return
+        lock = self.project_lock if self.project is not None and root == self.project.root else None
+        if lock is None:
+            lock = QLockFile(str(root / ".desktop.lock"))
+            lock.setStaleLockTime(0)
+            if not lock.tryLock(0):
+                self._error("This project is already open in another window, or its folder is not writable.")
+                return
         try:
-            self._set_project(Project.open(root), lock)
+            # Check for a surviving worker before transaction recovery reads or
+            # repairs project folders, not just before displaying the project.
+            solver_lock = QLockFile(str(root / ".solver.lock"))
+            solver_lock.setStaleLockTime(0)
+            if not solver_lock.tryLock(0):
+                raise ValueError("A simulation worker is still using this project. Wait for it to finish before reopening.")
+            try:
+                project = Project.open(root)
+            finally:
+                solver_lock.unlock()
+            self._set_project(project, lock)
         except (ValueError, OSError) as exc:
-            lock.unlock()
+            if lock is not self.project_lock:
+                lock.unlock()
             self._error(exc)
 
     def _set_project(self, project, lock=None):
@@ -245,6 +332,10 @@ class MainWindow(QMainWindow):
                 project.recover_interrupted()
             finally:
                 solver_lock.unlock()
+            if not self._recover_drafts(project):
+                if lock is not self.project_lock:
+                    lock.unlock()
+                return
         except Exception:
             if lock is not self.project_lock:
                 lock.unlock()
@@ -253,8 +344,11 @@ class MainWindow(QMainWindow):
             self.project_lock.unlock()
         self.project_lock = lock
         self.study_editor.clear()
+        if self.project is not None:
+            self.project.on_edit = None
         self.project = project
-        self.editor.case = None
+        self.editor.case = self.editor.report.case = None
+        project.on_edit = self._remember_project
         self.runner.job = {}
         self.max_workers.blockSignals(True)
         self.max_workers.setValue(project.metadata.get("max_workers", 1))
@@ -265,18 +359,14 @@ class MainWindow(QMainWindow):
         self.project_title.setText(project.metadata["name"])
         self.statusBar().showMessage("Select a case to edit or preview it. Changes save automatically.")
         self._show_cases()
+        self._remember_project()
 
     def _new_case(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("New case in this project")
         form = QFormLayout(dialog)
         name = QLineEdit("New case")
-        template = QComboBox()
-        template.addItem("Example — separate channels", "run.yaml")
-        template.addItem("Example — feed stream", "run_feed_stream.yaml")
-        template.addItem("Empty draft", None)
         form.addRow("Case name", name)
-        form.addRow("Start from", template)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Create case")
         buttons.accepted.connect(dialog.accept)
@@ -284,16 +374,14 @@ class MainWindow(QMainWindow):
         form.addRow(buttons)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             try:
-                if template.currentData() is None:
-                    case = self.project.add_case(name.text())
-                else:
-                    source = files("packed_bed") / "examples/default_case" / template.currentData()
-                    case = self.project.add_case_from_files(str(source), name.text())
-                self._show_case(case)
+                if self._save_editors():
+                    self._show_case(self.project.add_case(name.text()))
             except (OSError, ValueError) as exc:
                 self._error(exc)
 
     def _add_files(self):
+        if not self._save_editors():
+            return
         path, _ = QFileDialog.getOpenFileName(self, "Import Case — select run.yaml", filter="YAML (*.yaml *.yml)")
         if path:
             try:
@@ -319,6 +407,9 @@ class MainWindow(QMainWindow):
             return
         if action == "Study":
             self._show_study(case_id)
+            return
+        if action == "DeleteStudy":
+            self._delete_study(case_id)
             return
         case = next(case for case in self.project.cases if case.id == case_id)
         if action == "Run":
@@ -346,8 +437,34 @@ class MainWindow(QMainWindow):
                         self.editor.debounce.stop()
                         self.editor.case = None
                         self.editor.dirty = False
+                        self.editor.report.debounce.stop()
+                        self.editor.report.case, self.editor.report.dirty = None, False
                     self.table.set_project(self.project)
                     self._refresh_cases()
+
+    def _delete_study(self, study_id):
+        if not self._save_editors():
+            return
+        entry = next(entry for entry in self.project.metadata["studies"] if entry["id"] == study_id)
+        cases = self.project.study_store.existing_cases(study_id)
+        answer = QMessageBox.question(
+            self, "Delete Study",
+            f"Delete ‘{entry['name']}’, its {len(cases)} generated cases and "
+            f"{sum(case.has_results for case in cases)} retained results?\n"
+            "Independent cases and reusable definitions will be kept.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel)
+        if answer == QMessageBox.StandardButton.Yes:
+            try:
+                self.project.study_store.delete_study(study_id)
+            except (OSError, ValueError) as exc:
+                self._error(exc)
+            finally:
+                if not any(entry["id"] == study_id for entry in self.project.metadata["studies"]):
+                    if self.study_editor.study is not None and self.study_editor.study.id == study_id:
+                        self.study_editor.clear()
+                    self._study_rebuilt()
+                    self._show_cases()
 
     def _include_cases(self, case_ids, included):
         changed = [case for case in self.project.cases if case.id in case_ids]
@@ -392,6 +509,7 @@ class MainWindow(QMainWindow):
         self.cancel_button.setVisible(self.project is not None)
         for index, action in enumerate(self.project_actions):
             action.setEnabled(not self.runner.active and (index < 2 or self.project is not None))
+        self.recent_menu.setEnabled(not self.runner.active)
 
     def _save_project(self):
         if self.project is not None and self._save_editors():
@@ -407,11 +525,15 @@ class MainWindow(QMainWindow):
         if self.project_lock is not None:
             self.project_lock.unlock()
         self.study_editor.clear()
+        if self.project is not None:
+            self.project.on_edit = None
         self.project_lock = self.project = self.editor.case = None
+        self.editor.report.case = None
         self.runner.job = {}
         self.pages.setCurrentWidget(self.welcome)
         self.setWindowTitle("MultiSolid")
         self._update_project_actions()
+        self.locations.refresh()
         self.statusBar().showMessage("Create or open a project to begin.")
 
     def _show_cases(self):
@@ -469,6 +591,7 @@ class MainWindow(QMainWindow):
         try:
             path = self.project.prepare_execution(cases, max_workers=self.max_workers.value())
             self.runner.start(path)
+            self._remember_project()
         except (OSError, ValueError) as exc:
             self._error(exc)
             return
@@ -537,6 +660,8 @@ class MainWindow(QMainWindow):
             event.ignore()
         else:
             self.study_editor.stop_preview()
+            if self.project is not None:
+                self.project.on_edit = None
             if self.project_lock is not None:
                 self.project_lock.unlock()
             event.accept()

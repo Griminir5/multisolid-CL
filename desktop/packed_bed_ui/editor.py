@@ -194,6 +194,8 @@ class InputEditor(QWidget):
             for widget in page.findChildren(QWidget):
                 if any(preview.isAncestorOf(widget) for preview in (self.bed.preview, self.program.preview)):
                     continue  # Plot navigation remains interactive during inspection.
+                if widget in (channel.toggle for channel in self.program.channels.values()):
+                    continue  # Collapsing channels only changes the layout.
                 if isinstance(widget, (QLineEdit, QSpinBox)):
                     freeze(widget.setReadOnly, widget.isReadOnly(), True)
                 elif isinstance(widget, (QComboBox, QAbstractButton)):
@@ -295,14 +297,15 @@ class InputEditor(QWidget):
 
     def _draw_preview(self, case, preview):
         axes = self.figures[0].subplots(4, 1, sharex=True)
-        for axis, values, label in zip(axes, (
+        for axis, values, label in zip((axes[0], axes[1], axes[3]), (
             preview.flow_mol_s, preview.temperature_k, preview.pressure_pa,
         ), ("Inlet flow\n(mol/s)", "Temperature\n(K)", "Outlet pressure\n(Pa)")):
             axis.plot(preview.time_s, values, color="#317c89")
             axis.set_ylabel(label, fontsize=9)
-        axes[3].plot(preview.time_s, preview.mole_fractions, label=case.chemistry.gas_species)
-        axes[3].legend(loc="upper right", fontsize=8, ncols=3)
-        axes[3].set(ylabel="Mole fraction", xlabel="Time (s)", ylim=(-0.02, 1.02))
+        axes[2].plot(preview.time_s, preview.mole_fractions, label=case.chemistry.gas_species)
+        axes[2].legend(loc="upper right", fontsize=8, ncols=3)
+        axes[2].set(ylabel="Mole fraction", ylim=(-0.02, 1.02))
+        axes[3].set_xlabel("Time (s)")
         for axis in axes:
             axis.grid(alpha=0.2)
             axis.tick_params(labelsize=8)
@@ -333,28 +336,53 @@ class CaseEditor(InputEditor):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.results = QWidget()
-        results_layout = QVBoxLayout(self.results)
-        results_layout.addStretch()
-        self.results_status = QLabel()
-        self.results_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.results_status.setWordWrap(True)
-        results_layout.addWidget(self.results_status)
-        hint = QLabel("The Results workspace is awaiting its layout.\nRequested plots can be opened from General.")
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        results_layout.addWidget(hint)
-        results_layout.addStretch()
-        self.tabs.addTab(self.results, "Results")
+        from .report import ReportPage
+        self.report = ReportPage(self)
+        self.tabs.addTab(self.report, "Report")
 
     def set_case(self, case):
-        return super().set_case(case, read_only=bool(case.metadata.get("study_id")))
+        if not super().set_case(case, read_only=bool(case.metadata.get("study_id"))):
+            return False
+        self.report.set_case(case)
+        return True
+
+    def queue_edit(self):
+        super().queue_edit()
+        if self.dirty:
+            self.checkpoint()
+
+    def checkpoint(self):
+        if self.case is None:
+            return
+        from .recovery import case_payload
+        try:
+            if self.dirty or self.report.dirty:
+                if self.dirty:
+                    self.bed.anchor_zones()
+                report = self.report.definition if self.report.case is self.case and self.report.dirty else None
+                self.case.project.drafts.write("case", self.case.id, case_payload(self.case, report))
+            else:
+                self.case.project.drafts.clear("case", self.case.id)
+        except (OSError, ValueError) as exc:
+            self.validation.setText(f"Recovery copy could not be saved: {exc}")
+
+    def save(self):
+        if not super().save():
+            return False
+        if self.report.needs_refresh and self.report.case is self.case:
+            self.report.refresh_source()
+        if not self.report.save():
+            return False
+        self.checkpoint()
+        return True
 
     def update_results(self):
         if self.case is None:
             return
         available = (self.case.run_folder / "output" / RESULTS_FILENAME).is_file()
         self.general.plots.set_results_available(available)
-        self.results_status.setText("Latest results are available." if available else "No results available for this case yet.")
+        if self.report.case is self.case:
+            self.report.invalidate()
 
     def show_plot(self, plot_id):
         if self.case is None or plot_id not in PLOT_REGISTRY:

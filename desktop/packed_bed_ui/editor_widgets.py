@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
-    QSizePolicy, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QSizePolicy, QStyledItemDelegate, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 
@@ -77,8 +77,19 @@ def message(text=""):
     return label
 
 
+class DraftDelegate(QStyledItemDelegate):
+    """Keep text cells in the draft while typing, including unfinished numbers."""
+
+    def createEditor(self, parent, option, index):
+        editor = super().createEditor(parent, option, index)
+        if isinstance(editor, QLineEdit):
+            editor.textEdited.connect(lambda: self.commitData.emit(editor))
+        return editor
+
+
 def table(headers):
     widget = QTableWidget(0, len(headers))
+    widget.setItemDelegate(DraftDelegate(widget))
     widget.setHorizontalHeaderLabels(headers)
     widget.verticalHeader().hide()
     widget.verticalHeader().setDefaultSectionSize(34)

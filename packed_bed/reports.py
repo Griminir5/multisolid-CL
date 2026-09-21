@@ -29,12 +29,14 @@ class ModelField:
     source: str
     output: str
     dimensions: tuple[str, ...] = ()
+    unit: str = ""
 
 
 @dataclass(frozen=True)
 class OutputField:
     name: str
     dimensions: tuple[str, ...]
+    unit: str = ""
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,8 @@ class ReportSpec:
     derived: tuple[OutputField, ...] = ()
     derive: Callable[[Any, Mapping[str, Any], Case], None] | None = None
     requires_reactions: bool = False
+    unit: str = ""
+    axis_resolvers: Mapping[str, Callable[[Mapping[str, Any]], Any]] = field(default_factory=dict)
 
     @property
     def model_variables(self) -> tuple[str, ...]:
@@ -53,10 +57,10 @@ class ReportSpec:
     @property
     def outputs(self) -> tuple[OutputField, ...]:
         direct = tuple(
-            OutputField(field.output, ("time", *field.dimensions))
+            OutputField(field.output, ("time", *field.dimensions), field.unit or self.unit)
             for field in self.fields
         )
-        return (*direct, *self.derived)
+        return (*direct, *(OutputField(f.name, f.dimensions, f.unit or self.unit) for f in self.derived))
 
 
 def _derive_temperature(dataset, _raw, _case) -> None:
@@ -135,12 +139,12 @@ def _derive_mass_balance(dataset, _raw, _case) -> None:
     dataset.mass_balance_error.attrs = {"units": "kg", "derived_from": "mass totals"}
 
 
-def _field(source: str, output: str, *dimensions: str) -> ModelField:
-    return ModelField(source, output, dimensions)
+def _field(source: str, output: str, *dimensions: str, unit: str = "") -> ModelField:
+    return ModelField(source, output, dimensions, unit)
 
 
-def _output(name: str, *dimensions: str) -> OutputField:
-    return OutputField(name, ("time", *dimensions))
+def _output(name: str, *dimensions: str, unit: str = "") -> OutputField:
+    return OutputField(name, ("time", *dimensions), unit)
 
 
 REPORT_REGISTRY: Mapping[str, ReportSpec] = MappingProxyType({
@@ -149,6 +153,7 @@ REPORT_REGISTRY: Mapping[str, ReportSpec] = MappingProxyType({
         (_field("T_in", "inlet_temperature"), _field("temp_bed", "temperature", "x_cell")),
         derived=(_output("outlet_temperature"),),
         derive=_derive_temperature,
+        unit="K",
     ),
     "pressure": ReportSpec(
         "Inlet, cell-centre, outlet, and drop pressure.",
@@ -159,14 +164,17 @@ REPORT_REGISTRY: Mapping[str, ReportSpec] = MappingProxyType({
         ),
         derived=(_output("pressure_drop"),),
         derive=_derive_pressure,
+        unit="Pa",
     ),
     "velocity": ReportSpec(
         "Face superficial velocity.",
         (_field("u_s", "velocity", "x_face"),),
+        unit="m/s",
     ),
     "gas_concentration": ReportSpec(
         "Gas concentration by species and cell.",
         (_field("c_gas", "gas_concentration", "gas_species", "x_cell"),),
+        unit="mol/m³",
     ),
     "gas_mole_fraction": ReportSpec(
         "Inlet, cell-centre, and outlet gas mole fraction.",
@@ -177,37 +185,43 @@ REPORT_REGISTRY: Mapping[str, ReportSpec] = MappingProxyType({
         support=(_field("N_gas_face", "", "gas_species", "x_face"),),
         derived=(_output("outlet_composition", "gas_species"),),
         derive=_derive_outlet_composition,
+        unit="1",
     ),
     "solid_concentration": ReportSpec(
         "Solid concentration by species and cell.",
         (_field("c_sol", "solid_concentration", "solid_species", "x_cell"),),
+        unit="mol/m³ bed",
     ),
     "solid_mole_fraction": ReportSpec(
         "Derived solid mole fraction by species and cell.",
         support=(_field("c_sol", "", "solid_species", "x_cell"),),
         derived=(_output("solid_mole_fraction", "solid_species", "x_cell"),),
         derive=_derive_solid_mole_fraction,
+        unit="1",
     ),
     "gas_flux": ReportSpec(
         "Inlet flow and face gas flux with outlet flows.",
         (
-            _field("F_in", "inlet_flow"),
+            _field("F_in", "inlet_flow", unit="mol/s"),
             _field("N_gas_face", "gas_flux", "gas_species", "x_face"),
         ),
         derived=(
-            _output("outlet_species_flow", "gas_species"),
-            _output("outlet_flow"),
+            _output("outlet_species_flow", "gas_species", unit="mol/s"),
+            _output("outlet_flow", unit="mol/s"),
         ),
         derive=_derive_gas_flux,
+        unit="mol/(m² s)",
     ),
     "reaction_rate": ReportSpec(
         "Reaction rate by reaction and cell.",
         (_field("R_rxn", "reaction_rate", "reaction", "x_cell"),),
         requires_reactions=True,
+        unit="mol/(m³ bed s)",
     ),
     "gas_enthalpy_flux": ReportSpec(
         "Gas enthalpy flux by species and face.",
         (_field("J_gas_face", "gas_enthalpy_flux", "gas_species", "x_face"),),
+        unit="J/(m² s)",
     ),
     "heat_balance": ReportSpec(
         "Integral heat totals and balance error.",
@@ -216,6 +230,7 @@ REPORT_REGISTRY: Mapping[str, ReportSpec] = MappingProxyType({
         )),
         derived=(_output("heat_balance_error"),),
         derive=_derive_heat_balance,
+        unit="J",
     ),
     "mass_balance": ReportSpec(
         "Integral mass totals and balance error.",
@@ -224,6 +239,7 @@ REPORT_REGISTRY: Mapping[str, ReportSpec] = MappingProxyType({
         )),
         derived=(_output("mass_balance_error"),),
         derive=_derive_mass_balance,
+        unit="kg",
     ),
 })
 
@@ -318,8 +334,14 @@ def _coordinate(case: Case, variable, dimension: str, index: int, size: int):
 
 
 def _scheduled_time(case: Case) -> np.ndarray:
-    interval = case.run.simulation.reporting_interval_s
-    horizon = case.run.simulation.time_horizon_s
+    return reporting_times(case.run.simulation.time_horizon_s, case.run.simulation.reporting_interval_s)
+
+
+def reporting_times(horizon: float, interval: float) -> np.ndarray:
+    """Expected reporting coordinates, also used by report configuration."""
+    horizon, interval = float(horizon), float(interval)
+    if not np.isfinite(horizon) or not np.isfinite(interval) or horizon < 0 or interval <= 0:
+        raise ValueError("Enter a nonnegative horizon and positive reporting interval.")
     time = interval * np.arange(int(np.floor(horizon / interval)) + 1)
     if np.isclose(time[-1], horizon, rtol=0.0, atol=TIME_ATOL):
         time[-1] = horizon

@@ -185,6 +185,110 @@ def test_rebuild_deletes_every_case_and_result_but_keeps_library(study_project):
     assert not restored.run_folder.exists()
 
 
+def test_study_reports_are_fixed_copies_and_adapt_to_generated_grids(study_project):
+    from packed_bed.report_schema import describe_inputs
+    from packed_bed_ui.workbook import plan_sheet, rule_columns
+
+    project, base, study = study_project
+    rule = {"id": "temperature", "quantity": "temperature", "selections": {"x_cell": {"mode": "all"}}}
+    sheet = {"name": "Temperatures", "axis": "time", "rows": {"mode": "all"},
+             "columns": rule_columns(describe_inputs(base.documents), rule), "column_rules": [rule]}
+    base.metadata["report"] = {"version": 1, "sheets": [sheet]}
+    base.save()
+    study = project.study_store.replace_baseline(study, base)
+    study.factors = [Factor("cells", "axial_cells", [3, 5])]
+    project.study_store.save_study(study)
+    signature = project.study_store.signature(study)
+    base.metadata["report"]["sheets"][0]["name"] = "Source edited later"
+    base.save()
+    project.delete_case(base)
+    project = Project.open(project.root)
+    store = project.study_store
+    study = store.studies[study.id]
+    cases = store.apply_preview(store.preview(study))
+    assert len(cases) == 2
+    for case, cells in zip(cases, (3, 5)):
+        layout = case.metadata["report"]["sheets"][0]
+        assert layout["name"] == "Temperatures"
+        assert len(plan_sheet(describe_inputs(case.documents), layout)["columns"]) == cells
+    cases[0].metadata["report"]["sheets"][0]["name"] = "Local report edit"
+    cases[0].save()
+    assert cases[1].metadata["report"]["sheets"][0]["name"] == "Temperatures"
+    assert store.signature(study) == signature and not store.needs_update(study.id)
+    replacement = store.apply_preview(store.preview(study))
+    assert replacement[0].metadata["report"]["sheets"][0]["name"] == "Temperatures"
+
+
+def test_existing_study_can_capture_report_before_source_is_deleted(study_project):
+    project, base, study = study_project
+    study.editor_metadata.pop("report")  # An existing study from before report inheritance.
+    study.factors = [Factor("cells", "axial_cells", [3])]
+    project.study_store.save_study(study, _replace_baseline=True)
+    base.metadata["report"] = {"version": 1, "sheets": []}
+    base.save()
+    generated, = project.study_store.apply_preview(project.study_store.preview(study))
+    assert generated.metadata["report"] == base.metadata["report"]
+    project.delete_case(base)
+    reopened = Project.open(project.root)
+    store = reopened.study_store
+    generated, = store.apply_preview(store.preview(store.studies[study.id]))
+    assert generated.metadata["report"] == {"version": 1, "sheets": []}
+
+
+def test_delete_study_removes_cases_results_and_queue_but_keeps_library(study_project):
+    project, base, study = study_project
+    store = project.study_store
+    other = store.create("Other study", base)
+    other.factors = [Factor("cells", "axial_cells", [5])]
+    store.save_study(other)
+    other_case, = store.apply_preview(store.preview(other))
+    definition = ReusableDefinition(uuid4().hex, "Bed", "bed", definition_payload("bed", base.documents))
+    store.save_definition(definition)
+    study.factors = [Factor("bed", "definition:bed", [definition.id])]
+    store.save_study(study)
+    generated, = store.apply_preview(store.preview(study))
+    succeed(project, generated)
+    project.executing = True
+    with pytest.raises(StudyError, match="execution"):
+        store.delete_study(study.id)
+    project.executing = False
+    store.delete_study(study.id)
+    assert not generated.root.exists()
+    assert not (project.root / "studies" / study.id).exists()
+    assert not (project.root / ".study-transaction").exists()
+    assert generated.id not in read_json(project.root / "execution.json")["cases"]
+    reopened = Project.open(project.root)
+    assert {case.id for case in reopened.cases} == {base.id, other_case.id}
+    assert set(reopened.study_store.studies) == {other.id}
+    assert definition.id in reopened.study_store.definitions
+
+
+def test_delete_study_rolls_back_when_metadata_commit_fails(study_project, monkeypatch):
+    import packed_bed_ui.study_store as storage
+
+    project, base, study = study_project
+    study.factors = [Factor("cells", "axial_cells", [3])]
+    project.study_store.save_study(study)
+    generated, = project.study_store.apply_preview(project.study_store.preview(study))
+    succeed(project, generated)
+    before = (project.root / "project.json").read_bytes()
+    write = storage.write_json
+    def fail(path, value):
+        if path == project.root / "project.json":
+            raise OSError("Commit interrupted")
+        write(path, value)
+    with monkeypatch.context() as patch:
+        patch.setattr(storage, "write_json", fail)
+        with pytest.raises(OSError, match="interrupted"):
+            project.study_store.delete_study(study.id)
+    reopened = Project.open(project.root)
+    assert (project.root / "project.json").read_bytes() == before
+    assert {case.id for case in reopened.cases} == {base.id, generated.id}
+    assert study.id in reopened.study_store.studies
+    assert (generated.run_folder / "retained-result.txt").read_text() == "result"
+    assert not (project.root / ".study-transaction").exists()
+
+
 def test_scientific_errors_create_drafts_and_program_horizons_follow_ownership(study_project):
     project, base, study = study_project
     study.factors = [Factor("length", "bed_length_m", [-1])]

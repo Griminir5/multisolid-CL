@@ -40,6 +40,22 @@ def action_icon(widget, label, theme, fallback):
     return QIcon.fromTheme(theme, icon)
 
 
+def icon_button(widget, label, callback, description):
+    theme, fallback = {
+        "Run": ("media-playback-start", QStyle.StandardPixmap.SP_MediaPlay),
+        "Duplicate": ("edit-copy", QStyle.StandardPixmap.SP_FileDialogNewFolder),
+        "Edit": ("document-edit", QStyle.StandardPixmap.SP_FileDialogDetailedView),
+        "Delete": ("edit-delete", QStyle.StandardPixmap.SP_TrashIcon),
+    }[label]
+    button = QToolButton(widget)
+    button.setIcon(action_icon(widget, label, theme, fallback))
+    button.setToolTip(description)
+    button.setAccessibleName(description)
+    button.setAutoRaise(True)
+    button.clicked.connect(callback)
+    return button
+
+
 class CaseItemDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
         # Restrict text editors without intercepting Qt's checkbox events.
@@ -84,13 +100,8 @@ class CaseList(QTreeWidget):
             group.setText(1, study["name"])
             group.setExpanded(expansion.get(study_id, True))
             self.groups[study_id] = group
-            button = QToolButton()
-            button.setText("Edit study")
-            button.setToolTip("Inspect variations or rebuild generated cases")
-            button.setAccessibleName(f"Edit study {study['name']}")
-            button.clicked.connect(lambda _, key=study_id: self.action.emit("Study", key))
-            self.setItemWidget(group, 4, button)
-            self.group_buttons[study_id] = button
+            self.group_buttons[study_id] = self.add_actions(
+                group, study_id, f"study {study['name']}", {"Edit": "Study", "Delete": "DeleteStudy"})
         independent_index = 0
         for case in project.cases:
             study_id = case.metadata.get("study_id")
@@ -106,29 +117,24 @@ class CaseList(QTreeWidget):
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEditable)
             item.setCheckState(0, Qt.CheckState.Checked if case.metadata.get("included", True) else Qt.CheckState.Unchecked)
             self.items[case.id] = item
-            actions = QWidget()
-            layout = QHBoxLayout(actions)
-            layout.setContentsMargins(2, 1, 2, 1)
-            layout.setSpacing(4)
-            self.buttons[case.id] = {}
-            for label, theme, fallback in (
-                ("Run", "media-playback-start", QStyle.StandardPixmap.SP_MediaPlay),
-                ("Duplicate", "edit-copy", QStyle.StandardPixmap.SP_FileDialogNewFolder),
-                ("Edit", "document-edit", QStyle.StandardPixmap.SP_FileDialogDetailedView),
-                ("Delete", "edit-delete", QStyle.StandardPixmap.SP_TrashIcon),
-            ):
-                button = QToolButton()
-                button.setIcon(action_icon(self, label, theme, fallback))
-                button.setToolTip(label)
-                button.setAccessibleName(f"{label} {case.name}")
-                button.setAutoRaise(True)
-                button.clicked.connect(lambda checked=False, a=label, key=case.id: self.action.emit(a, key))
-                layout.addWidget(button)
-                self.buttons[case.id][label] = button
-            self.setItemWidget(item, 4, actions)
+            self.buttons[case.id] = self.add_actions(
+                item, case.id, case.name, {label: label for label in ("Run", "Duplicate", "Edit", "Delete")})
         for group in self.groups.values():
             group.setText(1, f"{group.text(1)} ({group.childCount()} cases)")
         self.blockSignals(False)
+
+    def add_actions(self, item, key, name, actions):
+        holder = QWidget()
+        layout = QHBoxLayout(holder)
+        layout.setContentsMargins(2, 1, 2, 1)
+        layout.setSpacing(4)
+        buttons = {}
+        for label, action in actions.items():
+            button = icon_button(self, label, lambda _, a=action: self.action.emit(a, key), f"{label} {name}")
+            layout.addWidget(button)
+            buttons[label] = button
+        self.setItemWidget(item, 4, holder)
+        return buttons
 
     def refresh(self, project, job, active):
         self.blockSignals(True)
@@ -157,7 +163,10 @@ class CaseList(QTreeWidget):
         for study_id, group in self.groups.items():
             entry = next((entry for entry in project.metadata.get("studies", []) if entry["id"] == study_id), {})
             group.setText(1, f"{entry.get('name', 'Study')} ({group.childCount()} cases)")
-            self.group_buttons[study_id].setEnabled(not active)
+            for label, button in self.group_buttons[study_id].items():
+                button.setEnabled(not active)
+                button.setToolTip(f"{label} study {entry.get('name', 'Study')}")
+                button.setAccessibleName(button.toolTip())
             children = [group.child(i) for i in range(group.childCount())]
             checks = {child.checkState(0) for child in children}
             group.setCheckState(0, next(iter(checks)) if len(checks) == 1 else Qt.CheckState.PartiallyChecked if checks else Qt.CheckState.Unchecked)

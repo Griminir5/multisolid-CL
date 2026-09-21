@@ -24,15 +24,15 @@ def empty_documents(case_id):
         "run": {
             "simulation": {"system_name": "Case_" + case_id, "time_horizon_s": 0.0,
                            "reporting_interval_s": 1.0, "mass_scheme": "weno3", "heat_scheme": "weno3",
-                           "report_time_derivatives": False, "repeat_program": False},
+                           "report_time_derivatives": False, "repeat_program": True, "program_mode": "feed_stream"},
             "model": {"axial_cells": 20},
-            "solver": {"backend": "daetools", "name": "superlu", "threads": 1, "relative_tolerance": 1e-3},
+            "solver": {"backend": "daetools", "name": "superlu", "threads": 1, "relative_tolerance": 1e-5},
             "outputs": {"requested_reports": [], "requested_plots": []},
         },
         "chemistry": {"gas_species": [], "reaction_families": [], "reaction_ids": []},
         "solids": {"solid_species": [], "initial_profile": {"basis": "bed", "zones": []}},
-        "program": {key: {"initial": {} if key == "inlet_composition" else "", "steps": []}
-                    for key in ("inlet_flow", "inlet_temperature", "inlet_composition", "outlet_pressure")},
+        "program": {"feed_stream": {"basis": "mol_per_s", "initial": {"flow": "", "temperature": "", "composition": {}}, "steps": []},
+                    "outlet_pressure": {"initial": "", "steps": []}},
     }
 
 
