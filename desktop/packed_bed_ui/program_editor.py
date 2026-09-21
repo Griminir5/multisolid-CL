@@ -212,13 +212,30 @@ class ChannelTable(QGroupBox):
         species = self.editor.get(("chemistry", "gas_species"), [])
         composition_fields = {}
         total = QLabel()
+
+        def normalize_composition():
+            values = [float(field.text()) for field in composition_fields.values()]
+            value_sum = math.fsum(values)
+            for field, value in zip(composition_fields.values(), values):
+                field.setText(repr(value / value_sum))
+
+        normalize = action_button("Normalize", normalize_composition,
+                                  tooltip="Scale all mole fractions to sum to 1; requires non-negative numbers and a positive total")
+        normalize.setAutoDefault(False)
+
         def update_total():
             try:
-                value = math.fsum(float(field.text()) for field in composition_fields.values())
+                values = [float(field.text()) for field in composition_fields.values()]
+                value = math.fsum(values)
                 valid = math.isclose(value, 1.0, rel_tol=0, abs_tol=1e-12)
-                total.setText(f"Total: {value:g}" + ("" if valid else " · must sum to 1"))
-            except ValueError:
+                total.setText(f"Total: {display(value)}" + ("" if valid else " · must sum to 1"))
+                normalize.setEnabled(composition_enabled.isChecked() and value > 0
+                                     and all(math.isfinite(item) and item >= 0 for item in values))
+            except (ValueError, OverflowError):
                 total.setText("Total: unfinished composition")
+                normalize.setEnabled(False)
+
+        composition_enabled.toggled.connect(update_total)
         for key in species:
             field = QLineEdit(display(composition.get(key)))
             field.setObjectName(key)
@@ -227,7 +244,10 @@ class ChannelTable(QGroupBox):
             composition_fields[key] = field
             field.textChanged.connect(update_total)
             form.addRow(key, field)
-        form.addRow(total)
+        summary = QHBoxLayout()
+        summary.addWidget(total, 1)
+        summary.addWidget(normalize)
+        form.addRow(summary)
         update_total()
         scroll.setWidget(content)
         outer.addWidget(scroll)

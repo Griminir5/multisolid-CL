@@ -22,9 +22,10 @@ def number(text):
 
 
 def display(value):
+    """Preserve numeric precision when displayed values are edited and saved."""
     if value is None:
         return ""
-    return f"{value:g}" if isinstance(value, float) else str(value)
+    return str(value).removesuffix(".0") if isinstance(value, float) else str(value)
 
 
 def select_value(combo, value):

@@ -41,7 +41,10 @@ previews do not need DAETools. Execution needs DAETools with SuperLU.
    the numerical preview. Program edits initial values and timed hold/ramp steps
    beside its preview, ordered as flow, temperature, composition, and pressure.
    Target headers show the units. Click a channel's arrow to collapse its settings
-   and give the other channels more room. Drafts save after a short pause, including incomplete
+   and give the other channels more room. In a composition dialog, **Normalize**
+   scales the entered mole fractions to sum to 1 while preserving their ratios.
+   Fill every species with a non-negative number and use a positive total to enable it.
+   Drafts save after a short pause, including incomplete
    values. Hover over a validation message for its full details.
 5. **Run** in the project case list executes one case. **Run all included cases** runs the checked
    cases as one batch, continuing after individual failures. **Maximum workers**

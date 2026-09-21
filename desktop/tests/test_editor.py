@@ -231,6 +231,56 @@ def test_hold_ramp_targets_and_duration_round_trip(editing):
     assert case.documents["program"]["inlet_flow"]["steps"] == [{"kind": "hold", "duration_s": 1.0}]
 
 
+@pytest.mark.parametrize("mode, key", [("separate_channels", "inlet_composition"), ("feed_stream", "feed_stream")])
+@pytest.mark.parametrize("row", [0, 1], ids=["initial", "ramp"])
+@pytest.mark.parametrize("normalize", [False, True], ids=["entered", "normalized"])
+def test_composition_precision_survives_save_and_reopen(editing, monkeypatch, mode, key, row, normalize):
+    from PyQt6.QtWidgets import QDialog, QLabel, QLineEdit, QPushButton
+
+    editor, case = editing
+    initial = {"N2": 1.0, "H2": 0.0, "O2": 0.0}
+    editor.set_species("gas", list(initial))
+    editor.program.mode.setCurrentIndex(editor.program.mode.findData(mode))
+    channel = editor.program.channels[key]
+    state = ({"flow": 1.234567891234567e-8, "temperature": 300.1234567891234, "composition": initial}
+             if key == "feed_stream" else initial)
+    channel.write({"initial": deepcopy(state), "steps": [
+        {"kind": "ramp", "duration_s": 1.0, "target": deepcopy(state)},
+    ]})
+    expected = ({name: 1 / 3 for name in initial} if normalize else
+                {"N2": 0.987654321, "H2": 0.011111111, "O2": 0.001234568})
+
+    def enter_composition(dialog):
+        for name, value in expected.items():
+            dialog.findChild(QLineEdit, name).setText("1" if normalize else str(value))
+        if normalize:
+            next(button for button in dialog.findChildren(QPushButton) if button.text() == "Normalize").click()
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QDialog, "exec", enter_composition)
+    channel.edit_state(row)
+    assert editor.save()
+
+    def accept_unchanged(dialog):
+        assert {name: float(dialog.findChild(QLineEdit, name).text()) for name in expected} == expected
+        assert any(label.text() == "Total: 1" for label in dialog.findChildren(QLabel))
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QDialog, "exec", accept_unchanged)
+    for _ in range(2):
+        reopened = Project.open(case.project.root).cases[0]
+        saved = reopened.documents["program"][key]
+        value = saved["initial"] if row == 0 else saved["steps"][0]["target"]
+        assert (value["composition"] if key == "feed_stream" else value) == expected
+        if key == "feed_stream":
+            assert value["flow"] == state["flow"]
+            assert value["temperature"] == state["temperature"]
+        reopened.resolve()  # The engine's 1e-12 sum constraint must still pass.
+        assert editor.set_case(reopened)
+        editor.program.channels[key].edit_state(row)
+        assert editor.save()
+
+
 def test_modes_preserve_steps_and_shared_outlet_across_reopen(editing, qt_app):
     editor, case = editing
     original = deepcopy(case.documents["program"])
