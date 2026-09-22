@@ -243,7 +243,7 @@ FAMILY = ReactionFamily(
     reactions=(
         ReactionDefinition(
             id="ni_reduction_h2_medrano",
-            name="NiO reduction by H2 (Medrano AN)",
+            name="NiO reduction by H2",
             phase="gas_solid",
             stoichiometry={"H2": -1.0, "NiO": -1.0, "Ni": 1.0, "H2O": 1.0},
             required_species=("H2", "H2O", "Ni", "NiO"),

@@ -9,6 +9,7 @@ pyrightconfig.json
 build/
 **/.packed_bed_cache/
 dist/
+desktop/vendor/graphviz/
 
 Barin_Extraction/Thermochemical Data of Pure Substances - 1995 - Barin.pdf
 

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from importlib.util import find_spec
 from pathlib import Path
+import warnings
 
 import numpy as np
 
@@ -37,121 +37,18 @@ def _finalize_series_axes(axes, *, x_min, x_max):
 
 
 def _render_system_graph(case: Case, output_dir: Path, property_registry) -> dict[str, Path]:
-    import pygraphviz
+    from .reaction_graph import build_reaction_graph, render_svg
     from .reactions import reaction_catalog
 
-    graph = pygraphviz.AGraph(name="system_graph", strict=False, directed=True)
-    graph.graph_attr.update(
-        bgcolor="white",
-        pad="0.35",
-        outputorder="edgesfirst",
-        overlap="false",
-        splines="true",
-        labelloc="t",
-        labeljust="c",
-        fontname="Arial",
-        fontsize="20",
-        label="Species and Reaction System Graph",
-        rankdir="LR",
-        nodesep="0.55",
-        ranksep="0.85",
-        newrank="true",
+    catalog = reaction_catalog(case.reaction_families)
+    graph = build_reaction_graph(
+        case.chemistry.gas_species, case.solids.solid_species,
+        [catalog[key] for key in case.chemistry.reaction_ids], property_registry,
     )
-
-    graph.node_attr.update(
-        fontname="Arial",
-        fontsize="13",
-        penwidth="1.6",
-        margin="0.18,0.12",
-    )
-    graph.edge_attr.update(
-        fontname="Arial",
-        fontsize="13",
-        penwidth="2.0",
-        arrowsize="0.95",
-    )
-
-    for species_ids, fill_color in (
-        (case.chemistry.gas_species, "#81b29a"),
-        (case.solids.solid_species, "#f2cc8f"),
-    ):
-        for species_id in species_ids:
-            graph.add_node(
-                species_id,
-                label=f"{species_id}\n{property_registry.get_record(species_id).name}",
-                shape="ellipse",
-                style="filled",
-                fillcolor=fill_color,
-                color="#2f3e46",
-                fontcolor="#1f2933",
-            )
-
-    def add_edge(source, target, coefficient, reversible, label):
-        edge_color = (
-            "#355070"
-            if coefficient < 0.0
-            else "#bc6c25" if coefficient > 0.0 else "#6d597a"
-        )
-        graph.add_edge(
-            source,
-            target,
-            label=label,
-            color=edge_color,
-            fontcolor=edge_color,
-            dir="both" if reversible else "forward",
-            arrowhead="normal",
-            arrowtail="normal" if reversible else "none",
-            style="dashed" if coefficient == 0.0 else "solid",
-            constraint="false" if coefficient == 0.0 else "true",
-            penwidth="1.8" if coefficient == 0.0 else "2.2",
-            arrowsize="0.85" if coefficient == 0.0 else "0.95",
-        )
-
-    reactions = reaction_catalog(case.reaction_families)
-    for reaction_id in case.chemistry.reaction_ids:
-        reaction = reactions[reaction_id]
-        reaction_node = f"reaction:{reaction.id}"
-        label = [reaction.id]
-        if reaction.reversible:
-            label.append("reversible")
-        if reaction.catalyst_species:
-            label.append(f"cat: {', '.join(reaction.catalyst_species)}")
-        graph.add_node(
-            reaction_node,
-            label="\n".join(label),
-            shape="box",
-            style="rounded,filled",
-            fillcolor="#6d597a",
-            color="#3d405b",
-            fontcolor="white",
-            margin="0.22,0.14",
-        )
-        for species_id, coefficient in reaction.stoichiometry.items():
-            magnitude = abs(coefficient)
-            rounded = round(magnitude)
-            coefficient_label = (
-                str(int(rounded))
-                if abs(magnitude - rounded) < 1.0e-9
-                else f"{magnitude:g}"
-            )
-            source, target = (
-                (species_id, reaction_node)
-                if coefficient < 0.0
-                else (reaction_node, species_id)
-            )
-            add_edge(
-                source,
-                target,
-                coefficient,
-                reaction.reversible,
-                coefficient_label,
-            )
-        for species_id in reaction.catalyst_species:
-            add_edge(species_id, reaction_node, 0.0, reaction.reversible, "cat")
-
+    svg = render_svg(graph)
     output_dir.mkdir(parents=True, exist_ok=True)
     svg_path = output_dir / "system_graph.svg"
-    graph.draw(str(svg_path), prog="neato")
+    svg_path.write_bytes(svg)
     return {"system_graph_svg": svg_path}
 
 
@@ -306,14 +203,15 @@ def generate_artifacts(case: Case) -> dict[str, Path]:
     case.output_directory.mkdir(parents=True, exist_ok=True)
     case.artifacts_directory.mkdir(parents=True, exist_ok=True)
     artifacts: dict[str, Path] = {}
-    if find_spec("pygraphviz") is not None:
-        artifacts.update(
-            _render_system_graph(
-                case,
-                case.artifacts_directory,
-                PROPERTY_REGISTRY,
-            )
-        )
+    from .reaction_graph import GraphvizError
+
+    try:
+        artifacts.update(_render_system_graph(case, case.artifacts_directory, PROPERTY_REGISTRY))
+    except GraphvizError as exc:
+        # Optional diagrams must not prevent the simulation or other artifacts.
+        # Remove a previous export so it cannot masquerade as this case's graph.
+        (case.artifacts_directory / "system_graph.svg").unlink(missing_ok=True)
+        warnings.warn(f"System graph was not generated: {exc}", RuntimeWarning, stacklevel=2)
     artifacts.update(render_operating_program(case, case.artifacts_directory))
     artifacts.update(render_initial_solid_profile(case, case.artifacts_directory))
     return artifacts

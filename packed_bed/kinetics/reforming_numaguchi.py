@@ -144,7 +144,7 @@ FAMILY = ReactionFamily(
     reactions=(
         ReactionDefinition(
             id="smr_reaction_numaguchi",
-            name="Steam methane reforming on Ni (Numaguchi and Kikuchi) as documented by Andrew Wright",
+            name="Steam methane reforming on Ni (Numaguchi and Kikuchi)",
             phase="gas_gas",
             stoichiometry={"CH4": -1.0, "H2O": -1.0, "CO": 1.0, "H2": 3.0},
             required_species=("CH4", "H2O", "CO", "H2", "Ni"),
@@ -155,7 +155,7 @@ FAMILY = ReactionFamily(
         ),
         ReactionDefinition(
             id="wgs_reaction_numaguchi",
-            name="Water-gas shift on Ni (Numaguchi and Kikuchi) as documented by Andrew Wright",
+            name="Water-gas shift on Ni (Numaguchi and Kikuchi)",
             phase="gas_gas",
             stoichiometry={"CO": -1.0, "H2O": -1.0, "CO2": 1.0, "H2": 1.0},
             required_species=("CO", "H2O", "CO2", "H2", "Ni"),

@@ -38,9 +38,10 @@ Configuration validation does not need DAETools. Simulation needs a working DAET
 This repository does not distribute DAETools, OpenCS, or their binary dependencies.
 
 For the DAETools plotter, install the GUI dependencies with `python -m pip install -e ".[plotter]"`.
-For the system graph, install Graphviz.
-Then run `python -m pip install -e ".[graph]"`.
-Graphviz must be available to `pygraphviz`.
+The system graph uses the separate Graphviz `neato` executable, shared with the
+desktop preview. For source development, install Graphviz on `PATH` or set
+`MULTISOLID_GRAPHVIZ` to the executable. No Python Graphviz binding is needed.
+See [bundling Graphviz](desktop/GRAPHVIZ.md) for staging the separate runtime.
 
 **Validate a case.** Start with the [default case](packed_bed/examples/default_case/run.yaml).
 
@@ -58,7 +59,9 @@ python -m packed_bed packed_bed/examples/default_case/run.yaml
 ```
 
 Use `--artifacts` to create the operating-program diagram and initial solid profile before the run.
-If `pygraphviz` is available, this option also creates the system graph.
+This option also creates the system graph with Graphviz. If Graphviz is unavailable
+or fails, a warning explains why that diagram was skipped; other artifacts and the
+simulation can still proceed.
 Use `--dae-plotter` to open the DAETools plotter after the run.
 Use `--debug` to show the traceback for an unexpected error.
 The installed `packed-bed` command accepts the same arguments as `python -m packed_bed`.

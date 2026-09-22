@@ -1,18 +1,16 @@
-"""Species lists, reaction families and a fitted, native Qt reaction graph."""
+"""Species lists, reaction families and a fitted Graphviz reaction graph."""
 
-from math import atan2, cos, sin
-
-from PyQt6.QtCore import QPointF, Qt
-from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QGraphicsScene, QGraphicsView, QGroupBox, QHBoxLayout, QHeaderView,
-    QLabel, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QGroupBox, QHBoxLayout, QHeaderView, QLabel, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from packed_bed.kinetics import FAMILY_REGISTRY
 from packed_bed.properties import PROPERTY_REGISTRY
 
 from .editor_widgets import SelectionList, action_button, choose_items
+from .reaction_graph import NetworkView
 
 
 def equation(reaction):
@@ -20,99 +18,6 @@ def equation(reaction):
         return " + ".join((f"{abs(value):g} " if abs(value) != 1 else "") + species
                           for species, value in reaction.stoichiometry.items() if value * sign > 0)
     return side(-1) + (" ⇌ " if reaction.reversible else " → ") + side(1)
-
-
-class NetworkView(QGraphicsView):
-    def __init__(self):
-        super().__init__()
-        self.setScene(QGraphicsScene(self))
-        self.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self.setMinimumSize(0, 0)
-        self.setBackgroundBrush(QColor("#f8fafc"))
-        self.setAccessibleName("Species and reactions graph")
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.fit()
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        self.fit()
-
-    def fit(self):
-        bounds = self.scene().itemsBoundingRect().adjusted(-25, -25, 25, 25)
-        self.setSceneRect(bounds)
-        self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
-
-    def draw(self, gases, solids, reactions):
-        scene = self.scene()
-        scene.clear()
-        selected = set(gases) | set(solids)
-        required = {species for reaction in reactions for species in reaction.all_species}
-        missing = required - selected
-        gases = list(gases) + sorted(species for species in missing
-                                    if PROPERTY_REGISTRY.records.get(species)
-                                    and PROPERTY_REGISTRY.records[species].phase == "gas")
-        solids = list(solids) + sorted(missing - set(gases))
-        positions = {}
-        height = max(len(gases), len(solids), len(reactions), 1) * 85
-        nodes = []
-        for ids, x, color in ((gases, 0, "#d9eee8"), (solids, 540, "#f5e6ca")):
-            for index, species in enumerate(ids):
-                y = (index + 0.5) * height / max(len(ids), 1)
-                positions[species] = QPointF(x, y)
-                nodes.append((species, species, x, y, "#ffe0dd" if species in missing else color, False))
-        for index, reaction in enumerate(reactions):
-            key = "reaction:" + reaction.id
-            y = (index + 0.5) * height / len(reactions)
-            positions[key] = QPointF(270, y)
-            nodes.append((key, reaction.name, 270, y, "#e3e5f5", True))
-        for reaction in reactions:
-            target = positions["reaction:" + reaction.id]
-            for species in reaction.all_species:
-                source = positions[species]
-                coefficient = reaction.stoichiometry.get(species, 0)
-                start, end = (source, target) if coefficient <= 0 else (target, source)
-                direction = 1 if end.x() > start.x() else -1
-                start = start + QPointF(direction * (76 if start == target else 52), 0)
-                end = end - QPointF(direction * (76 if end == target else 52), 0)
-                path = QPainterPath(start)
-                path.cubicTo(start + QPointF(direction * 70, 0), end - QPointF(direction * 70, 0), end)
-                color = QColor("#9272a1" if coefficient == 0 else "#648494")
-                pen = QPen(color, 1.5)
-                if coefficient == 0:
-                    pen.setStyle(Qt.PenStyle.DashLine)
-                edge = scene.addPath(path, pen)
-                edge.setToolTip(f"{species}: {'catalyst / rate dependency' if coefficient == 0 else abs(coefficient)}")
-                arrows = [(end, path.pointAtPercent(0.97))]
-                if reaction.reversible and coefficient:
-                    arrows.append((start, path.pointAtPercent(0.03)))
-                for tip, tail in arrows:
-                    angle = atan2(tip.y() - tail.y(), tip.x() - tail.x())
-                    arrow = QPolygonF([tip, tip - QPointF(9 * cos(angle - .4), 9 * sin(angle - .4)),
-                                       tip - QPointF(9 * cos(angle + .4), 9 * sin(angle + .4))])
-                    scene.addPolygon(arrow, QPen(color), QBrush(color))
-        for key, label, x, y, color, is_reaction in nodes:
-            width, node_height = (152, 64) if is_reaction else (104, 42)
-            pen, brush = QPen(QColor("#a4b0bc")), QBrush(QColor(color))
-            shape = (scene.addRect(x - width / 2, y - node_height / 2, width, node_height, pen, brush)
-                     if is_reaction else scene.addEllipse(x - width / 2, y - node_height / 2, width, node_height, pen, brush))
-            text = scene.addText(label)
-            text.setDefaultTextColor(QColor("#253748"))
-            text.setTextWidth(width - 8)
-            option = text.document().defaultTextOption()
-            option.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            text.document().setDefaultTextOption(option)
-            text.setPos(x - (width - 8) / 2, y - text.boundingRect().height() / 2)
-            tooltip = "Missing required species" if key in missing else label
-            if is_reaction:
-                reaction = next(item for item in reactions if "reaction:" + item.id == key)
-                tooltip = equation(reaction) + "\n" + reaction.source_reference
-            shape.setToolTip(tooltip)
-            text.setToolTip(tooltip)
-        if not nodes:
-            scene.addText("Add species and reaction families to build the system graph.")
-        self.fit()
 
 
 class ChemistryPage(QWidget):
@@ -157,7 +62,24 @@ class ChemistryPage(QWidget):
         graph_layout = QVBoxLayout(graph)
         self.graph = NetworkView()
         graph_layout.addWidget(self.graph, 1)
-        key = QLabel("Gas · green     Solid · sand     Reaction · violet\nDashed links: catalysts / rate dependencies. Red nodes: missing species.")
+        controls = QHBoxLayout()
+        controls.addWidget(action_button("−", lambda: self.graph.zoom(1 / 1.2), tooltip="Zoom out"))
+        controls.addWidget(action_button("+", lambda: self.graph.zoom(1.2), tooltip="Zoom in"))
+        controls.addWidget(action_button("Fit", self.graph.fit, tooltip="Fit graph to window (0)"))
+        controls.addStretch()
+        self.graph_retry = action_button("Retry", self.graph.retry)
+        controls.addWidget(self.graph_retry)
+        graph_layout.addLayout(controls)
+        self.graph_status = QLabel()
+        self.graph_status.setWordWrap(True)
+        self.graph_status.setTextFormat(Qt.TextFormat.PlainText)
+        graph_layout.addWidget(self.graph_status)
+        self.graph.statusChanged.connect(self.graph_status.setText)
+        self.graph.statusChanged.connect(lambda text: self.graph_status.setVisible(bool(text)))
+        self.graph.statusChanged.connect(lambda text: self.graph_retry.setVisible(bool(text) and not text.startswith("Updating")))
+        self.graph_status.hide()
+        self.graph_retry.hide()
+        key = QLabel("Gas · green     Solid · sand     Reaction · violet\nDashed links: catalysts / rate dependencies. Red nodes: missing species.\nClick a node to highlight its links; click again or empty space to clear. Scroll to zoom; drag to pan.")
         key.setWordWrap(True)
         graph_layout.addWidget(key)
         layout.addWidget(graph, 1)

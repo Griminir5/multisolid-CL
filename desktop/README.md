@@ -17,6 +17,9 @@ packed-bed-ui
 `python -m packed_bed_ui` starts the same application. Supply a project folder
 as an optional argument to open it directly. Opening projects and generating
 previews do not need DAETools. Execution needs DAETools with SuperLU.
+The Chemistry graph uses a separate Graphviz `neato` runtime. See
+[Graphviz setup and bundling](GRAPHVIZ.md); source development can also use
+`neato` on `PATH` or the `MULTISOLID_GRAPHVIZ` executable override.
 
 ## Use the starter
 
@@ -37,7 +40,11 @@ previews do not need DAETools. Execution needs DAETools with SuperLU.
 4. The case editor has five tabs: **General**, **Chemistry**, **Bed**, **Program**,
    and **Report**. General contains numerical and solver settings and requested
    reports/plots. Chemistry selects species and collapsible reaction families
-   beside a fitted reaction graph. Bed places settings on the left and material zones on the right above
+   beside a fitted reaction graph. Click a node to highlight its direct neighbours
+   and connecting links; click it again or click empty space to clear. Scroll or
+   use **+/−** to zoom, drag to pan, and use **Fit** to reset the view. Layouts
+   update in the background after edits and fit again when the pane resizes.
+   Bed places settings on the left and material zones on the right above
    the numerical preview. Program edits initial values and timed hold/ramp steps
    beside its preview, ordered as flow, temperature, composition, and pressure.
    Target headers show the units. Click a channel's arrow to collapse its settings
@@ -287,7 +294,8 @@ after an interrupted session marks unfinished retained runs as Interrupted.
 | `packed_bed_ui/definition_editor.py` | Reusable-definition library and shared inspection dialogs |
 | `packed_bed_ui/inputs.py` | Explicit draft initialization, input validation, timing, and zone scaling |
 | `packed_bed_ui/general.py` | Numerical/solver settings and report/plot selections |
-| `packed_bed_ui/chemistry.py` | Species lists, reaction families, and a native Qt network graph |
+| `packed_bed_ui/chemistry.py` | Species lists and reaction families |
+| `packed_bed_ui/reaction_graph.py` | Asynchronous Graphviz SVG preview, node highlighting, zoom and pan |
 | `packed_bed_ui/bed.py` | Geometry, material zones, and reactor boundary rules |
 | `packed_bed_ui/program_editor.py` | Program modes, hold/ramp tables, feed targets, timing, and flow conversion |
 | `packed_bed_ui/editor_widgets.py` | Shared selection lists, tables, and preview canvases |
