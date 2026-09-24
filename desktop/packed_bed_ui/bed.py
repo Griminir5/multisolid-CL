@@ -64,7 +64,7 @@ class BedPage(QWidget):
         self.columns = ["x_start_m", "x_end_m", "e_b", "e_p", "d_p"] + list(self.species)
         self.zones.clear()
         self.zones.setColumnCount(len(self.columns) + 1)
-        self.zones.setHorizontalHeaderLabels(["x_start", "x_end", "e_b", "e_p", "d_p", *self.species, ""])
+        self.zones.setHorizontalHeaderLabels(["x_start", "x_end", "e_b", "e_p", "d_p", *[self.editor.species_label(key, formula_only=True) for key in self.species], ""])
         self.zones.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         for column in range(len(self.columns)):
             self.zones.setColumnWidth(column, 78)

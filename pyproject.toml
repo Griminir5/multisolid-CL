@@ -32,6 +32,8 @@ packed_bed = [
     "examples/default_batch_case/programs/*.yaml",
     "examples/default_batch_case/geometries/*.yaml",
     "kinetics/*.md",
+    "examples/plugins/*/*.yaml",
+    "examples/plugins/*/*.py",
 ]
 
 [tool.pytest.ini_options]

@@ -186,6 +186,7 @@ class ExpandedBatchCase:
     chemistry: dict[str, Any]
     program: dict[str, Any]
     solids: dict[str, Any]
+    definition_catalogue: Any = None
 
 
 @dataclass
@@ -336,6 +337,8 @@ def _force_case_run_fields(run: dict[str, Any], case_id: str) -> None:
 
 def expand_batch_cases(document: BatchDocument) -> tuple[ExpandedBatchCase, ...]:
     base = _load_base_case(document)
+    from .plugins.storage import catalogue_for_case
+    catalogue = catalogue_for_case(resolve_path(document.base_dir, document.spec.base_case))
     program_presets = {
         name: read_yaml_mapping(resolve_path(document.base_dir, path), f"programs.{name}")
         for name, path in document.spec.programs.items()
@@ -386,6 +389,7 @@ def expand_batch_cases(document: BatchDocument) -> tuple[ExpandedBatchCase, ...]
                 chemistry=documents["chemistry"],
                 program=documents["program"],
                 solids=documents["solids"],
+                definition_catalogue=catalogue,
             )
         )
 
@@ -402,6 +406,7 @@ def expand_batch_cases(document: BatchDocument) -> tuple[ExpandedBatchCase, ...]
 
 def _resolve_expanded_case(expanded: ExpandedBatchCase) -> Case:
     return resolve_case(
+        catalogue=expanded.definition_catalogue,
         run_path=expanded.run_yaml_path,
         chemistry_path=expanded.case_directory / "chemistry.yaml",
         program_path=expanded.case_directory / "program.yaml",
@@ -419,6 +424,14 @@ def _write_case_files(cases: tuple[ExpandedBatchCase, ...]) -> None:
         for name in ("run", "chemistry", "program", "solids"):
             path = case.case_directory / f"{name}.yaml"
             path.write_text(yaml.safe_dump(getattr(case, name), sort_keys=False), encoding="utf-8")
+        if case.definition_catalogue is not None:
+            catalogue = case.definition_catalogue
+            selection = _resolve_expanded_case(case).definitions.selection
+            from .plugins.storage import copy_package
+            for provider in selection.lock['plugins']:
+                copy_package(catalogue.paths[provider], case.case_directory)
+            descriptor = {'root': '.', 'lock': dict(selection.to_dict()['lock'])}
+            (case.case_directory / 'definitions.json').write_text(json.dumps(descriptor, indent=2), encoding='utf-8')
 
 
 def _check_output_collisions(

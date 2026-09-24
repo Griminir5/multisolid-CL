@@ -109,6 +109,8 @@ def _run_cli(argv: list[str]) -> int:
         return 1 if batch_result.failed_count or batch_result.plot_failed_count else 0
 
     case = load_case(args.input_yaml)
+    for caution in case.definitions.selection.cautions:
+        print('Applicability: ' + caution)
     if args.validate_only:
         print(f"Validation passed: {case.run_path}")
         return 0

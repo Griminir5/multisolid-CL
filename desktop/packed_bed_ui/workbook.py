@@ -254,7 +254,8 @@ def column_heading(column, quantity, schema, fixed):
     if "label" not in column:
         for dim, value in fixed.items():
             axis = schema["axes"][dim]
-            heading += f" | {axis['label']}={text_value(value, axis.get('precision', 15))}"
+            displayed = axis.get('labels', {}).get(str(value), text_value(value, axis.get('precision', 15)))
+            heading += f" | {axis['label']}={displayed}"
             if axis["unit"]:
                 heading += f" {axis['unit']}"
     if len(heading) > 255:
@@ -305,7 +306,8 @@ def plan_sheet(schema, sheet):
         seen_headings.add(heading.casefold())
         headings.append(heading)
         resolved.append({"quantity": name, "indices": indices, "fixed": fixed, "unit": quantity["unit"]})
-    return {"name": sheet["name"], "axis": axis, "rows": rows, "values": values[rows],
+    shown = np.array([schema['axes'][axis].get('labels', {}).get(str(value), value) for value in values[rows]]) if schema['axes'][axis].get('labels') else values[rows]
+    return {"name": sheet["name"], "axis": axis, "rows": rows, "values": shown,
             "headings": headings, "columns": resolved, "selection": sheet["rows"]}
 
 

@@ -33,17 +33,19 @@ from .workbook import (
 
 class CoordinateModel(QAbstractListModel):
     """Render coordinate labels lazily, even for long reporting schedules."""
-    def __init__(self, values, parent=None, precision=15):
+    def __init__(self, values, parent=None, precision=15, labels=None):
         super().__init__(parent)
         self.values = values
         self.precision = precision
+        self.labels = labels or {}
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.values)
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if index.isValid() and role == Qt.ItemDataRole.DisplayRole:
-            return text_value(self.values[index.row()], self.precision)
+            value = self.values[index.row()]
+            return self.labels.get(str(value), text_value(value, self.precision))
 
 
 class CoordinatePicker(QWidget):
@@ -115,7 +117,7 @@ class CoordinatePicker(QWidget):
         search = QLineEdit()
         search.setPlaceholderText("Filter coordinates…")
         layout.addWidget(search)
-        model = CoordinateModel(values, dialog, self.axis.get("precision", 15))
+        model = CoordinateModel(values, dialog, self.axis.get("precision", 15), self.axis.get('labels'))
         proxy = QSortFilterProxyModel(dialog)
         proxy.setSourceModel(model)
         proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -451,7 +453,7 @@ class ReportPage(QWidget):
             return
         self.needs_refresh = False
         try:
-            self.schema = describe_inputs(self.case.documents)
+            self.schema = describe_inputs(self.case.documents, catalogue=self.case.catalogue())
             previous = deepcopy(self.definition)
             removed = refresh_report(self.schema, self.definition)
             if removed:
@@ -697,7 +699,7 @@ class ReportPage(QWidget):
             return
         try:
             definition = report_definition(read_json(Path(path)))
-            schema = describe_inputs(self.case.documents)
+            schema = describe_inputs(self.case.documents, catalogue=self.case.catalogue())
             removed = refresh_report(schema, definition)
             if TemplateDialog(schema, definition, removed, self).exec() != QDialog.DialogCode.Accepted:
                 return

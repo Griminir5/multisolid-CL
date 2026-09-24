@@ -36,14 +36,15 @@ def _finalize_series_axes(axes, *, x_min, x_max):
         axis.margins(x=0.0)
 
 
-def _render_system_graph(case: Case, output_dir: Path, property_registry) -> dict[str, Path]:
+def _render_system_graph(case: Case, output_dir: Path) -> dict[str, Path]:
     from .reaction_graph import build_reaction_graph, render_svg
     from .reactions import reaction_catalog
 
-    catalog = reaction_catalog(case.reaction_families)
+    catalog = {reaction.id: reaction for reaction in case.definitions.reaction_network.reactions}
     graph = build_reaction_graph(
         case.chemistry.gas_species, case.solids.solid_species,
-        [catalog[key] for key in case.chemistry.reaction_ids], property_registry,
+        [catalog[key] for key in case.chemistry.reaction_ids], case.definitions.properties,
+        labels=case.definitions.selection.labels,
     )
     svg = render_svg(graph)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -198,7 +199,6 @@ def render_initial_solid_profile(case: Case, output_dir) -> dict[str, Path]:
 def generate_artifacts(case: Case) -> dict[str, Path]:
     """Generate the explicitly requested pre-run diagrams."""
 
-    from .properties import PROPERTY_REGISTRY
 
     case.output_directory.mkdir(parents=True, exist_ok=True)
     case.artifacts_directory.mkdir(parents=True, exist_ok=True)
@@ -206,7 +206,7 @@ def generate_artifacts(case: Case) -> dict[str, Path]:
     from .reaction_graph import GraphvizError
 
     try:
-        artifacts.update(_render_system_graph(case, case.artifacts_directory, PROPERTY_REGISTRY))
+        artifacts.update(_render_system_graph(case, case.artifacts_directory))
     except GraphvizError as exc:
         # Optional diagrams must not prevent the simulation or other artifacts.
         # Remove a previous export so it cannot masquerade as this case's graph.

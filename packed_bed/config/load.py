@@ -22,7 +22,7 @@ from .models import (
 )
 
 if TYPE_CHECKING:
-    from packed_bed.reactions import ReactionFamily
+    from packed_bed.definitions import DefinitionEnvironment
 
 
 _PROGRAM_DURATION_SUM_ABS_TOLERANCE_S = 1.0e-9
@@ -44,8 +44,8 @@ class PackedBedValidationError(ValueError):
 
 
 @dataclass(frozen=True)
-class Case:
-    """One resolved and structurally validated runtime handoff."""
+class CaseDocuments:
+    """Parsed inputs and compiled boundary programs; no executable plugin objects."""
 
     run_path: Path
     chemistry_path: Path
@@ -55,7 +55,6 @@ class Case:
     solids: SolidConfig
     run: RunConfig
     program: ProgramConfig | FeedProgramConfig
-    reaction_families: tuple[ReactionFamily, ...]
     inlet_flow_program: CompiledProgram
     inlet_composition_program: CompiledProgram | RatioProgram
     inlet_temperature_program: CompiledProgram | RatioProgram
@@ -71,10 +70,32 @@ class Case:
         return resolve_path(self.run_path.parent, self.run.outputs.artifacts_directory)
 
 
-def load_case(run_yaml_path: str | Path) -> Case:
+@dataclass(frozen=True, kw_only=True)
+class CaseInputs(CaseDocuments):
+    selection: object
+
+
+@dataclass(frozen=True, kw_only=True)
+class Case(CaseDocuments):
+    """The complete runtime handoff. Construct executable definitions in a worker."""
+    definitions: DefinitionEnvironment
+
+
+def load_case(run_yaml_path: str | Path, *, definitions=None, catalogue=None, approved=()) -> Case:
     """Load, resolve, compile, and structurally validate one case."""
+    return _load_case(run_yaml_path, definitions=definitions, catalogue=catalogue, approved=approved)
+
+
+def inspect_case_file(run_yaml_path, *, catalogue=None):
+    return _load_case(run_yaml_path, catalogue=catalogue, metadata_only=True)
+
+
+def _load_case(run_yaml_path, *, definitions=None, catalogue=None, approved=(), metadata_only=False):
 
     run_path = Path(run_yaml_path).resolve()
+    if catalogue is None and definitions is None:
+        from packed_bed.plugins.storage import catalogue_for_case
+        catalogue = catalogue_for_case(run_path)
     input_hashes = {}
     run_data = read_yaml_mapping(run_path, "run", hashes=input_hashes)
     run = _parse_config_model(RunConfig, run_data, "run", run_path)
@@ -95,7 +116,7 @@ def load_case(run_yaml_path: str | Path) -> Case:
     if path_errors:
         raise PackedBedValidationError("\n".join(path_errors))
 
-    return resolve_case(
+    return _resolve_case(
         run_path=run_path,
         chemistry_path=input_paths["chemistry"],
         program_path=input_paths["program"],
@@ -105,10 +126,21 @@ def load_case(run_yaml_path: str | Path) -> Case:
         program_data=read_yaml_mapping(input_paths["program"], "program", hashes=input_hashes),
         solids_data=read_yaml_mapping(input_paths["solids"], "solids", hashes=input_hashes),
         input_hashes=input_hashes,
+        definitions=definitions, catalogue=catalogue, approved=approved,
+        metadata_only=metadata_only,
     )
 
 
-def resolve_case(
+def resolve_case(**kwargs) -> Case:
+    return _resolve_case(**kwargs)
+
+
+def inspect_case(**kwargs) -> CaseInputs:
+    """Validate inputs using static metadata, without importing plugin implementations."""
+    return _resolve_case(**kwargs, metadata_only=True)
+
+
+def _resolve_case(
     *,
     run_path: str | Path,
     chemistry_path: str | Path,
@@ -119,6 +151,10 @@ def resolve_case(
     program_data: dict[str, Any],
     solids_data: dict[str, Any],
     input_hashes: dict[str, str] | None = None,
+    definitions=None,
+    catalogue=None,
+    approved=(),
+    metadata_only=False,
 ) -> Case:
     """Resolve an in-memory case without reading or writing files."""
 
@@ -138,12 +174,17 @@ def resolve_case(
     if shape_errors:
         raise PackedBedValidationError("\n".join(shape_errors))
 
-    from packed_bed.kinetics import load_reaction_families
+    from packed_bed.definitions import select_definitions, materialize_definitions
 
     try:
-        reaction_families = load_reaction_families(chemistry.reaction_families)
-    except ValueError as exc:
-        raise PackedBedValidationError(f"chemistry.reaction_families: {exc}") from exc
+        if definitions is None:
+            selection = select_definitions(chemistry, solids, catalogue)
+            if not metadata_only:
+                definitions = materialize_definitions(selection, catalogue, approved=approved)
+        if definitions is not None:
+            definitions.matches(chemistry, solids)
+    except (ValueError, KeyError) as exc:
+        raise PackedBedValidationError("\n".join([str(exc), *_report_errors(run)])) from exc
 
     programs = compile_program_channels(
         program,
@@ -152,7 +193,8 @@ def resolve_case(
         repeat=run.simulation.repeat_program,
         time_horizon=run.simulation.time_horizon_s,
     )
-    case = Case(
+    case_type = CaseInputs if metadata_only else Case
+    case = case_type(
         run_path=paths["run"],
         chemistry_path=paths["chemistry"],
         solids_path=paths["solids"],
@@ -161,88 +203,46 @@ def resolve_case(
         solids=solids,
         run=run,
         program=program,
-        reaction_families=reaction_families,
+        **({'selection': selection} if metadata_only else {'definitions': definitions}),
         inlet_flow_program=programs[0],
         inlet_composition_program=programs[1],
         inlet_temperature_program=programs[2],
         outlet_pressure_program=programs[3],
         input_hashes=dict(input_hashes or {}),
     )
+    if metadata_only:
+        errors = _report_errors(run, has_reactions=bool(chemistry.reaction_ids))
+        if errors:
+            raise PackedBedValidationError('\n'.join(errors))
+        return case
     return validate_case(case)
 
 
-def validate_case(
-    case: Case,
-    *,
-    property_registry=None,
-    report_registry=None,
-    plot_registry=None,
-) -> Case:
-    """Validate resolved component, reaction, property, report, and plot references."""
+def validate_case(case: Case, *, report_registry=None, plot_registry=None) -> Case:
+    """Validate using exactly the environment which will assemble the model."""
+    case.definitions.matches(case.chemistry, case.solids)
+    errors = []
+    for phase, ids in (("gas", case.chemistry.gas_species), ("solid", case.solids.solid_species)):
+        _validate_species_group(errors, species_ids=ids, expected_phase=phase,
+                                property_registry=case.definitions.properties)
+    errors.extend(_report_errors(case.run, has_reactions=bool(case.chemistry.reaction_ids),
+                                 report_registry=report_registry, plot_registry=plot_registry))
+    if errors:
+        raise PackedBedValidationError("\n".join(errors))
+    return case
 
-    if property_registry is None:
-        from packed_bed.properties import PROPERTY_REGISTRY
 
-        property_registry = PROPERTY_REGISTRY
+def _report_errors(run, *, has_reactions=True, report_registry=None, plot_registry=None):
     if report_registry is None:
         from packed_bed.reports import REPORT_REGISTRY
-
         report_registry = REPORT_REGISTRY
     if plot_registry is None:
         from packed_bed.plotting import PLOT_REGISTRY
-
         plot_registry = PLOT_REGISTRY
-
-    from packed_bed.reactions import build_reaction_network, reaction_catalog
-
-    errors: list[str] = []
-    gas_species = set(case.chemistry.gas_species)
-    solid_species = set(case.solids.solid_species)
-    selected_species = gas_species | solid_species
-    catalog = reaction_catalog(case.reaction_families)
-    unknown_reactions = False
-
-    _validate_species_group(
-        errors,
-        species_ids=case.chemistry.gas_species,
-        expected_phase="gas",
-        property_registry=property_registry,
-    )
-    _validate_species_group(
-        errors,
-        species_ids=case.solids.solid_species,
-        expected_phase="solid",
-        property_registry=property_registry,
-    )
-
-    for reaction_id in case.chemistry.reaction_ids:
-        reaction = catalog.get(reaction_id)
-        if reaction is None:
-            errors.append(f"chemistry.reaction_ids contains unknown id '{reaction_id}'.")
-            unknown_reactions = True
-            continue
-        missing = sorted(species_id for species_id in reaction.all_species if species_id not in selected_species)
-        if missing:
-            errors.append(
-                f"Reaction '{reaction_id}' requires unselected species: {', '.join(missing)}."
-            )
-
-    if not unknown_reactions:
-        try:
-            build_reaction_network(
-                case.chemistry.reaction_ids,
-                case.chemistry.gas_species,
-                case.solids.solid_species,
-                families=case.reaction_families,
-            )
-        except (KeyError, ValueError) as exc:
-            message = str(exc).strip("'")
-            if message not in errors:
-                errors.append(message)
-
+    errors = []
     unknown_reports = sorted(
         report_id
-        for report_id in case.run.outputs.requested_reports
+        for report_id in run.outputs.requested_reports
         if report_id not in report_registry
     )
     if unknown_reports:
@@ -252,10 +252,10 @@ def validate_case(
         )
     unavailable_reports = sorted(
         report_id
-        for report_id in case.run.outputs.requested_reports
+        for report_id in run.outputs.requested_reports
         if report_id in report_registry
         and report_registry[report_id].requires_reactions
-        and not case.chemistry.reaction_ids
+        and not has_reactions
     )
     if unavailable_reports:
         errors.append(
@@ -263,10 +263,10 @@ def validate_case(
             f"{', '.join(unavailable_reports)}."
         )
 
-    requested_reports = set(case.run.outputs.requested_reports)
+    requested_reports = set(run.outputs.requested_reports)
     unknown_plots = sorted(
         plot_id
-        for plot_id in case.run.outputs.requested_plots
+        for plot_id in run.outputs.requested_plots
         if plot_id not in plot_registry
     )
     if unknown_plots:
@@ -274,7 +274,7 @@ def validate_case(
             "run.outputs.requested_plots contains unknown ids: "
             f"{', '.join(unknown_plots)}."
         )
-    for plot_id in case.run.outputs.requested_plots:
+    for plot_id in run.outputs.requested_plots:
         if plot_id not in plot_registry:
             continue
         missing = sorted(set(plot_registry[plot_id].required_reports) - requested_reports)
@@ -284,9 +284,7 @@ def validate_case(
                 f"{', '.join(missing)}."
             )
 
-    if errors:
-        raise PackedBedValidationError("\n".join(errors))
-    return case
+    return errors
 
 
 def resolve_path(base_dir: Path, raw_path: str) -> Path:

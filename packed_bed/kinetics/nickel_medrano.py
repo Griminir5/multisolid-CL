@@ -122,9 +122,10 @@ def k_expr(
     comp_key: str,
     *,
     temperature_k,
+    parameters,
 ) -> Any:
-    return Constant(K0_M_PER_S[comp_key]) * Exp(
-        -Constant(ACTIVATION_ENERGY_J_PER_MOL[comp_key] / GAS_CONSTANT_J_PER_MOL_K) / temperature_k
+    return Constant(parameters["K0_M_PER_S"][comp_key]) * Exp(
+        -Constant(parameters["ACTIVATION_ENERGY_J_PER_MOL"][comp_key] / GAS_CONSTANT_J_PER_MOL_K) / temperature_k
     )
 
 
@@ -162,9 +163,10 @@ def _medrano_conversion_rate_expr(
     gas_mole_fraction,
     conversion,
     unreacted_fraction,
+    parameters,
 ):
     order = REACTION_ORDER[comp_key]
-    k_reaction = k_expr(comp_key, temperature_k=temperature_k)
+    k_reaction = k_expr(comp_key, temperature_k=temperature_k, parameters=parameters)
     conversion_bounded = _bounded_fraction_expr(conversion)
     unreacted_available = _bounded_fraction_expr(unreacted_fraction)
     gas_fraction_available = _available_expr(gas_mole_fraction)
@@ -188,11 +190,11 @@ def _medrano_conversion_rate_expr(
         * c_power_kinetic
         * diffusivity
         * c_power_diffusive
-        / Constant(R0_M[comp_key] * CS_MOL_PER_M3[comp_key])
+        / Constant(parameters["R0_M"][comp_key] * CS_MOL_PER_M3[comp_key])
     )
     denominator = (
         diffusivity * c_power_diffusive
-        + Constant(R0_M[comp_key]) * k_reaction * c_power_kinetic * (f_one_third - f_two_thirds)
+        + Constant(parameters["R0_M"][comp_key]) * k_reaction * c_power_kinetic * (f_one_third - f_two_thirds)
     )
     gas_gate = _availability_gate_expr(gas_fraction_available, Y_GATE)
     solid_gate = _availability_gate_expr(unreacted_available, F_GATE)
@@ -220,6 +222,7 @@ def _medrano_reaction_rate(context: KineticsContext, comp_key: str):
         gas_mole_fraction=context.model.y_gas(context.gas_index(comp_key), context.idx_cell),
         conversion=conversion,
         unreacted_fraction=unreacted_fraction,
+        parameters=context.parameters,
     )
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
@@ -278,3 +281,13 @@ FAMILY = ReactionFamily(
 
 
 __all__ = ("FAMILY",)
+
+
+# Explicit authoring contract; undeclared implementation constants stay fixed.
+from ..parameters import parameter_group
+
+PARAMETERS = {
+    **parameter_group("R0_M", R0_M, "m", "Initial grain radius", minimum=1e-30),
+    **parameter_group("K0_M_PER_S", K0_M_PER_S, "m/s", "K0 m per s", minimum=0),
+    **parameter_group("ACTIVATION_ENERGY_J_PER_MOL", ACTIVATION_ENERGY_J_PER_MOL, "J/mol", "Activation energy j per mol", minimum=0),
+}

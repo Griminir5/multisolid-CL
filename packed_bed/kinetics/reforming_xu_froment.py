@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..properties import PROPERTY_REGISTRY
 from ..reactions import KineticsContext, ReactionDefinition, ReactionFamily
 from .runtime import Constant, Exp, K, Max, Pa, Sqrt, m, mol, s
 
@@ -11,10 +10,7 @@ from .runtime import Constant, Exp, K, Max, Pa, Sqrt, m, mol, s
 GAS_CONSTANT_J_PER_MOL_K = 8.31446261815324
 MIN_H2_MOLE_FRACTION = 0.001
 H2_MOLE_FRACTION_SMOOTH_EPS_SQUARED = 1.0e-4
-NI_MW_KG_PER_MOL = PROPERTY_REGISTRY.get_record("Ni").mw
 
-if NI_MW_KG_PER_MOL is None:
-    raise ValueError("Nickel molecular weight must be available for Xu-Froment kinetics.")
 
 XU_FROMENT_RATE_COEFFICIENTS = {
     "smr": 1.17e15,
@@ -61,9 +57,9 @@ def _pressure_pa_expression(pressure) -> Any:
     return pressure / Constant(1.0 * Pa)
 
 
-def _rate_constant_expression(rate_key: str, temperature_k, catalyst_mass_density_kg_per_m3) -> Any:
-    coefficient = XU_FROMENT_RATE_COEFFICIENTS[rate_key]
-    activation_energy = XU_FROMENT_ACTIVATION_ENERGIES_J_PER_MOL[rate_key]
+def _rate_constant_expression(rate_key: str, temperature_k, catalyst_mass_density_kg_per_m3, *, parameters) -> Any:
+    coefficient = parameters["XU_FROMENT_RATE_COEFFICIENTS"][rate_key]
+    activation_energy = parameters["XU_FROMENT_ACTIVATION_ENERGIES_J_PER_MOL"][rate_key]
     return (
         catalyst_mass_density_kg_per_m3
         * Constant(coefficient)
@@ -71,9 +67,9 @@ def _rate_constant_expression(rate_key: str, temperature_k, catalyst_mass_densit
     )
 
 
-def _adsorption_constant_expression(species_id: str, temperature_k) -> Any:
-    coefficient = XU_FROMENT_ADSORPTION_COEFFICIENTS[species_id]
-    adsorption_energy = XU_FROMENT_ADSORPTION_ENERGIES_J_PER_MOL[species_id]
+def _adsorption_constant_expression(species_id: str, temperature_k, *, parameters) -> Any:
+    coefficient = parameters["XU_FROMENT_ADSORPTION_COEFFICIENTS"][species_id]
+    adsorption_energy = parameters["XU_FROMENT_ADSORPTION_ENERGIES_J_PER_MOL"][species_id]
     return Constant(coefficient) * Exp(Constant(adsorption_energy / GAS_CONSTANT_J_PER_MOL_K) / temperature_k)
 
 
@@ -134,7 +130,7 @@ def _hydrogen_inverse_pressure_expression(context: KineticsContext):
 def _catalyst_mass_density_expression(context: KineticsContext):
     ni_idx = context.solid_index("Ni")
     ni_concentration = context.model.c_sol(ni_idx, context.idx_cell) / Constant(1.0 * mol / m**3)
-    return Max(ni_concentration, Constant(0.0)) * Constant(NI_MW_KG_PER_MOL)
+    return Max(ni_concentration, Constant(0.0)) * Constant(context.molecular_weight("Ni"))
 
 
 def _xu_froment_terms(context: KineticsContext) -> XuFromentTerms:
@@ -148,10 +144,10 @@ def _xu_froment_terms(context: KineticsContext) -> XuFromentTerms:
     p_inv_h2_pa_inv = _hydrogen_inverse_pressure_expression(context)
     denominator = (
         Constant(1.0)
-        + _adsorption_constant_expression("CO", temperature_k) * p_co_pa
-        + _adsorption_constant_expression("H2", temperature_k) * p_h2_pa
-        + _adsorption_constant_expression("CH4", temperature_k) * p_ch4_pa
-        + _adsorption_constant_expression("H2O", temperature_k) * p_h2o_pa * p_inv_h2_pa_inv
+        + _adsorption_constant_expression("CO", temperature_k, parameters=context.parameters) * p_co_pa
+        + _adsorption_constant_expression("H2", temperature_k, parameters=context.parameters) * p_h2_pa
+        + _adsorption_constant_expression("CH4", temperature_k, parameters=context.parameters) * p_ch4_pa
+        + _adsorption_constant_expression("H2O", temperature_k, parameters=context.parameters) * p_h2o_pa * p_inv_h2_pa_inv
     )
     return XuFromentTerms(
         temperature_k=temperature_k,
@@ -175,6 +171,7 @@ def xu_froment_smr(context: KineticsContext):
         "smr",
         terms.temperature_k,
         terms.catalyst_mass_density_kg_per_m3,
+        parameters=context.parameters,
     ) * (terms.p_inv_h2_pa_inv**2.5 / Constant(10.0**-2.5)) * driving_force / terms.denominator**2
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
@@ -188,6 +185,7 @@ def xu_froment_wgs(context: KineticsContext):
         "wgs",
         terms.temperature_k,
         terms.catalyst_mass_density_kg_per_m3,
+        parameters=context.parameters,
     ) * (terms.p_inv_h2_pa_inv / Constant(1.0e5)) * driving_force / terms.denominator**2
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
@@ -203,6 +201,7 @@ def xu_froment_overall(context: KineticsContext):
         "overall",
         terms.temperature_k,
         terms.catalyst_mass_density_kg_per_m3,
+        parameters=context.parameters,
     ) * (terms.p_inv_h2_pa_inv**3.5 / Constant(10.0**-2.5)) * driving_force / terms.denominator**2
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
@@ -255,3 +254,14 @@ FAMILY = ReactionFamily(
 
 
 __all__ = ("FAMILY",)
+
+
+# Explicit authoring contract; undeclared implementation constants stay fixed.
+from ..parameters import parameter_group
+
+PARAMETERS = {
+    **parameter_group("XU_FROMENT_RATE_COEFFICIENTS", XU_FROMENT_RATE_COEFFICIENTS, "mol/(kg*s)", "Rate coefficient; pressure factors use p/(1 Pa) and the original fixed conversion factors", minimum=0),
+    **parameter_group("XU_FROMENT_ACTIVATION_ENERGIES_J_PER_MOL", XU_FROMENT_ACTIVATION_ENERGIES_J_PER_MOL, "J/mol", "Xu froment activation energies j per mol", minimum=0),
+    **parameter_group("XU_FROMENT_ADSORPTION_COEFFICIENTS", XU_FROMENT_ADSORPTION_COEFFICIENTS, "1", "Adsorption coefficient for normalized p/(1 Pa); H2O multiplies the H2O/H2 pressure ratio", minimum=0),
+    **parameter_group("XU_FROMENT_ADSORPTION_ENERGIES_J_PER_MOL", XU_FROMENT_ADSORPTION_ENERGIES_J_PER_MOL, "J/mol", "Xu froment adsorption energies j per mol", minimum=None),
+}

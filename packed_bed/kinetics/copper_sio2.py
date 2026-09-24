@@ -50,9 +50,9 @@ def _positive_pressure(partial_pressure_bar):
 
 def _reduction_rate(context: KineticsContext, reactant: str, rate_key: str):
     temperature_k = _temperature_k(context)
-    rate_constant = Constant(REDUCTION_COEFFICIENTS[rate_key]) * Exp(
+    rate_constant = Constant(context.parameters["REDUCTION_COEFFICIENTS"][rate_key]) * Exp(
         -Constant(
-            REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL[rate_key]
+            context.parameters["REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL"][rate_key]
             / GAS_CONSTANT_J_PER_MOL_K
         )
         / temperature_k
@@ -109,3 +109,12 @@ FAMILY = ReactionFamily(
 
 
 __all__ = ("FAMILY",)
+
+
+# Explicit authoring contract; undeclared implementation constants stay fixed.
+from ..parameters import parameter_group
+
+PARAMETERS = {
+    **parameter_group("REDUCTION_COEFFICIENTS", REDUCTION_COEFFICIENTS, "1/s", "Reduction coefficients", minimum=0),
+    **parameter_group("REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL", REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL, "J/mol", "Reduction activation energies j per mol", minimum=0),
+}

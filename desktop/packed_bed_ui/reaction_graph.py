@@ -191,14 +191,14 @@ class NetworkView(QGraphicsView):
             self._outline.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
             self._outline.setZValue(2)
 
-    def draw(self, gases, solids, reactions):
+    def draw(self, gases, solids, reactions, property_registry=None, *, labels=None):
         self._revision += 1
         self._debounce.stop()
         if self._process is not None:
             # The revision changes before killing: its queued signals are stale.
             self._process.cancel()
             self._process = None
-        self._pending = build_reaction_graph(gases, solids, reactions)
+        self._pending = build_reaction_graph(gases, solids, reactions, property_registry, labels=labels)
         if not self._pending.nodes:
             self._clear()
             self.scene().addText("Add species and reaction families to build the system graph.")

@@ -136,6 +136,11 @@ def choose_items(parent, title, catalog, selected):
         ).casefold()) for i in range(items.count())
     ])
     layout.addWidget(items)
+    from .catalogue_widgets import DefinitionDetails
+    details = DefinitionDetails()
+    details.setMaximumHeight(190)
+    items.currentItemChanged.connect(lambda item, _: details.setPlainText(item.toolTip() if item else ''))
+    layout.addWidget(details)
     buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
     buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Add selected")
     buttons.accepted.connect(dialog.accept)

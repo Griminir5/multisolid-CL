@@ -105,7 +105,7 @@ def test_iterative_order_places_a_dependency_on_every_diagonal(tmp_path):
     case = _reactive_case(tmp_path, "sundials_gmres_ifpack")
     configure_threads(1)
     configure_idas(case.run.solver)
-    simulation = PackedBedSimulation(case, PROPERTY_REGISTRY)
+    simulation = PackedBedSimulation(case)
     simulation.TimeHorizon = 100
     simulation.ReportingInterval = 1
     solver = daeIDAS()

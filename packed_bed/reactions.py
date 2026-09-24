@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from typing import Any, Callable, Literal, Mapping
 
@@ -15,6 +15,14 @@ class KineticsContext:
     idx_cell: Any
     gas_species_index: Mapping[str, int]
     solid_species_index: Mapping[str, int]
+    parameters: Mapping[str, Any] = field(default_factory=dict)
+    properties: Any = None
+    bindings: Mapping[str, str] = field(default_factory=dict)
+
+    def molecular_weight(self, role: str) -> float:
+        if self.properties is None:
+            raise ValueError("Kinetics requires the case's resolved properties.")
+        return self.properties.get_record(self.bindings[role]).mw
 
     def gas_index(self, species_id: str) -> int:
         return self.gas_species_index[species_id]

@@ -209,8 +209,8 @@ def test_concentration_tolerance_is_scoped_to_each_case(native_tools, tmp_path):
     tight = replace(original, run=original.run.model_copy(update={
         "solver": original.run.solver.model_copy(update={"concentration_absolute_tolerance": 1e-11}),
     }))
-    first = PackedBedSimulation(tight, PROPERTY_REGISTRY)
-    second = PackedBedSimulation(original, PROPERTY_REGISTRY)
+    first = PackedBedSimulation(tight)
+    second = PackedBedSimulation(original)
     for name in ("c_gas", "c_sol", "ct_gas", "ct_sol"):
         assert getattr(first.model, name).VariableType.AbsoluteTolerance == 1e-11
         assert getattr(second.model, name).VariableType.AbsoluteTolerance == 1e-5

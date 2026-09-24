@@ -27,7 +27,7 @@ def test_initial_state_calculation_and_pressure_bracketing(tmp_path: Path, inlet
     case = load_case(_write_inert_case(tmp_path, inlet_flow=inlet_flow))
     paths_before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
 
-    state = calculate_initial_state(case, PROPERTY_REGISTRY)
+    state = calculate_initial_state(case)
 
     assert state.face_coordinates_m.shape == (4,)
     assert state.interparticle_voidage.shape == (3,)
@@ -62,7 +62,7 @@ def test_gas_storage_mode_changes_only_gas_inventory_and_its_energy(tmp_path):
         folder = tmp_path / mode
         folder.mkdir()
         documents["run.yaml"]["model"]["gas_voidage_mode"] = mode
-        states[mode] = calculate_initial_state(load_case(_write_case(folder, documents)), PROPERTY_REGISTRY)
+        states[mode] = calculate_initial_state(load_case(_write_case(folder, documents)))
     bed, pores = states["bed_only"], states["bed_and_particle"]
     np.testing.assert_allclose(bed.gas_fraction, [.4, .4, .5, .5])
     np.testing.assert_allclose(pores.gas_fraction, [.7, .7, .6, .6])

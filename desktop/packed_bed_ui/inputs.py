@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from packed_bed.config import resolve_case
+from packed_bed.config.load import inspect_case
 from packed_bed.config.models import ModelConfig, SimulationConfig
 
 
@@ -76,17 +76,20 @@ def scale_zones(documents, old_length, new_length):
             zone[key] = value * new_length / old_length
 
 
-def resolve_documents(documents):
+def resolve_documents(documents, catalogue=None):
     # resolve_case accepts in-memory data and never reads these diagnostic paths.
-    return resolve_case(**{f"{name}_path": Path("inputs") / f"{name}.yaml" for name in documents},
+    return inspect_case(catalogue=catalogue, **{f"{name}_path": Path("inputs") / f"{name}.yaml" for name in documents},
                         **{f"{name}_data": value for name, value in documents.items()})
 
 
-def input_readiness(documents, extensions=()):
+def input_readiness(documents, extensions=(), *, catalogue=None):
     try:
-        case = resolve_documents(documents)
-        if extensions:
+        case = resolve_documents(documents, catalogue)
+        if extensions and not isinstance(extensions, dict):
             raise ValueError("This project requires extensions. Extension loading is not available yet.")
+        if catalogue is not None:
+            from packed_bed.plugins.storage import require_approval
+            require_approval(catalogue, case.selection.lock)
         if case.run.solver.backend != "daetools" or case.run.solver.name != "superlu":
             raise ValueError("Select DAETools / SuperLU for the desktop runtime.")
     except (ValueError, TypeError, KeyError, OSError) as exc:
@@ -97,14 +100,17 @@ def input_readiness(documents, extensions=()):
 
 
 def definition_payload(kind, documents, metadata=None):
+    species = documents['chemistry'].get('gas_species', []) if kind == 'program' else documents['solids'].get('solid_species', [])
+    references = {key: documents['chemistry'].get('species_definitions', {}).get(key, 'builtin:' + key) for key in species}
     if kind == "program":
         simulation = documents["run"].get("simulation", {})
         return {"program": deepcopy(documents["program"]),
                 "simulation": {key: simulation.get(key, default) for key, default in
                                (("program_mode", "separate_channels"), ("repeat_program", False))},
                 "gas_species": deepcopy(documents["chemistry"].get("gas_species", [])),
+                "species_definitions": references,
                 "editor_metadata": deepcopy(metadata or {})}
-    payload = {"solids": deepcopy(documents["solids"])}
+    payload = {"solids": deepcopy(documents["solids"]), "species_definitions": references}
     for section, keys in BED_RUN_FIELDS.items():
         schema = ModelConfig if section == "model" else SimulationConfig
         payload[section] = {}
@@ -117,7 +123,21 @@ def definition_payload(kind, documents, metadata=None):
 
 def apply_definition(documents, kind, payload):
     document = "program" if kind == "program" else "solids"
+    references = documents['chemistry'].get('species_definitions', {}).copy()
+    if kind == 'bed':
+        removed = set(documents['solids'].get('solid_species', [])) - set(payload['solids'].get('solid_species', []))
+        for key in removed:
+            references.pop(key, None)
     documents[document] = deepcopy(payload[document])
+    for key, ref in payload.get('species_definitions', {}).items():
+        if ref == 'builtin:' + key:
+            references.pop(key, None)
+        else:
+            references[key] = ref
+    if references:
+        documents['chemistry']['species_definitions'] = references
+    else:
+        documents['chemistry'].pop('species_definitions', None)
     for section in ("model", "simulation"):
         if section in payload:
             documents["run"].setdefault(section, {}).update(deepcopy(payload[section]))

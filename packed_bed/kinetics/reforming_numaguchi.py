@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..properties import PROPERTY_REGISTRY
 from ..reactions import KineticsContext, ReactionDefinition, ReactionFamily
 from .runtime import Constant, Exp, K, Max, Pa, Sqrt, m, mol, s
 
@@ -12,7 +11,6 @@ GAS_CONSTANT_J_PER_MOL_K = 8.31446261815324
 PRESSURE_PA_PER_BAR = 1.0e5
 MIN_STEAM_PARTIAL_PRESSURE_BAR = 1.0e-2
 STEAM_REFORMING_H2O_ORDER = 1.596
-NI_MW_KG_PER_MOL = PROPERTY_REGISTRY.get_record("Ni").mw
 
 NUMAGUCHI_RATE_COEFFICIENTS = {
     "smr": 3.65e5,
@@ -48,9 +46,9 @@ def _pressure_bar_expression(pressure) -> Any:
     return pressure / Constant(PRESSURE_PA_PER_BAR * Pa)
 
 
-def _rate_constant_expression(rate_key: str, temperature_k, catalyst_mass_density_kg_per_m3) -> Any:
-    coefficient = NUMAGUCHI_RATE_COEFFICIENTS[rate_key]
-    activation_energy = NUMAGUCHI_ACTIVATION_ENERGIES_J_PER_MOL[rate_key]
+def _rate_constant_expression(rate_key: str, temperature_k, catalyst_mass_density_kg_per_m3, *, parameters) -> Any:
+    coefficient = parameters["NUMAGUCHI_RATE_COEFFICIENTS"][rate_key]
+    activation_energy = parameters["NUMAGUCHI_ACTIVATION_ENERGIES_J_PER_MOL"][rate_key]
     return (
         catalyst_mass_density_kg_per_m3
         * Constant(coefficient)
@@ -86,7 +84,7 @@ def _partial_pressure_bar_expression(context: KineticsContext, species_id: str):
 def _catalyst_mass_density_expression(context: KineticsContext):
     ni_idx = context.solid_index("Ni")
     ni_concentration = context.model.c_sol(ni_idx, context.idx_cell) / Constant(1.0 * mol / m**3)
-    return Max(ni_concentration, Constant(0.0)) * Constant(NI_MW_KG_PER_MOL)
+    return Max(ni_concentration, Constant(0.0)) * Constant(context.molecular_weight("Ni"))
 
 
 def _safe_steam_partial_pressure_bar_expression(partial_pressure_bar):
@@ -120,6 +118,7 @@ def numaguchi_smr(context: KineticsContext):
         "smr",
         terms.temperature_k,
         terms.catalyst_mass_density_kg_per_m3,
+        parameters=context.parameters,
     ) * driving_force / terms.p_h2o_bar_safe**STEAM_REFORMING_H2O_ORDER
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
@@ -133,6 +132,7 @@ def numaguchi_wgs(context: KineticsContext):
         "wgs",
         terms.temperature_k,
         terms.catalyst_mass_density_kg_per_m3,
+        parameters=context.parameters,
     ) * driving_force / terms.p_h2o_bar_safe
     return Constant(1.0 * mol / (m**3 * s)) * rate_expression
 
@@ -173,3 +173,12 @@ FAMILY = ReactionFamily(
 
 
 __all__ = ("FAMILY",)
+
+
+# Explicit authoring contract; undeclared implementation constants stay fixed.
+from ..parameters import parameter_group
+
+PARAMETERS = {
+    **parameter_group("NUMAGUCHI_RATE_COEFFICIENTS", NUMAGUCHI_RATE_COEFFICIENTS, "mol/(kg*s)", "Rate coefficient; pressure factors use p/(100000 Pa), with fixed concentration orders", minimum=0),
+    **parameter_group("NUMAGUCHI_ACTIVATION_ENERGIES_J_PER_MOL", NUMAGUCHI_ACTIVATION_ENERGIES_J_PER_MOL, "J/mol", "Numaguchi activation energies j per mol", minimum=0),
+}

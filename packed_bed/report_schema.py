@@ -1,6 +1,7 @@
 """Import-safe descriptions of expected and recorded result dimensions."""
 
 import numpy as np
+import json
 
 from .reports import REPORT_REGISTRY, reporting_times
 from .solid_profiles import build_uniform_axial_grid
@@ -56,10 +57,14 @@ def describe_dataset(dataset):
             axes[dim] = axis_description(dim, error=f"No one-dimensional coordinate for {dim}.")
         else:
             axes[dim] = axis_description(dim, coord.values.copy(), attrs=coord.attrs)
+    labels = json.loads(dataset.attrs.get('definition_labels', '{}'))
+    for dim in ('gas_species', 'solid_species', 'reaction'):
+        if dim in axes:
+            axes[dim]['labels'] = labels
     return {"quantities": quantities, "axes": axes}
 
 
-def describe_inputs(documents, *, variables=None, axis_resolvers=None):
+def describe_inputs(documents, *, variables=None, axis_resolvers=None, catalogue=None):
     """Describe requested outputs without resolving a draft or creating a solver.
 
     Optional configured variables are keyed by the reporter source variable name.
@@ -136,4 +141,30 @@ def describe_inputs(documents, *, variables=None, axis_resolvers=None):
                     if len(points):
                         unit = str(getattr(domain, "Units", "")) or axes[name]["unit"]
                         axes[name] = axis_description(name, points, attrs={"units": unit})
+    if catalogue is not None:
+        chemistry = documents.get('chemistry', {})
+        mappings = chemistry.get('species_definitions', {})
+        for axis in ('gas_species', 'solid_species'):
+            if axis in axes and axes[axis]['values'] is not None:
+                labels = {}
+                for key in axes[axis]['values']:
+                    ref = mappings.get(key, 'builtin:' + key)
+                    try:
+                        labels[key] = key + ' · ' + catalogue.label('species', ref)
+                    except ValueError:
+                        labels[key] = key + ' — Missing ' + ref
+                axes[axis]['labels'] = labels
+        if 'reaction' in axes:
+            from .definitions import reaction_instance_id
+            from .plugins.catalogue import split_ref
+            labels = {}
+            for instance in chemistry.get('reaction_families', []):
+                ref = chemistry.get('mechanisms', {}).get(instance, {}).get('definition', 'builtin:' + instance)
+                try:
+                    definition = catalogue.get('mechanisms', ref)
+                    source = catalogue.manifest(split_ref(ref)[0]).name
+                    labels.update({reaction_instance_id(instance, r.id, ref): r.name + ' — ' + source for r in definition.reactions})
+                except ValueError:
+                    pass
+            axes['reaction']['labels'] = labels
     return {"quantities": quantities, "axes": axes}

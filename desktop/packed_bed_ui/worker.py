@@ -32,8 +32,8 @@ def verify_snapshot(folder: Path):
             raise ValueError("Snapshot inputs must stay within the run folder.")
     if case.output_directory != folder / "output" or case.artifacts_directory != folder / "output" / "artifacts":
         raise ValueError("Snapshot outputs must stay within the run folder.")
-    if metadata.get("extensions"):
-        raise ValueError("Extension loading is not supported in this starter.")
+    if case.definitions.selection.to_dict() != metadata.get('definitions'):
+        raise ValueError('Snapshot definitions no longer match the saved selection.')
     require_desktop_solver(case)
     return case
 

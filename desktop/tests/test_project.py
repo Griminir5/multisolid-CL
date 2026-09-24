@@ -116,32 +116,8 @@ def test_duplicate_and_renaming_do_not_copy_results_or_invent_staleness(tmp_path
     case.save()
     assert not case.state()["stale"]
     project.metadata["extensions"] = [{"id": "custom", "version": "1", "sha256": "example"}]
-    assert case.state()["stale"]
     with pytest.raises(ValueError, match="requires extensions"):
         case.validate_for_run()
-
-
-def test_legacy_project_migration_keeps_only_latest_run_in_new_case_and_backs_up_originals(tmp_path, source_case):
-    root = tmp_path / "legacy"
-    write_documents(root / "inputs", read_documents(source_case.parent))
-    write_json(root / "project.json", {"format_version": 1, "name": "Original"})
-    hashes = input_hashes(root / "inputs")
-    for number in (1, 2):
-        folder = root / "runs" / f"run-{number}"
-        write_documents(folder / "inputs", read_documents(source_case.parent))
-        write_json(folder / "snapshot.json", {"format_version": 1, "input_hashes": hashes,
-                                               "created_at": f"2026-01-01T00:00:00.00000{number}+00:00"})
-        write_json(folder / "status.json", {"state": "completed"})
-        (folder / "result.txt").write_text(str(number))
-    (root / "runs/run-1").rename(root / "runs/zzz-first")
-    project = Project.open(root)
-    assert len(project.cases) == 1
-    assert (project.cases[0].run_folder / "result.txt").read_text() == "2"
-    assert input_hashes(root / "inputs") == hashes
-    assert (root / "runs/zzz-first/result.txt").read_text() == "1"
-    assert read_json(root / "project-v1.json")["format_version"] == 1
-    assert read_json(root / "project.json")["format_version"] == 3
-    assert len(Project.open(root).cases) == 1
 
 
 def test_interrupted_replacement_and_pending_inputs_recover(tmp_path, source_case):
@@ -247,3 +223,12 @@ def test_worker_limit_validation_and_case_threads_are_independent(tmp_path, sour
     assert job["max_workers"] == 2
     staged = case.root / f".pending-{job['attempt_id']}" / "inputs/run.yaml"
     assert yaml.safe_load(staged.read_text())["solver"]["threads"] == 3
+
+
+@pytest.mark.parametrize('version', [1, 2])
+def test_old_project_formats_are_rejected(tmp_path, version):
+    project = Project.create(tmp_path / 'project')
+    project.metadata['format_version'] = version
+    project.save()
+    with pytest.raises(ValueError, match='Unsupported project format'):
+        Project.open(project.root)

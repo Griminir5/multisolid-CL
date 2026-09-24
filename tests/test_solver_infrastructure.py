@@ -122,7 +122,7 @@ def test_tiny_inert_case_preserves_equation_order_and_executes(tmp_path: Path, g
     case = replace(case, run=case.run.model_copy(update={
         "model": case.run.model.model_copy(update={"gas_voidage_mode": gas_voidage_mode}),
     }))
-    simulation = PackedBedSimulation(case, PROPERTY_REGISTRY)
+    simulation = PackedBedSimulation(case)
     reporter = create_dataset_reporter(case)
     equation_names = ()
 
@@ -155,7 +155,7 @@ def test_ordinary_run_writes_one_dataset_and_manifest(tmp_path: Path) -> None:
     from packed_bed.simulation import run_case
 
     case = load_case(_write_inert_case(tmp_path))
-    result = run_case(case, property_registry=PROPERTY_REGISTRY)
+    result = run_case(case)
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
 
     assert result.status == "success"
@@ -202,10 +202,9 @@ def test_dae_plotter_retention_cannot_change_reports_or_netcdf(tmp_path: Path) -
         ("gas_mole_fraction",),
     )
 
-    ordinary = run_case(ordinary_case, property_registry=PROPERTY_REGISTRY)
+    ordinary = run_case(ordinary_case)
     retained = run_case(
         retained_case,
-        property_registry=PROPERTY_REGISTRY,
         retain_reporter=True,
     )
 
@@ -235,7 +234,7 @@ def test_plot_failure_preserves_successful_simulation_and_netcdf(
     registry["axial_profiles"] = replace(registry["axial_profiles"], render=fail)
     monkeypatch.setattr(plotting, "PLOT_REGISTRY", registry)
 
-    result = run_case(case, property_registry=PROPERTY_REGISTRY)
+    result = run_case(case)
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
 
     assert result.status == "success"
@@ -289,7 +288,7 @@ def test_requested_balances_control_accounting_dae_size(
     from packed_bed.simulation import PackedBedSimulation, execute_simulation
 
     case = _with_reports(load_case(_write_inert_case(tmp_path)), reports)
-    simulation = PackedBedSimulation(case, PROPERTY_REGISTRY)
+    simulation = PackedBedSimulation(case)
     reporter = create_dataset_reporter(case)
     observed = {}
 
@@ -343,7 +342,7 @@ def test_interior_flow_mode_controls_solver_incidence(
 
     case = _with_reports(load_case(_write_inert_case(tmp_path)), ("mass_balance", "heat_balance"))
     case = _with_interior_flow_mode(case, mode)
-    simulation = PackedBedSimulation(case, PROPERTY_REGISTRY)
+    simulation = PackedBedSimulation(case)
     observed = {}
 
     def inspect(initialized_simulation, _solver):

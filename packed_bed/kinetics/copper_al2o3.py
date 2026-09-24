@@ -73,8 +73,8 @@ def _arrhenius(coefficient: float, activation_energy: float, temperature_k):
 
 def _reduction_rate(context: KineticsContext, reactant: str, rate_key: str):
     rate_constant = _arrhenius(
-        REDUCTION_COEFFICIENTS[rate_key],
-        REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL[rate_key],
+        context.parameters["REDUCTION_COEFFICIENTS"][rate_key],
+        context.parameters["REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL"][rate_key],
         _temperature_k(context),
     )
     hydrogen_pressure = _positive_pressure(_partial_pressure_bar(context, "H2"))
@@ -113,8 +113,8 @@ def oxidize_cu(context: KineticsContext):
     oxygen_pressure = _positive_pressure(_partial_pressure_bar(context, "O2"))
     rate = (
         _arrhenius(
-            OXIDATION_COEFFICIENTS["cu_to_cuo"],
-            OXIDATION_ACTIVATION_ENERGIES_J_PER_MOL["cu_to_cuo"],
+            context.parameters["OXIDATION_COEFFICIENTS"]["cu_to_cuo"],
+            context.parameters["OXIDATION_ACTIVATION_ENERGIES_J_PER_MOL"]["cu_to_cuo"],
             _temperature_k(context),
         )
         * _solid_concentration(context, "Cu")
@@ -126,8 +126,8 @@ def oxidize_cu(context: KineticsContext):
 def form_spinel_from_cuo(context: KineticsContext):
     rate = (
         _arrhenius(
-            OXIDATION_COEFFICIENTS["cuo_to_spinel"],
-            OXIDATION_ACTIVATION_ENERGIES_J_PER_MOL["cuo_to_spinel"],
+            context.parameters["OXIDATION_COEFFICIENTS"]["cuo_to_spinel"],
+            context.parameters["OXIDATION_ACTIVATION_ENERGIES_J_PER_MOL"]["cuo_to_spinel"],
             _temperature_k(context),
         )
         * _solid_concentration(context, "CuO")
@@ -140,8 +140,8 @@ def oxidize_cualo2(context: KineticsContext):
     oxygen_pressure = _positive_pressure(_partial_pressure_bar(context, "O2"))
     rate = (
         _arrhenius(
-            OXIDATION_COEFFICIENTS["cualo2_to_spinel"],
-            OXIDATION_ACTIVATION_ENERGIES_J_PER_MOL["cualo2_to_spinel"],
+            context.parameters["OXIDATION_COEFFICIENTS"]["cualo2_to_spinel"],
+            context.parameters["OXIDATION_ACTIVATION_ENERGIES_J_PER_MOL"]["cualo2_to_spinel"],
             _temperature_k(context),
         )
         * _solid_concentration(context, "CuAlO2")
@@ -262,3 +262,16 @@ FAMILY = ReactionFamily(
 
 
 __all__ = ("FAMILY",)
+
+
+# Explicit authoring contract; undeclared implementation constants stay fixed.
+from ..parameters import parameter_group
+
+PARAMETERS = {
+    **parameter_group("REDUCTION_COEFFICIENTS", REDUCTION_COEFFICIENTS, "1/s", "Reduction coefficients", minimum=0),
+    **parameter_group("REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL", REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL, "J/mol", "Reduction activation energies j per mol", minimum=0),
+    **parameter_group("OXIDATION_COEFFICIENTS.cu_to_cuo", OXIDATION_COEFFICIENTS['cu_to_cuo'], "1/s", "Cu oxidation; pressure factor is sqrt(p/(100000 Pa))", minimum=0),
+    **parameter_group("OXIDATION_COEFFICIENTS.cuo_to_spinel", OXIDATION_COEFFICIENTS['cuo_to_spinel'], "m^3/(mol*s)", "Spinel formation from CuO and Al2O3 concentrations", minimum=0),
+    **parameter_group("OXIDATION_COEFFICIENTS.cualo2_to_spinel", OXIDATION_COEFFICIENTS['cualo2_to_spinel'], "m^3/(mol*s)", "Spinel formation; pressure factor is sqrt(p/(100000 Pa))", minimum=0),
+    **parameter_group("OXIDATION_ACTIVATION_ENERGIES_J_PER_MOL", OXIDATION_ACTIVATION_ENERGIES_J_PER_MOL, "J/mol", "Oxidation activation energies j per mol", minimum=0),
+}

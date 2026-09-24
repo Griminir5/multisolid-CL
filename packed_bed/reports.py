@@ -403,6 +403,8 @@ def extract_dataset(process, case: Case):
         attrs={
             "system_name": case.run.simulation.system_name,
             "selected_reports": ",".join(case.run.outputs.requested_reports),
+            "definition_labels": json.dumps(case.definitions.selection.labels, ensure_ascii=False),
+            "definition_selection": json.dumps(case.definitions.selection.to_dict(), ensure_ascii=False),
         },
     )
     for spec in specs:
@@ -622,6 +624,7 @@ def write_run_manifest(
             "program": case.program.model_dump(mode="json"),
             "solids": case.solids.model_dump(mode="json"),
             "compiled_programs": _compiled_programs(case),
+            "definitions": case.definitions.selection.to_dict(),
         },
         "inputs": {
             name: {"path": str(inputs[name]), "sha256": digest}

@@ -15,8 +15,9 @@ from uuid import uuid4
 from pydantic import ValidationError
 import yaml
 
-from packed_bed.config import Case, load_case, resolve_case
-from packed_bed.config.load import read_yaml_mapping
+from packed_bed.config import Case, CaseInputs
+from packed_bed.config.load import read_yaml_mapping, inspect_case, inspect_case_file
+from packed_bed.parameters import plain
 
 from .inputs import scientific_documents
 
@@ -80,7 +81,7 @@ def scientific_fingerprint(documents: dict[str, dict], extensions: list) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def require_desktop_solver(case: Case) -> None:
+def require_desktop_solver(case: Case | CaseInputs) -> None:
     if case.run.solver.backend != "daetools" or case.run.solver.name != "superlu":
         raise ValueError("This starter supports DAETools / SuperLU. Select it explicitly in the case inputs, or use the CLI for this solver.")
 
@@ -107,22 +108,30 @@ class ProjectCase:
     def run_folder(self) -> Path:
         return self.root / "run"
 
-    def resolve(self) -> Case:
+    def resolve(self) -> CaseInputs:
         if self.documents["run"].get("references") != REFERENCES:
             raise ValueError("Case inputs must reference chemistry.yaml, program.yaml and solids.yaml in inputs/.")
-        return resolve_case(
+        return inspect_case(catalogue=self.catalogue(),
             **{f"{name}_path": self.root / "inputs" / f"{name}.yaml" for name in DOCUMENTS},
             **{f"{name}_data": self.documents[name] for name in DOCUMENTS},
         )
 
-    def validate_for_run(self) -> Case:
+    def catalogue(self):
+        return self.project.plugins.catalogue(self.definition_lock())
+
+    def definition_lock(self):
+        return self.project.plugins.lock_for(self.documents)
+
+    def validate_for_run(self) -> CaseInputs:
         study_id = self.metadata.get("study_id")
         if study_id and self.project.study_store.needs_update(study_id):
             raise NeedsStudyUpdate("This study changed. Open Edit study and rebuild its generated cases before running.")
         case = self.resolve()
         if self.project.metadata.get("extensions"):
-            raise ValueError("This project requires extensions. Extension loading is not available in the starter yet.")
+            raise ValueError("This project requires extensions in an unsupported legacy format.")
         require_desktop_solver(case)
+        from packed_bed.plugins.storage import require_approval
+        require_approval(self.catalogue(), case.selection.lock)
         return case
 
     def save(self) -> None:
@@ -137,7 +146,7 @@ class ProjectCase:
             self.project.save()
 
     def fingerprint(self) -> str:
-        return scientific_fingerprint(self.documents, self.project.metadata.get("extensions", []))
+        return scientific_fingerprint(self.documents, self.definition_lock())
 
     def state(self) -> dict:
         readiness, message = "Ready", ""
@@ -162,20 +171,26 @@ class ProjectCase:
 
     def prepare(self, attempt_id: str) -> Path:
         """Stage a complete input snapshot. Existing results remain until execution starts."""
-        self.validate_for_run()
+        resolved = self.validate_for_run()
         self.save()
         folder = self.root / f".pending-{attempt_id}"
         folder.mkdir(exist_ok=False)
         try:
             write_documents(folder / "inputs", portable_documents(self.documents))
+            from packed_bed.plugins.storage import copy_package
+            catalogue = self.catalogue()
+            for provider in resolved.selection.lock['plugins']:
+                copy_package(catalogue.paths[provider], folder)
+            write_json(folder / 'inputs' / 'definitions.json', {'root': '..', 'lock': plain(resolved.selection.lock)})
             write_json(folder / "snapshot.json", {
                 "format_version": SNAPSHOT_VERSION,
                 "case_id": self.id,
                 "case_name": self.name,
                 "attempt_id": attempt_id,
                 "created_at": datetime.now(timezone.utc).isoformat(),
-                "fingerprint": self.fingerprint(),
-                "extensions": deepcopy(self.project.metadata.get("extensions", [])),
+                "fingerprint": scientific_fingerprint(self.documents, plain(resolved.selection.lock)),
+                "extensions": plain(resolved.selection.lock),
+                "definitions": resolved.selection.to_dict(),
                 "input_hashes": input_hashes(folder / "inputs"),
             })
             write_json(folder / "status.json", {"state": "queued", "elapsed_s": 0.0})
@@ -208,12 +223,17 @@ class Project:
             self._study_store = StudyStore(self)
         return self._study_store
 
+    @property
+    def plugins(self):
+        from .plugins_store import PluginStore
+        return PluginStore(self)
+
     @classmethod
     def create(cls, destination: str | Path, name: str | None = None) -> Project:
         root = Path(destination).resolve()
         root.mkdir(parents=True, exist_ok=False)
         project = cls(root, {"format_version": PROJECT_VERSION, "name": name or root.name,
-                             "cases": [], "extensions": [], "studies": [], "definitions": [], "max_workers": 1})
+                             "cases": [], "extensions": [], "plugins": [], "studies": [], "definitions": [], "max_workers": 1})
         try:
             project.save()
         except Exception:
@@ -229,13 +249,10 @@ class Project:
         from .study_store import recover_study_transaction
         recover_study_transaction(root)
         metadata = read_json(root / "project.json")
-        old_version = metadata.get("format_version")
-        if metadata.get("format_version") == 1:
-            return cls._migrate(root, metadata)
-        if metadata.get("format_version") not in (2, PROJECT_VERSION):
-            raise ValueError("Unsupported project format. Open it with a compatible application version.")
-        if not isinstance(metadata.get("cases"), list) or not isinstance(metadata.get("extensions", []), list):
-            raise ValueError("Project cases and extensions must be lists.")
+        if metadata.get("format_version") != PROJECT_VERSION:
+            raise ValueError("Unsupported project format.")
+        if not isinstance(metadata.get("cases"), list):
+            raise ValueError("Project cases must be a list.")
         project = cls(root, metadata)
         seen = set()
         for entry in metadata["cases"]:
@@ -248,44 +265,6 @@ class Project:
             if not folder.resolve().is_relative_to(root):
                 raise ValueError("Case folders must stay inside the project.")
             project.cases.append(ProjectCase(project, entry, read_documents(folder / "inputs")))
-        if old_version == 2:
-            backup = root / "project-v2.json"
-            if not backup.exists():
-                write_json(backup, metadata)
-            project.study_store.migrate_v2()
-        return project
-
-    @classmethod
-    def _migrate(cls, root: Path, old: dict) -> Project:
-        """Copy the old project into one case, retaining original files as a migration backup."""
-        backup = root / "project-v1.json"
-        if not backup.exists():
-            write_json(backup, old)
-        project = cls(root, {**old, "format_version": PROJECT_VERSION, "cases": [],
-                             "extensions": old.get("extensions", []), "studies": []})
-        # Commit project.json last, so a failed migration can be retried.
-        case_id = f"original-{uuid4().hex}"
-        folder = root / "cases" / case_id
-        entry = {"id": case_id, "name": old.get("name", "Original case"), "included": True, "origin": "Independent"}
-        case = ProjectCase(project, entry, read_documents(root / "inputs"))
-        write_documents(folder / "inputs", case.documents)
-        def created_at(path):
-            value = read_json(path / "snapshot.json").get("created_at")
-            try:
-                return datetime.fromisoformat(value).timestamp()
-            except (TypeError, ValueError):
-                return path.stat().st_mtime
-
-        old_runs = sorted((path for path in (root / "runs").glob("*") if (path / "snapshot.json").is_file()), key=created_at)
-        if old_runs:
-            shutil.copytree(old_runs[-1], case.run_folder)
-            snapshot = read_json(case.run_folder / "snapshot.json")
-            snapshot.update(case_id=case_id, case_name=case.name,
-                            fingerprint=scientific_fingerprint(read_documents(case.run_folder / "inputs"), project.metadata["extensions"]))
-            write_json(case.run_folder / "snapshot.json", snapshot)
-        project.metadata["cases"].append(entry)
-        project.cases.append(case)
-        project.save()
         return project
 
     def save(self) -> None:
@@ -317,7 +296,17 @@ class Project:
         return case
 
     def add_case_from_files(self, run_path: str | Path, name: str | None = None) -> ProjectCase:
-        resolved = load_case(run_path)
+        from packed_bed.plugins.storage import catalogue_for_case
+        catalogue = catalogue_for_case(run_path)
+        resolved = inspect_case_file(run_path, catalogue=catalogue)
+        existing, _ = self.plugins.browse_catalogue(include_disabled=True)
+        registered = {entry['id'] for entry in self.plugins.entries}
+        for provider in resolved.selection.lock['plugins']:
+            if provider in registered and existing.hashes.get(provider) != catalogue.hashes[provider]:
+                raise ValueError(f'Plugin {provider} already exists with different contents. '
+                                 'Use Register plugin to replace it before importing this case.')
+        for provider in resolved.selection.lock['plugins']:
+            self.plugins.add(catalogue.paths[provider])
         documents = {key: read_yaml_mapping(getattr(resolved, f"{key}_path"), key) for key in DOCUMENTS}
         return self.add_case(name or resolved.run.simulation.system_name, documents)
 

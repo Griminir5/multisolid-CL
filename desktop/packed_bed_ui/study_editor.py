@@ -465,7 +465,8 @@ class StudyEditor(QWidget):
             self.begin_preview()
 
     def inspect_baseline(self):
-        inspect_inputs(self, "Study baseline · read-only", self.study.baseline, self.study.editor_metadata)
+        catalogue = self.store.project.plugins.catalogue()
+        inspect_inputs(self, "Study baseline · read-only", self.study.baseline, self.study.editor_metadata, catalogue=catalogue)
 
     def replace_baseline(self):
         if not self.save():
@@ -568,7 +569,8 @@ class StudyEditor(QWidget):
         index = self.candidate_table.currentIndex().row()
         if 0 <= index < len(self.candidate_model.candidates):
             candidate = self.candidate_model.candidates[index]
-            inspect_inputs(self, candidate.name + " · read-only", candidate.documents)
+            catalogue = self.store.project.plugins.catalogue()
+            inspect_inputs(self, candidate.name + " · read-only", candidate.documents, catalogue=catalogue)
 
     def apply(self):
         if self.preview is None or not self.save():

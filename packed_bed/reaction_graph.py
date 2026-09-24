@@ -62,12 +62,13 @@ def _quote(value: str) -> str:
     return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('\r', '').replace('\n', '\\n') + '"'
 
 
-def build_reaction_graph(gases, solids, reactions, property_registry=None) -> ReactionGraph:
+def build_reaction_graph(gases, solids, reactions, property_registry=None, *, labels=None) -> ReactionGraph:
     if property_registry is None:
         from .properties import PROPERTY_REGISTRY
         property_registry = PROPERTY_REGISTRY
 
     gases, solids = list(dict.fromkeys(gases)), list(dict.fromkeys(solids))
+    labels = labels or {}
     reactions = list({reaction.id: reaction for reaction in reactions}.values())
     selected = set(gases) | set(solids)
     missing = {species for reaction in reactions for species in reaction.all_species} - selected
@@ -96,8 +97,9 @@ def build_reaction_graph(gases, solids, reactions, property_registry=None) -> Re
         for species in species_ids:
             if ("species", species) in ids:
                 continue
-            node(("species", species), species,
-                 f"{species}\nMissing required species" if species in missing else species,
+            label = labels.get(species, species)
+            node(("species", species), label,
+                 f"{label}\nMissing required species" if species in missing else label,
                  "ellipse", "#ffe0dd" if species in missing else color)
     for reaction in reactions:
         # Coefficients remain in the scientific editor's equations, not the graph.
@@ -105,7 +107,7 @@ def build_reaction_graph(gases, solids, reactions, property_registry=None) -> Re
         products = " + ".join(s for s, c in reaction.stoichiometry.items() if c > 0)
         tooltip = (reaction.name + '\n' + reactants + (' ⇌ ' if reaction.reversible else ' → ')
                    + products + '\n' + reaction.source_reference)
-        node(("reaction", reaction.id), reaction.name, tooltip, "box", "#e3e5f5")
+        node(("reaction", reaction.id), labels.get(reaction.id, reaction.name), tooltip, "box", "#e3e5f5")
     for reaction in reactions:
         reaction_id = ids[("reaction", reaction.id)]
         for species in reaction.all_species:

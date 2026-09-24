@@ -270,17 +270,10 @@ commit, recovery restores old cases; after it, recovery deletes temporary backup
 Recovery runs before loading case inputs. General case-draft recovery and project
 archives remain pending.
 
-The project format is 3; the run-snapshot format remains 1. Format-2 projects retain
-all existing cases/results and gain study metadata, with a `project-v2.json` backup.
-Legacy studies require successful-baseline verification before their next generation.
-Their materialized cases remain usable until a study edit requires rebuilding.
-
-Original format-1 starter projects migrate on opening: their inputs become one
-independent case, and their latest run is copied into its run slot. The original
-`inputs/`, `runs/`, and a `project-v1.json` copy remain as a one-time migration
-backup. They are not shown as run history or modified by later reruns. The
-application uses project and solver locks to prevent concurrent access. Reopening
-after an interrupted session marks unfinished retained runs as Interrupted.
+The application reads the current project format (3) and run-snapshot format (1).
+Older project formats are rejected rather than migrated. Project and solver locks
+prevent concurrent access. Reopening after an interrupted session marks unfinished
+retained runs as Interrupted.
 
 | File | Responsibility |
 | --- | --- |
@@ -299,7 +292,7 @@ after an interrupted session marks unfinished retained runs as Interrupted.
 | `packed_bed_ui/bed.py` | Geometry, material zones, and reactor boundary rules |
 | `packed_bed_ui/program_editor.py` | Program modes, hold/ramp tables, feed targets, timing, and flow conversion |
 | `packed_bed_ui/editor_widgets.py` | Shared selection lists, tables, and preview canvases |
-| `packed_bed_ui/project.py` | Project/case storage, imports, migration, readiness, and run preparation |
+| `packed_bed_ui/project.py` | Project/case storage, imports, readiness, and run preparation |
 | `packed_bed_ui/execution.py` | Start, monitor, and stop the project's worker with Qt |
 | `packed_bed_ui/worker.py` | Verify/activate snapshots, collect logs, publish status, call the shared engine loop |
 | `../packed_bed/batch.py` | Shared case scheduling, concurrency, thread limits, and worker cleanup |
@@ -310,14 +303,14 @@ Both the workspace and storage use `preview_study()`; its lazy mode lets Qt cons
 one captured preview incrementally. Shared document access, scientific fingerprint
 inputs, timing, and scaling live in `inputs.py`.
 
-`ProjectCase.resolve()` uses the engine's `resolve_case()`. Workers load the
+`ProjectCase.resolve()` uses the engine's metadata-only `inspect_case()`. Workers load the
 snapshots and call `run_case()` with its optional status callback. The UI and
 batch CLI both use `run_cases_in_processes()` for concurrent scheduling and
 worker cleanup. The CLI retains its in-process path for one worker with no timeout. There is no second scheduler inside a widget.
 
-Extension requirements belong to the project. Code extensions are not loaded by
-this starter; a project requiring them cannot run yet. See [PLAN.md](../PLAN.md)
-for the full definition/extension design and remaining release work.
+Each project stores one current copy of each plugin; Save replaces that copy.
+Code/resource approval belongs to the local computer and survives parameter edits.
+Workers reconstruct authoritative definitions from plugin copies in their input snapshots. See [PLUGINS.md](../PLUGINS.md) for the plugin workflow and API.
 
 ## Checks
 
@@ -329,6 +322,10 @@ python -m pip wheel --no-deps --no-build-isolation ./desktop
 
 Tests cover multi-case projects, the mixed 11-case example, portable imports,
 invalid drafts, successful-baseline eligibility, complete study rebuilds, reusable
-definitions, spreadsheet editing, staleness, transaction recovery, migration, interrupted execution,
+definitions, spreadsheet editing, staleness, transaction recovery, interrupted execution,
 project locking, and real DAETools runs compared with direct engine results.
 Qt checks run offscreen; real solver checks skip when DAETools is absent.
+
+## Project plugins
+
+Use **Plugins** beside **Project** in the menu bar to register, enable, inspect, create, edit or export scientific plugins. Species and reaction pickers display their sources; reaction-family bindings select among multiple definitions of the same chemical species. See [the plugin guide](../PLUGINS.md) for authoring and revision behavior.

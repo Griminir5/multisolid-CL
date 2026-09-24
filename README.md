@@ -443,3 +443,7 @@ These local research directories remain ignored by Git. The obsolete relaunch he
 Third-party dependencies retain their own licenses.
 
 The language reference for this README is [ASD-STE100, Issue 9](https://www.asd-ste100.org/).
+
+## Scientific plugins
+
+Projects support portable species, property and kinetic plugins, including in-app parameter variants and externally authored Python implementations. See [PLUGINS.md](PLUGINS.md) for the Plugins browser, examples, package format and engine API.

@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout,
                              QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
                              QVBoxLayout, QWidget)
 
-from packed_bed.properties import PROPERTY_REGISTRY
+from .catalogue_widgets import species_choices
 
 from .editor import InputEditor
 from .editor_widgets import SelectionList, action_button, choices, dialog_buttons, message, row
@@ -17,13 +17,13 @@ from .project import portable_documents
 from .studies import ReusableDefinition
 
 
-def inspect_inputs(parent, title, documents, metadata=None):
+def inspect_inputs(parent, title, documents, metadata=None, *, catalogue=None):
     dialog = QDialog(parent)
     dialog.setWindowTitle(title)
     dialog.resize(1100, 800)
     layout = QVBoxLayout(dialog)
     editor = InputEditor()
-    editor.set_documents(documents, metadata, read_only=True)
+    editor.set_documents(documents, metadata, read_only=True, catalogue=catalogue)
     layout.addWidget(editor)
     layout.addWidget(dialog_buttons(dialog, QDialogButtonBox.StandardButton.Close))
     dialog.exec()
@@ -53,7 +53,7 @@ class DefinitionDialog(QDialog):
         for index in range(self.editor.tabs.count()):
             self.editor.tabs.setTabVisible(index, index == (3 if kind == "program" else 2))
         phase = "gas" if kind == "program" else "solid"
-        catalog = {key: (key, record.name) for key, record in PROPERTY_REGISTRY.records.items() if record.phase == phase}
+        catalog, _ = species_choices(store.project.plugins.catalogue(), phase)
         self.species = SelectionList(catalog, f"{phase} species")
         self.species.setMaximumHeight(110)
         self.species.changed.connect(lambda values: self.editor.set_species(phase, values))
@@ -81,9 +81,11 @@ class DefinitionDialog(QDialog):
         if self.kind == "program":
             documents["chemistry"]["gas_species"] = deepcopy(payload.get("gas_species", []))
             metadata = payload.get("editor_metadata", {})
-        self.editor.set_documents(documents, metadata)
+        self.editor.set_documents(documents, metadata, catalogue=self.store.project.plugins.catalogue())
         self.editor.tabs.setCurrentIndex(3 if self.kind == "program" else 2)
         path = ("chemistry", "gas_species") if self.kind == "program" else ("solids", "solid_species")
+        self.species.catalog, _ = species_choices(self.store.project.plugins.catalogue(), 'gas' if self.kind == 'program' else 'solid',
+                                                  documents['chemistry'].get('species_definitions', {}))
         self.species.set_values(self.editor.get(path, []))
 
     def save_definition(self):

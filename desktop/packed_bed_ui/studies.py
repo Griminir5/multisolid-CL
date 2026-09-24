@@ -318,7 +318,7 @@ def generation_signature(study, definitions, extensions=()):
     return hashlib.sha256(json.dumps(payload, sort_keys=True, allow_nan=False).encode()).hexdigest()
 
 
-def _legacy_candidates(study, definitions, extensions):
+def _legacy_candidates(study, definitions, extensions, catalogue=None):
     legacy = study.legacy
     spec = BatchSpec.model_validate(legacy["spec"])
     for name, ident in legacy["beds"].items():
@@ -333,14 +333,14 @@ def _legacy_candidates(study, definitions, extensions):
         for value in selection.values():
             documents = apply_batch_value(documents, value, programs, spec.geometries, solids)
         selected = {key: value.id for key, value in selection.items()}
-        readiness, message = input_readiness(documents, extensions)
+        readiness, message = input_readiness(documents, extensions, catalogue=catalogue)
         yield Candidate(" / ".join(selected.values()), documents, selected, readiness, message)
 
 
-def expand_study(study, definitions, extensions=()):
+def expand_study(study, definitions, extensions=(), *, catalogue=None):
     if study.legacy:
         try:
-            yield from _legacy_candidates(study, definitions, extensions)
+            yield from _legacy_candidates(study, definitions, extensions, catalogue)
         except KeyError as exc:
             raise StudyError("An imported rule references a missing definition.") from exc
         return
@@ -377,17 +377,17 @@ def expand_study(study, definitions, extensions=()):
         if changed_timing and not documents["run"]["simulation"].get("repeat_program", False):
             duration = program_duration(documents["program"])
             documents["run"]["simulation"]["time_horizon_s"] = duration if duration is not None else ""
-        readiness, message = input_readiness(documents, extensions)
+        readiness, message = input_readiness(documents, extensions, catalogue=catalogue)
         yield Candidate(" / ".join(labels), documents, selection, readiness, message)
 
 
-def preview_study(study, definitions, existing_cases, extensions=(), *, lazy=False):
+def preview_study(study, definitions, existing_cases, extensions=(), *, lazy=False, catalogue=None):
     """Capture one reviewed source state; Qt may consume its candidates incrementally."""
     study, definitions, extensions = deepcopy((study, definitions, extensions))
     cases = [case for case in existing_cases if case.study_id == study.id]
     preview = StudyPreview(study.id, generation_signature(study, definitions, extensions), [],
                            [case.id for case in cases], sum(case.has_results for case in cases),
-                           candidate_count(study, definitions), expand_study(study, definitions, extensions))
+                           candidate_count(study, definitions), expand_study(study, definitions, extensions, catalogue=catalogue))
     if not lazy:
         preview.candidates.extend(preview.remaining)
     return preview

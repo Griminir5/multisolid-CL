@@ -243,7 +243,7 @@ class ChannelTable(QGroupBox):
             composition_enabled.toggled.connect(field.setEnabled)
             composition_fields[key] = field
             field.textChanged.connect(update_total)
-            form.addRow(key, field)
+            form.addRow(self.editor.species_label(key, formula_only=True), field)
         summary = QHBoxLayout()
         summary.addWidget(total, 1)
         summary.addWidget(normalize)

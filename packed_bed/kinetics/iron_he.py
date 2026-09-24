@@ -4,7 +4,6 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from ..properties import PROPERTY_REGISTRY
 from ..reactions import KineticsContext, ReactionDefinition, ReactionFamily
 from .runtime import Constant, Exp, K, Log, Pa, Sqrt, m, mol, s
 
@@ -12,14 +11,10 @@ from .runtime import Constant, Exp, K, Log, Pa, Sqrt, m, mol, s
 GAS_CONSTANT_J_PER_MOL_K = 8.31446261815324
 PRESSURE_PA_PER_BAR = 1.0e5
 
-FE2O3_MW_KG_PER_MOL = PROPERTY_REGISTRY.get_record("Fe2O3").mw
-FE3O4_MW_KG_PER_MOL = PROPERTY_REGISTRY.get_record("Fe3O4").mw
-FEO_MW_KG_PER_MOL = PROPERTY_REGISTRY.get_record("FeO").mw
-FE_MW_KG_PER_MOL = PROPERTY_REGISTRY.get_record("Fe").mw
 
 
 # C_fullOx_Fe2O3 = (0.20 * 2500) / MW_Fe2O3
-FULLY_OXIDIZED_FE2O3_CONCENTRATION_MOL_PER_M3 = (0.20 * 2500.0) / FE2O3_MW_KG_PER_MOL
+FULLY_OXIDIZED_FE2O3_MASS_KG_PER_M3 = 0.20 * 2500.0
 
 # H2 reduction via shrinking-core model
 AVERAGE_GRAIN_RADIUS_M = 5.3e-8
@@ -185,10 +180,10 @@ def _pow_minus_one_third(one_minus_x):
 
 def _oc_mass_density_expression(context: KineticsContext):
     return (
-        _optional_solid_concentration_expression(context, "Fe2O3") * Constant(FE2O3_MW_KG_PER_MOL)
-        + _optional_solid_concentration_expression(context, "Fe3O4") * Constant(FE3O4_MW_KG_PER_MOL)
-        + _optional_solid_concentration_expression(context, "FeO") * Constant(FEO_MW_KG_PER_MOL)
-        + _optional_solid_concentration_expression(context, "Fe") * Constant(FE_MW_KG_PER_MOL)
+        _optional_solid_concentration_expression(context, "Fe2O3") * Constant(context.molecular_weight("Fe2O3"))
+        + _optional_solid_concentration_expression(context, "Fe3O4") * Constant(context.molecular_weight("Fe3O4"))
+        + _optional_solid_concentration_expression(context, "FeO") * Constant(context.molecular_weight("FeO"))
+        + _optional_solid_concentration_expression(context, "Fe") * Constant(context.molecular_weight("Fe"))
     )
 
 
@@ -197,7 +192,7 @@ def _fe_conversions(context: KineticsContext):
     c_fe3o4 = _optional_solid_concentration_expression(context, "Fe3O4")
     c_feo = _optional_solid_concentration_expression(context, "FeO")
     c_fe = _optional_solid_concentration_expression(context, "Fe")
-    c_full = Constant(FULLY_OXIDIZED_FE2O3_CONCENTRATION_MOL_PER_M3)
+    c_full = Constant(FULLY_OXIDIZED_FE2O3_MASS_KG_PER_M3 / context.molecular_weight("Fe2O3"))
 
     # Eqs. 14-16 from paper
     x_fe2o3 = Constant(1.0) - c_fe2o3 / c_full
@@ -239,22 +234,22 @@ def he_fe2o3_h2_reduction(context: KineticsContext):
     denominator = (
         Constant(1.0)
         / _arrhenius_expression(
-            H2_REDUCTION_PREEXPONENTIALS["Fe2O3"],
-            H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL["Fe2O3"],
+            context.parameters["H2_REDUCTION_PREEXPONENTIALS"]["Fe2O3"],
+            context.parameters["H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL"]["Fe2O3"],
             terms.temperature_k,
         )
         * _pow_minus_two_thirds(one_minus_x)
-        + Constant(AVERAGE_GRAIN_RADIUS_M)
+        + Constant(context.parameters["AVERAGE_GRAIN_RADIUS_M"])
         / _arrhenius_expression(
-            H2_DIFFUSIVITY_PREEXPONENTIALS["Fe2O3"],
-            H2_DIFFUSIVITY_ACTIVATION_ENERGIES_J_PER_MOL["Fe2O3"],
+            context.parameters["H2_DIFFUSIVITY_PREEXPONENTIALS"]["Fe2O3"],
+            context.parameters["H2_DIFFUSIVITY_ACTIVATION_ENERGIES_J_PER_MOL"]["Fe2O3"],
             terms.temperature_k,
         )
         * (_pow_minus_one_third(one_minus_x) - Constant(1.0))
     )
 
     rate_expression = (
-        Constant(3.0 / (AVERAGE_GRAIN_RADIUS_M * MOLAR_DENSITY_FE2O3_MOL_PER_M3))
+        Constant(3.0 / (context.parameters["AVERAGE_GRAIN_RADIUS_M"] * MOLAR_DENSITY_FE2O3_MOL_PER_M3))
         * Constant(H2_REDUCTION_A_FACTORS["Fe2O3"])
         * terms.c_fe2o3_mol_per_m3
         * _positive_part_expression(terms.c_h2_mol_per_m3)
@@ -272,22 +267,22 @@ def he_fe3o4_h2_reduction(context: KineticsContext):
     denominator = (
         Constant(1.0)
         / _arrhenius_expression(
-            H2_REDUCTION_PREEXPONENTIALS["Fe3O4"],
-            H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL["Fe3O4"],
+            context.parameters["H2_REDUCTION_PREEXPONENTIALS"]["Fe3O4"],
+            context.parameters["H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL"]["Fe3O4"],
             terms.temperature_k,
         )
         * _pow_minus_two_thirds(one_minus_x)
-        + Constant(AVERAGE_GRAIN_RADIUS_M)
+        + Constant(context.parameters["AVERAGE_GRAIN_RADIUS_M"])
         / _arrhenius_expression(
-            H2_DIFFUSIVITY_PREEXPONENTIALS["Fe3O4"],
-            H2_DIFFUSIVITY_ACTIVATION_ENERGIES_J_PER_MOL["Fe3O4"],
+            context.parameters["H2_DIFFUSIVITY_PREEXPONENTIALS"]["Fe3O4"],
+            context.parameters["H2_DIFFUSIVITY_ACTIVATION_ENERGIES_J_PER_MOL"]["Fe3O4"],
             terms.temperature_k,
         )
         * (_pow_minus_one_third(one_minus_x) - Constant(1.0))
     )
 
     rate_expression = (
-        Constant(3.0 / (AVERAGE_GRAIN_RADIUS_M * MOLAR_DENSITY_FE2O3_MOL_PER_M3))
+        Constant(3.0 / (context.parameters["AVERAGE_GRAIN_RADIUS_M"] * MOLAR_DENSITY_FE2O3_MOL_PER_M3))
         * Constant(H2_REDUCTION_A_FACTORS["Fe3O4"])
         * terms.c_fe3o4_mol_per_m3
         * driving_force
@@ -305,22 +300,22 @@ def he_feo_h2_reduction(context: KineticsContext):
     denominator = (
         Constant(1.0)
         / _arrhenius_expression(
-            H2_REDUCTION_PREEXPONENTIALS["FeO"],
-            H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL["FeO"],
+            context.parameters["H2_REDUCTION_PREEXPONENTIALS"]["FeO"],
+            context.parameters["H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL"]["FeO"],
             terms.temperature_k,
         )
         * _pow_minus_two_thirds(one_minus_x)
-        + Constant(AVERAGE_GRAIN_RADIUS_M)
+        + Constant(context.parameters["AVERAGE_GRAIN_RADIUS_M"])
         / _arrhenius_expression(
-            H2_DIFFUSIVITY_PREEXPONENTIALS["FeO"],
-            H2_DIFFUSIVITY_ACTIVATION_ENERGIES_J_PER_MOL["FeO"],
+            context.parameters["H2_DIFFUSIVITY_PREEXPONENTIALS"]["FeO"],
+            context.parameters["H2_DIFFUSIVITY_ACTIVATION_ENERGIES_J_PER_MOL"]["FeO"],
             terms.temperature_k,
         )
         * (_pow_minus_one_third(one_minus_x) - Constant(1.0))
     )
 
     rate_expression = (
-        Constant(3.0 / (AVERAGE_GRAIN_RADIUS_M * MOLAR_DENSITY_FE2O3_MOL_PER_M3))
+        Constant(3.0 / (context.parameters["AVERAGE_GRAIN_RADIUS_M"] * MOLAR_DENSITY_FE2O3_MOL_PER_M3))
         * Constant(H2_REDUCTION_A_FACTORS["FeO"])
         * terms.c_feo_mol_per_m3
         * driving_force
@@ -336,7 +331,7 @@ def he_fe2o3_co_reduction(context: KineticsContext):
         terms.oc_mass_density_kg_per_m3
         * _arrhenius_expression(
             CO_REDUCTION_PREEXPONENTIALS["Fe2O3"],
-            CO_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL["Fe2O3"],
+            context.parameters["CO_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL"]["Fe2O3"],
             terms.temperature_k,
         )
         * _positive_part_expression(terms.c_co_mol_per_m3)
@@ -354,7 +349,7 @@ def he_fe3o4_co_reduction(context: KineticsContext):
         terms.oc_mass_density_kg_per_m3
         * _arrhenius_expression(
             CO_REDUCTION_PREEXPONENTIALS["Fe3O4"],
-            CO_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL["Fe3O4"],
+            context.parameters["CO_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL"]["Fe3O4"],
             terms.temperature_k,
         )
         * driving_force
@@ -376,7 +371,7 @@ def he_feo_co_reduction(context: KineticsContext):
 
     k_feo_co = _arrhenius_expression(
         CO_REDUCTION_PREEXPONENTIALS["FeO"],
-        CO_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL["FeO"],
+        context.parameters["CO_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL"]["FeO"],
         terms.temperature_k,
     )
     d_feo_co = _arrhenius_expression(
@@ -410,8 +405,8 @@ def he_fe2o3_ch4_reduction(context: KineticsContext):
     rate_expression = (
         terms.oc_mass_density_kg_per_m3
         * _arrhenius_expression(
-            CH4_REDUCTION_PREEXPONENTIAL,
-            CH4_REDUCTION_ACTIVATION_ENERGY_J_PER_MOL,
+            context.parameters["CH4_REDUCTION_PREEXPONENTIAL"],
+            context.parameters["CH4_REDUCTION_ACTIVATION_ENERGY_J_PER_MOL"],
             terms.temperature_k,
         )
         * _positive_part_expression(terms.c_ch4_mol_per_m3)
@@ -541,3 +536,18 @@ FAMILY = ReactionFamily(
 
 
 __all__ = ("FAMILY",)
+
+
+# Explicit authoring contract; undeclared implementation constants stay fixed.
+from ..parameters import parameter_group
+
+PARAMETERS = {
+    **parameter_group("AVERAGE_GRAIN_RADIUS_M", AVERAGE_GRAIN_RADIUS_M, "m", "Average grain radius m", minimum=1e-30),
+    **parameter_group("H2_REDUCTION_PREEXPONENTIALS", H2_REDUCTION_PREEXPONENTIALS, "m/s", "H2 reduction preexponentials", minimum=0),
+    **parameter_group("H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL", H2_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL, "J/mol", "H2 reduction activation energies j per mol", minimum=0),
+    **parameter_group("H2_DIFFUSIVITY_PREEXPONENTIALS", H2_DIFFUSIVITY_PREEXPONENTIALS, "m^2/s", "H2 diffusivity preexponentials", minimum=0),
+    **parameter_group("H2_DIFFUSIVITY_ACTIVATION_ENERGIES_J_PER_MOL", H2_DIFFUSIVITY_ACTIVATION_ENERGIES_J_PER_MOL, "J/mol", "H2 diffusivity activation energies j per mol", minimum=0),
+    **parameter_group("CO_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL", CO_REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL, "J/mol", "Co reduction activation energies j per mol", minimum=0),
+    **parameter_group("CH4_REDUCTION_PREEXPONENTIAL", CH4_REDUCTION_PREEXPONENTIAL, "m^3/(kg*s)", "CH4 reduction coefficient multiplying oxygen-carrier mass density and gas concentration", minimum=0),
+    **parameter_group("CH4_REDUCTION_ACTIVATION_ENERGY_J_PER_MOL", CH4_REDUCTION_ACTIVATION_ENERGY_J_PER_MOL, "J/mol", "Ch4 reduction activation energy j per mol", minimum=0),
+}

@@ -22,11 +22,8 @@ from daetools.pyDAE import (
 
 from .config import Case
 from .initialization import apply_initial_state, calculate_initial_state, configure_model
-from .kinetics import resolve_kinetics_hooks
 from .model import PackedBedModel
 from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S
-from .properties import PROPERTY_REGISTRY
-from .reactions import build_reaction_network
 from .reports import (
     RunResult,
     compute_balance_errors,
@@ -54,30 +51,15 @@ class PackedBedSimulation(daeSimulation):
     def __init__(
         self,
         case: Case,
-        property_registry,
         *,
         smooth_ramp_width_s: float = DEFAULT_SMOOTH_RAMP_WIDTH_S,
     ):
         daeSimulation.__init__(self)
         self.case = case
-        self.property_registry = property_registry
+        self.property_registry = case.definitions.properties
         self.smooth_ramp_width_s = float(smooth_ramp_width_s)
-        reaction_network = build_reaction_network(
-            case.chemistry.reaction_ids,
-            case.chemistry.gas_species,
-            case.solids.solid_species,
-            families=case.reaction_families,
-        )
-        reaction_rate_hooks = resolve_kinetics_hooks(
-            reaction_network,
-            case.reaction_families,
-        )
         self.model = PackedBedModel(
-            case.run.simulation.system_name,
-            case,
-            reaction_network,
-            reaction_rate_hooks,
-            property_registry,
+            case.run.simulation.system_name, case,
             smooth_ramp_width_s=self.smooth_ramp_width_s,
         )
         self.initial_state = None
@@ -85,7 +67,6 @@ class PackedBedSimulation(daeSimulation):
     def SetUpParametersAndDomains(self):
         self.initial_state = calculate_initial_state(
             self.case,
-            self.property_registry,
             smooth_ramp_width_s=self.smooth_ramp_width_s,
         )
         configure_model(self.model, self.case, self.initial_state)
@@ -305,7 +286,6 @@ def execute_simulation(
 
 def run_case(
     case: Case,
-    property_registry=None,
     artifact_paths: dict[str, Path] | None = None,
     *,
     retain_reporter: bool = False,
@@ -316,9 +296,6 @@ def run_case(
     Optional status callbacks run synchronously; exceptions fail the run.
     """
 
-    if property_registry is None:
-        property_registry = PROPERTY_REGISTRY
-
     case.output_directory.mkdir(parents=True, exist_ok=True)
     solver_artifacts: dict[str, Path] = {}
     stage = "model construction"
@@ -328,7 +305,7 @@ def run_case(
     try:
         if on_status is not None:
             on_status("preparing")
-        simulation = PackedBedSimulation(case, property_registry)
+        simulation = PackedBedSimulation(case)
         dataset_reporter = create_dataset_reporter(case)
         after_initialize = None
         if case.run.outputs.solver_incidence_matrix:

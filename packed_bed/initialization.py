@@ -45,12 +45,12 @@ class InitialState:
 
 def calculate_initial_state(
     case: Case,
-    property_registry,
     *,
     smooth_ramp_width_s: float = DEFAULT_SMOOTH_RAMP_WIDTH_S,
 ) -> InitialState:
     """Calculate one consistently shaped initial state without DAETools objects."""
 
+    property_registry = case.definitions.properties
     cell_count = case.run.model.axial_cells
     face_coordinates = np.linspace(0.0, case.run.model.bed_length_m, cell_count + 1)
     cell_coordinates = 0.5 * (face_coordinates[:-1] + face_coordinates[1:])

@@ -68,10 +68,17 @@ FractionMapping = Annotated[
 ]
 
 
+class MechanismSelection(ConfigModel):
+    definition: ConfigString
+    bindings: dict[ConfigString, ConfigString] = Field(default_factory=dict)
+
+
 class ChemistryConfig(ConfigModel):
     gas_species: NonEmptyUniqueStringTuple
     reaction_families: UniqueStringTuple
     reaction_ids: UniqueStringTuple
+    species_definitions: dict[ConfigString, ConfigString] = Field(default_factory=dict)
+    mechanisms: dict[ConfigString, MechanismSelection] = Field(default_factory=dict)
 
 
 class HoldStep(ConfigModel):

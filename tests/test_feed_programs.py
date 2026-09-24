@@ -214,7 +214,7 @@ def test_feed_initialization_plots_and_manifest_use_derived_conditions(tmp_path)
     feed["initial"]["flow"] = .008
     feed["steps"][0]["target"]["flow"] = .002
     case = load_case(_write_case(tmp_path, documents))
-    state = calculate_initial_state(case, PROPERTY_REGISTRY)
+    state = calculate_initial_state(case)
     assert state.inlet_flow_mol_s == pytest.approx(_value(case.inlet_flow_program, 0))
     assert state.inlet_temperature_k == pytest.approx(_value(case.inlet_temperature_program, 0))
     np.testing.assert_allclose(state.inlet_composition, _value(case.inlet_composition_program, 0))

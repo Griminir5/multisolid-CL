@@ -161,7 +161,7 @@ def test_species_and_families_update_graph_and_dependent_drafts(editing, monkeyp
     monkeypatch.setattr("packed_bed_ui.chemistry.choose_items", lambda *_: ["nickel_medrano"])
     editor.chemistry.add_families()
     family = FAMILY_REGISTRY["nickel_medrano"]
-    editor.chemistry.add_requirements(family)
+    editor.chemistry.add_requirements(editor.chemistry.family('nickel_medrano'))
     assert set(family.required_gas_species) <= set(case.documents["chemistry"]["gas_species"])
     assert "" in case.documents["program"]["inlet_composition"]["initial"].values()
     assert case.documents["solids"]["initial_profile"]["zones"][0]["values"]["NiO"] == ""
@@ -178,6 +178,58 @@ def test_species_and_families_update_graph_and_dependent_drafts(editing, monkeyp
     reopened = Project.open(case.project.root).cases[0]
     assert reopened.resolve().chemistry.gas_species == ("N2",)
     assert reopened.documents["program"]["inlet_composition"]["initial"] == {"N2": 1.0}
+
+
+def test_bindings_choose_available_species_and_persist_user_choice(editing, qt_app, monkeypatch):
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QComboBox, QDialog
+    editor, case = editing
+    case.documents['chemistry'].update(gas_species=['H2', 'water_a', 'water_b'],
+        species_definitions={'water_a': 'builtin:H2O', 'water_b': 'builtin:H2O'})
+    case.documents['program']['inlet_composition']['initial'] = {'H2': .5, 'water_a': .25, 'water_b': .25}
+    case.documents['solids']['solid_species'].append('NiO')
+    case.documents['solids']['initial_profile']['zones'][0]['values']['NiO'] = 0
+    case.save()
+    editor.set_case(case)
+    monkeypatch.setattr('packed_bed_ui.chemistry.choose_items', lambda *_: ['nickel_medrano'])
+    editor.chemistry.add_families()
+    editor.put(('chemistry', 'reaction_ids'), ['ni_reduction_h2_medrano'])
+    assert case.documents['chemistry']['mechanisms']['nickel_medrano']['bindings']['H2O'] == 'water_a'
+
+    def choose_water():
+        dialog = qt_app.activeModalWidget()
+        assert isinstance(dialog, QDialog)
+        water = dialog.findChild(QComboBox, 'H2O')
+        assert [water.itemData(i) for i in range(water.count())] == ['water_a', 'water_b']
+        assert water.currentData() == 'water_a'
+        water.setCurrentIndex(water.findData('water_b'))
+        dialog.accept()
+    QTimer.singleShot(0, choose_water)
+    editor.chemistry.bind_roles('nickel_medrano')
+    assert editor.save()
+    reopened = Project.open(case.project.root).cases[0]
+    assert reopened.resolve().selection.mechanisms['nickel_medrano']['bindings']['H2O'] == 'water_b'
+    # Removing the chosen component selects an available replacement and saves it.
+    editor.set_species('gas', ['H2', 'water_a'])
+    assert case.documents['chemistry']['mechanisms']['nickel_medrano']['bindings']['H2O'] == 'water_a'
+
+
+def test_add_required_species_preserves_existing_component_identity(editing, monkeypatch):
+    editor, case = editing
+    case.documents['chemistry'].update(gas_species=['H2O'], species_definitions={'H2O': 'builtin:N2'})
+    case.documents['program']['inlet_composition']['initial'] = {'H2O': 1.0}
+    case.save()
+    editor.set_case(case)
+    monkeypatch.setattr('packed_bed_ui.chemistry.choose_items', lambda *_: ['nickel_medrano'])
+    editor.chemistry.add_families()
+
+    editor.chemistry.add_requirements(editor.chemistry.family('nickel_medrano'))
+
+    mappings = case.documents['chemistry']['species_definitions']
+    assert mappings['H2O'] == 'builtin:N2'
+    water = next(key for key, ref in mappings.items() if ref == 'builtin:H2O')
+    assert water != 'H2O' and water in case.documents['chemistry']['gas_species']
+    assert case.documents['chemistry']['mechanisms']['nickel_medrano']['bindings']['H2O'] == water
 
 
 def test_zones_add_edit_delete_and_anchor_to_length(editing):

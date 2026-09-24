@@ -134,10 +134,11 @@ def test_cli_export_uses_shared_svg(tmp_path):
 
     neato_or_skip()
     case = load_case("packed_bed/examples/default_case/run.yaml")
-    catalog = reaction_catalog(case.reaction_families)
+    catalog = {r.id: r for r in case.definitions.reaction_network.reactions}
     graph = rg.build_reaction_graph(case.chemistry.gas_species, case.solids.solid_species,
-                                    [catalog[key] for key in case.chemistry.reaction_ids])
-    paths = _render_system_graph(case, tmp_path, PROPERTY_REGISTRY)
+                                    [catalog[key] for key in case.chemistry.reaction_ids], case.definitions.properties,
+                                    labels=case.definitions.selection.labels)
+    paths = _render_system_graph(case, tmp_path)
     assert paths["system_graph_svg"].read_bytes() == rg.render_svg(graph)
 
 

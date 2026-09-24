@@ -29,16 +29,17 @@ class InputSession:
     documents: dict
     metadata: dict
     on_change: object = None
+    definition_catalogue: object = None
 
     def save(self):
         if self.on_change:
             self.on_change(self.documents, self.metadata)
 
     def resolve(self):
-        return resolve_documents(self.documents)
+        return resolve_documents(self.documents, self.definition_catalogue)
 
     def validate_for_run(self):
-        readiness, message = input_readiness(self.documents)
+        readiness, message = input_readiness(self.documents, catalogue=self.definition_catalogue)
         if readiness != "Ready":
             raise ValueError(message)
 
@@ -94,6 +95,21 @@ class InputEditor(QWidget):
     def get(self, path, default=None):
         return get_value(self.case.documents, path, default) if self.case else default
 
+    def catalogue(self):
+        from packed_bed.plugins.catalogue import Catalogue
+        if self.case is not None and hasattr(self.case, 'project'):
+            return self.case.project.plugins.browse_catalogue()[0]
+        return getattr(self.case, 'definition_catalogue', None) or Catalogue()
+
+    def species_label(self, component, *, formula_only=False):
+        reference = self.get(('chemistry', 'species_definitions'), {}).get(component, 'builtin:' + component)
+        try:
+            if formula_only:
+                return self.catalogue().get('species', reference).chemical_key
+            return component + ' · ' + self.catalogue().label('species', reference)
+        except ValueError:
+            return component if formula_only else component + ' — Missing ' + reference
+
     def put(self, path, value):
         if self.loading or self.read_only or self.case is None:
             return
@@ -135,8 +151,8 @@ class InputEditor(QWidget):
             form.addRow(label, widget)
         return widget
 
-    def set_documents(self, documents, metadata=None, on_change=None, *, read_only=False):
-        return self.set_case(InputSession(deepcopy(documents), deepcopy(metadata or {}), on_change), read_only=read_only)
+    def set_documents(self, documents, metadata=None, on_change=None, *, read_only=False, catalogue=None):
+        return self.set_case(InputSession(deepcopy(documents), deepcopy(metadata or {}), on_change, catalogue), read_only=read_only)
 
     def set_case(self, case, *, read_only=False):
         if not self.save():
@@ -239,6 +255,17 @@ class InputEditor(QWidget):
         path = ("chemistry", "gas_species") if phase == "gas" else ("solids", "solid_species")
         previous = self.get(path, [])
         removed, added = set(previous) - set(values), set(values) - set(previous)
+        from .catalogue_widgets import species_choices
+        references = self.get(('chemistry', 'species_definitions'), {}).copy()
+        _, available = species_choices(self.catalogue(), phase, references)
+        for key in removed:
+            references.pop(key, None)
+        for key in added:
+            reference = available.get(key, 'builtin:' + key)
+            if reference != 'builtin:' + key:
+                references[key] = reference
+        if references or self.get(('chemistry', 'species_definitions')) is not None:
+            self.put(('chemistry', 'species_definitions'), references)
         self.put(path, list(values))
         def update_composition(composition):
             if not isinstance(composition, dict):
@@ -265,6 +292,7 @@ class InputEditor(QWidget):
             for program in self.case.metadata.get("program_modes", {}).values():
                 update_program(program)
             self.program.load()
+        self.chemistry.update_bindings()
         self.chemistry.load()
         self.queue_edit()
 
@@ -302,7 +330,7 @@ class InputEditor(QWidget):
         ), ("Inlet flow\n(mol/s)", "Temperature\n(K)", "Outlet pressure\n(Pa)")):
             axis.plot(preview.time_s, values, color="#317c89")
             axis.set_ylabel(label, fontsize=9)
-        axes[2].plot(preview.time_s, preview.mole_fractions, label=case.chemistry.gas_species)
+        axes[2].plot(preview.time_s, preview.mole_fractions, label=[self.species_label(key, formula_only=True) for key in case.chemistry.gas_species])
         axes[2].legend(loc="upper right", fontsize=8, ncols=3)
         axes[2].set(ylabel="Mole fraction", ylim=(-0.02, 1.02))
         axes[3].set_xlabel("Time (s)")
@@ -311,7 +339,7 @@ class InputEditor(QWidget):
             axis.tick_params(labelsize=8)
         axes = self.figures[1].subplots(1, 3)
         for name, values in zip(case.solids.solid_species, preview.solid_concentrations_mol_m3_bed):
-            axes[0].stairs(values, preview.face_positions_m, label=name)
+            axes[0].stairs(values, preview.face_positions_m, label=self.species_label(name, formula_only=True))
         axes[0].set(ylabel="Concentration (mol/m³ bed)", title="Solid concentrations")
         if case.solids.solid_species:
             axes[0].legend(fontsize=8)

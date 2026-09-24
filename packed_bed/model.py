@@ -3,6 +3,7 @@
 import math
 
 import numpy as np
+import re
 from daetools.pyDAE import (
     Abs, Constant, Max, Min, Sqrt, Sum, Time,
     daeDomain, daeModel, daeParameter, daeVariable, daeVariableType,
@@ -67,9 +68,6 @@ class PackedBedModel(daeModel):
         self,
         name,
         case: Case,
-        reaction_network: ReactionNetwork,
-        reaction_rate_hooks,
-        property_registry,
         smooth_ramp_width_s=DEFAULT_SMOOTH_RAMP_WIDTH_S,
         description="",
         parent=None,
@@ -81,6 +79,9 @@ class PackedBedModel(daeModel):
         solid_concentration_type = _with_absolute_tolerance(molar_conc_sol_type, concentration_tolerance)
         self._concentration_types = (gas_concentration_type, solid_concentration_type)
 
+        reaction_network = case.definitions.reaction_network
+        reaction_rate_hooks = case.definitions.rate_hooks
+        property_registry = case.definitions.properties
         self.gas_species = list(case.chemistry.gas_species)
         self.solid_species = list(case.solids.solid_species)
         self.reaction_network = reaction_network
@@ -100,6 +101,17 @@ class PackedBedModel(daeModel):
         self.initial_inlet_composition = np.asarray(case.inlet_composition_program.initial_value)
         self.gas_species_index = {species_id: idx for idx, species_id in enumerate(self.gas_species)}
         self.solid_species_index = {species_id: idx for idx, species_id in enumerate(self.solid_species)}
+        identifiers = (*self.gas_species, *self.solid_species, *reaction_network.reaction_ids)
+        used_names = {value for value in identifiers if re.fullmatch(r'[A-Za-z0-9_,&;()]+', value)}
+        self.equation_identifiers = {}
+        for value in identifiers:
+            name = value
+            if not re.fullmatch(r'[A-Za-z0-9_,&;()]+', value):
+                name = 'encoded_' + value.encode('utf-8').hex()
+                while name in used_names:
+                    name += '_'
+            self.equation_identifiers[value] = name
+            used_names.add(name)
         if self.reaction_network.has_reactions and len(self.reaction_rate_hooks) != self.reaction_network.reaction_count:
             raise ValueError("Reaction rate hooks must align one-to-one with the selected reaction network.")
         if not self.reaction_network.has_reactions and self.reaction_rate_hooks:
@@ -467,7 +479,7 @@ class PackedBedModel(daeModel):
         # Species and solid balances. Keep DAETools' flattened variable order for ILU diagonals.
         for gas_idx in range(Ng):
             for idx_cell in range(Nc):
-                eq = self.CreateEquation(f"species_balance_cell_{idx_cell}_{self.gas_species[gas_idx]}")
+                eq = self.CreateEquation(f"species_balance_cell_{idx_cell}_{self.equation_identifiers[self.gas_species[gas_idx]]}")
                 source = self._source_expression(
                     self.reaction_network.gas_source_matrix[gas_idx],
                     idx_cell,
@@ -479,7 +491,7 @@ class PackedBedModel(daeModel):
 
         for sol_idx in range(Ns):
             for idx_cell in range(Nc):
-                eq = self.CreateEquation(f"solid_species_balance_cell_{idx_cell}_{self.solid_species[sol_idx]}")
+                eq = self.CreateEquation(f"solid_species_balance_cell_{idx_cell}_{self.equation_identifiers[self.solid_species[sol_idx]]}")
                 source = self._source_expression(
                     self.reaction_network.solid_source_matrix[sol_idx],
                     idx_cell,
@@ -503,17 +515,17 @@ class PackedBedModel(daeModel):
         for gas_idx, species_name in enumerate(self.gas_species):
             for face_index in range(Nf):
                 if face_index == 0:
-                    equation_name = f"lhs_boundary_flux_{species_name}"
+                    equation_name = f"lhs_boundary_flux_{self.equation_identifiers[species_name]}"
                 elif face_index == Nf - 1:
-                    equation_name = f"rhs_boundary_flux_{species_name}"
+                    equation_name = f"rhs_boundary_flux_{self.equation_identifiers[species_name]}"
                 else:
-                    equation_name = f"face_flux_{face_index}_{species_name}"
+                    equation_name = f"face_flux_{face_index}_{self.equation_identifiers[species_name]}"
                 eq = self.CreateEquation(equation_name)
                 eq.Residual = gas_face_flux_residual(gas_idx, face_index)
 
         if self.reaction_network.has_reactions:
             for reaction_idx, reaction in enumerate(self.reaction_network.reactions):
-                eq = self.CreateEquation(f"reaction_rate_{reaction.id}")
+                eq = self.CreateEquation(f"reaction_rate_{self.equation_identifiers[reaction.id]}")
                 idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
                 kinetics_context = KineticsContext(
                     model=self,
@@ -527,7 +539,7 @@ class PackedBedModel(daeModel):
 
         # Energy balances and component enthalpy closures.
         temperature_anchor_species = self.gas_species[temperature_anchor_gas_idx]
-        eq = self.CreateEquation(f"gas_component_enthalpy_{temperature_anchor_species}")
+        eq = self.CreateEquation(f"gas_component_enthalpy_{self.equation_identifiers[temperature_anchor_species]}")
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
         eq.Residual = gas_component_enthalpy_residual(temperature_anchor_gas_idx, idx_cell)
 
@@ -544,12 +556,12 @@ class PackedBedModel(daeModel):
                 idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
                 eq.Residual = self.h_cell(idx_cell) - Sum(self.c_gas.array("*", idx_cell)*self.h_gas.array("*", idx_cell)) - Sum(self.c_sol.array("*", idx_cell)*self.h_sol.array("*", idx_cell))
             else:
-                eq = self.CreateEquation(f"gas_component_enthalpy_{species_name}")
+                eq = self.CreateEquation(f"gas_component_enthalpy_{self.equation_identifiers[species_name]}")
                 idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
                 eq.Residual = gas_component_enthalpy_residual(gas_idx, idx_cell)
 
         for sol_idx, species_name in enumerate(self.solid_species):
-            eq = self.CreateEquation(f"solid_component_enthalpy_{species_name}")
+            eq = self.CreateEquation(f"solid_component_enthalpy_{self.equation_identifiers[species_name]}")
             idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
             eq.Residual = self.h_sol(sol_idx, idx_cell) - self.property_registry.enthalpy_expression(
                 species_name,
@@ -559,11 +571,11 @@ class PackedBedModel(daeModel):
         for gas_idx, species_name in enumerate(self.gas_species):
             for face_index in range(Nf):
                 if face_index == 0:
-                    equation_name = f"lhs_boundary_enthalpy_flux_{species_name}"
+                    equation_name = f"lhs_boundary_enthalpy_flux_{self.equation_identifiers[species_name]}"
                 elif face_index == Nf - 1:
-                    equation_name = f"rhs_boundary_enthalpy_flux_{species_name}"
+                    equation_name = f"rhs_boundary_enthalpy_flux_{self.equation_identifiers[species_name]}"
                 else:
-                    equation_name = f"face_enthalpy_flux_{face_index}_{species_name}"
+                    equation_name = f"face_enthalpy_flux_{face_index}_{self.equation_identifiers[species_name]}"
                 eq = self.CreateEquation(equation_name)
                 eq.Residual = gas_face_enthalpy_residual(gas_idx, face_index)
 

@@ -69,6 +69,33 @@ def test_numeric_product_and_length_scaling(study_project):
     assert zones[0]["values"] == study.baseline["solids"]["initial_profile"]["zones"][0]["values"]
 
 
+@pytest.mark.parametrize('legacy_payload', [False, True])
+def test_bed_replacement_removes_only_obsolete_solid_mappings(study_project, legacy_payload):
+    _, _, study = study_project
+    baseline = study.baseline
+    baseline['chemistry'].update(gas_species=['feed'], species_definitions={
+        'feed': 'builtin:N2', 'old': 'builtin:Ni', 'retained': 'builtin:NiO'})
+    baseline['program']['inlet_composition']['initial'] = {'feed': 1.0}
+    baseline['solids']['solid_species'] = ['old', 'retained']
+    baseline['solids']['initial_profile']['zones'][0]['values'] = {'old': 1.0, 'retained': 0.0}
+    replacement = deepcopy(baseline)
+    replacement['solids']['solid_species'] = ['Fe', 'retained']
+    replacement['solids']['initial_profile']['zones'][0]['values'] = {'Fe': 1.0, 'retained': 0.0}
+    payload = definition_payload('bed', replacement)
+    if legacy_payload:
+        payload.pop('species_definitions')
+    bed = ReusableDefinition('new-bed', 'Replacement bed', 'bed', payload)
+    study.factors = [Factor('bed', 'definition:bed', [bed.id])]
+
+    candidate, = expand_study(study, {bed.id: bed})
+
+    assert candidate.inputs == 'Ready', candidate.message
+    assert candidate.documents['chemistry']['species_definitions'] == {
+        'feed': 'builtin:N2', 'retained': 'builtin:NiO'}
+    assert candidate.documents['solids'] == replacement['solids']
+    assert baseline['chemistry']['species_definitions']['old'] == 'builtin:Ni'
+
+
 def test_replacement_requires_success_and_reselecting_steps(study_project):
     project, base, study = study_project
     target = next(p for p in parameter_catalogue(study) if "Step 2 ramp → Target" in p.label)
@@ -518,40 +545,6 @@ def test_import_native_and_advanced_rules_require_baseline_success(tmp_path, sou
     study = reopened.study_store.studies[advanced.id]
     generated = reopened.study_store.apply_preview(reopened.study_store.preview(study))
     assert [case.resolve().run.model.axial_cells for case in generated] == [7, 7]
-
-
-def test_format_two_studies_migrate_without_changing_cases_or_results(tmp_path, source_case):
-    from packed_bed.batch import expand_batch_cases, load_batch_spec
-    project = Project.create(tmp_path / "project")
-    path = source_case.parent / "batch.yaml"
-    path.write_text(yaml.safe_dump({"base_case": "run.yaml", "output_directory": "unused", "axes": [
-        {"id": "cells", "values": [{"id": "three", "patch": {"run": {"model": {"axial_cells": 3}}}}]},
-    ]}))
-    study = project.import_study(path)
-    folder = project.root / "studies" / study.id
-    expanded, = expand_batch_cases(load_batch_spec(folder / "batch.yaml"))
-    case = project.add_case("Old generated", {name: getattr(expanded, name) for name in ("run", "program", "chemistry", "solids")})
-    case.metadata["study_id"] = study.id
-    case.metadata["selections"] = expanded.selections
-    project.save()
-    run = succeed(project, case)
-    before = deepcopy(case.documents)
-    project.metadata["format_version"] = 2
-    project.metadata["studies"] = [{"id": study.id, "name": study.name}]
-    project.save()
-    (folder / "study.json").unlink()
-    shutil.rmtree(folder / "baseline")
-    reopened = Project.open(project.root)
-    assert reopened.metadata["format_version"] == 3
-    assert read_json(project.root / "project-v2.json")["format_version"] == 2
-    retained, = reopened.cases
-    assert retained.id == case.id and retained.documents == before
-    assert (run / "retained-result.txt").read_text() == "result"
-    assert retained.state()["inputs"] == "Ready"
-    migrated = reopened.study_store.studies[study.id]
-    assert not migrated.provenance
-    with pytest.raises(StudyError, match="successful"):
-        reopened.study_store.apply_preview(reopened.study_store.preview(migrated))
 
 
 def test_feed_ramp_units_timing_and_dependency_errors(study_project):

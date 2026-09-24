@@ -139,7 +139,7 @@ class StudyStore:
         # Cache only until a source save; previews always compute their own fresh signature.
         if study.id not in self._signatures:
             self._signatures[study.id] = generation_signature(study, self.definitions,
-                                                             self.project.metadata.get("extensions", []))
+                                                             study.provenance.get("extensions", []))
         return self._signatures[study.id]
 
     def needs_update(self, study_id):
@@ -173,7 +173,10 @@ class StudyStore:
                     for name, text in contents.items():
                         path = _inside(staged, name)
                         path.parent.mkdir(parents=True, exist_ok=True)
-                        write_text(path, text)
+                        if isinstance(text, bytes):
+                            path.write_bytes(text)
+                        else:
+                            write_text(path, text)
             write_json(transaction / "transaction.json", {"id": identity, "operations": operations,
                                                           "deleted_case_ids": list(deleted_case_ids)})
             for index, operation in enumerate(operations):
@@ -285,8 +288,9 @@ class StudyStore:
             raise StudyError("Select a successful, unchanged baseline before generating study cases.")
 
     def preview(self, study, *, lazy=False):
+        lock = study.provenance.get('extensions', [])
         return preview_study(study, self.definitions, self.existing_cases(study.id),
-                             self.project.metadata.get("extensions", []), lazy=lazy)
+                             lock, lazy=lazy, catalogue=self.project.plugins.catalogue())
 
     def existing_cases(self, study_id):
         return [ExistingCase(case.id, study_id, case.run_folder.exists()) for case in self.project.cases
@@ -462,15 +466,3 @@ class StudyStore:
         metadata["studies"].append({"id": study.id, "name": study.name})
         self._commit(self._stage_import(metadata, study, definitions, sources), metadata)
         return deepcopy(self.studies[study.id])
-
-    def migrate_v2(self):
-        metadata = deepcopy(self.project.metadata)
-        folders = {}
-        for entry in metadata.get("studies", []):
-            path = self.project.root / "studies" / _identity(entry["id"]) / "batch.yaml"
-            if path.exists():
-                study, definitions, sources = self._read_import(path, entry["name"], entry["id"])
-                entry["generation_signature"] = generation_signature(study, definitions, metadata.get("extensions", []))
-                folders.update(self._stage_import(metadata, study, definitions, sources))
-        metadata["format_version"] = 3
-        self._commit(folders, metadata)

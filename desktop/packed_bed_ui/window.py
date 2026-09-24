@@ -83,6 +83,8 @@ class MainWindow(QMainWindow):
                 action.setShortcut(shortcut)
             self.project_actions.append(action)
         self.recent_menu = menu.addMenu("Recent projects")
+        self.plugins_action = self.menuBar().addAction('Plugins', self._plugins)
+        self.plugins_action.setEnabled(False)
         self.recent_menu.aboutToShow.connect(self.locations.refresh)
         self.case_count = QLabel()
         layout.addWidget(self.case_count)
@@ -264,6 +266,21 @@ class MainWindow(QMainWindow):
             if self.pages.currentWidget() is self.study_editor:
                 self.study_editor.render()
                 self.study_editor.begin_preview()
+
+    def _plugins(self):
+        if self.project is None or self.runner.active or not self._save_editors():
+            return
+        from .plugins_dialog import PluginsDialog
+        try:
+            PluginsDialog(self.project, self).exec()
+            if self.editor.case is not None:
+                self.editor.set_case(self.editor.case)
+            self._refresh_cases()
+            if self.pages.currentWidget() is self.study_editor:
+                self.study_editor.render()
+                self.study_editor.begin_preview()
+        except (ValueError, OSError) as exc:
+            self._error(exc)
 
     def _new_project(self):
         if self.runner.active or not self._save_editors():
@@ -506,6 +523,7 @@ class MainWindow(QMainWindow):
             self._error(exc)
 
     def _update_project_actions(self):
+        self.plugins_action.setEnabled(self.project is not None and not self.runner.active)
         self.cancel_button.setVisible(self.project is not None)
         for index, action in enumerate(self.project_actions):
             action.setEnabled(not self.runner.active and (index < 2 or self.project is not None))
