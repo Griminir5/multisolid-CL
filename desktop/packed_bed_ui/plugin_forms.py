@@ -170,13 +170,13 @@ def text_fields(form, rows, values):
     return fields
 
 
-def numeric_values(fields):
-    return {key: [number(v.strip()) for v in field.text().split(',')] if key == 'coefficients' else number(field.text())
+def numeric_values(fields, *, polynomial=False):
+    return {key: [number(v.strip()) for v in field.text().split(',')] if polynomial and key == 'coefficients' else number(field.text())
             for key, field in fields.items()}
 
 
 class SpeciesForm(QWidget):
-    def __init__(self, definition, parent=None):
+    def __init__(self, definition, parent=None, *, correlations=None):
         super().__init__(parent)
         self.definition = deepcopy(definition)
         layout = QVBoxLayout(self)
@@ -190,6 +190,10 @@ class SpeciesForm(QWidget):
         limits = dict(zip(('low', 'high'), definition.get('temperature_range', [298.15, 1200])))
         self.limits = text_fields(form, (('low', 'Minimum T (K)', 298.15), ('high', 'Maximum T (K)', 1200)), limits)
         self.model = choices([('Polynomial Cp', 'builtin:polynomial'), ('Shomate Cp', 'builtin:shomate')])
+        correlations = correlations or {}
+        for key, spec in correlations.items():
+            if spec['kind'] == 'enthalpy':
+                self.model.addItem(spec.get('name') or key, key)
         enthalpy = definition.get('enthalpy', {'model': 'builtin:polynomial', 'parameters': {}})
         if self.model.findData(enthalpy['model']) < 0:
             self.model.addItem('External: ' + enthalpy['model'], enthalpy['model'])
@@ -209,8 +213,10 @@ class SpeciesForm(QWidget):
                 fields.addRow(QLabel('τ = T/1000 K; Cp = a0 + a1τ + a2τ² + a3τ³ + a4/τ².\nAll ai in J/(mol·K); H integrates Cp from Tref.'))
                 rows.extend((f'a{i}', f'a{i} (J/(mol·K))', '') for i in range(5))
             else:
-                fields.addRow(QLabel('Edit this correlation in its Python package.'))
-                rows = []
+                specs = correlations.get(model, {}).get('parameters', {})
+                rows = [(key, f"{key} ({spec['unit']})", spec['default']) for key, spec in specs.items()]
+                if model not in correlations:
+                    fields.addRow(QLabel('Edit this correlation in its Python package.'))
             self.correlation_forms[model] = text_fields(fields, rows, enthalpy['parameters'] if model == enthalpy['model'] else {})
             self.correlations.addWidget(page)
         self.model.currentIndexChanged.connect(self.correlations.setCurrentIndex)
@@ -237,7 +243,9 @@ class SpeciesForm(QWidget):
         fields = {key: field.text() for key, field in self.fields.items()}
         fields['mw'] = number(fields['mw'])
         model = self.model.currentData()
-        enthalpy = {'model': model, 'parameters': numeric_values(self.correlation_fields)} if model.startswith('builtin:') else self.definition['enthalpy']
+        parameters = dict(self.definition['enthalpy']['parameters']) if model == self.definition.get('enthalpy', {}).get('model') else {}
+        parameters.update(numeric_values(self.correlation_fields, polynomial=model == 'builtin:polynomial'))
+        enthalpy = {'model': model, 'parameters': parameters}
         viscosity = None
         if self.phase.currentText() == 'gas':
             viscosity = self.definition['viscosity'] if self.custom_viscosity else {
@@ -282,7 +290,7 @@ class PluginEditor(QDialog):
             fields.addWidget(QLabel('Plugin: ' + self.data['name']))
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        self.form = (SpeciesForm(self.data[kind][key]) if kind == 'species'
+        self.form = (SpeciesForm(self.data[kind][key], correlations=self.data.get('correlations')) if kind == 'species'
                      else ParameterForm(self.data[kind][key], reaction_id=reaction_id))
         scroll.setWidget(self.form)
         fields.addWidget(scroll)

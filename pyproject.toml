@@ -34,6 +34,7 @@ packed_bed = [
     "kinetics/*.md",
     "examples/plugins/*/*.yaml",
     "examples/plugins/*/*.py",
+    "examples/plugins/*.md",
 ]
 
 [tool.pytest.ini_options]

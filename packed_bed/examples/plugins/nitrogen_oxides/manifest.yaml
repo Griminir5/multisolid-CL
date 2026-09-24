@@ -1,0 +1,68 @@
+id: example_nitrogen_oxides
+name: Example nitrogen oxides
+description: Adds NO and NO2, plus a nitrogen parameter variant. No Python code.
+source: Illustrative API example; coefficients are not validated scientific data.
+species:
+  'NO':
+    name: Nitric oxide
+    chemical_key: 'NO'
+    phase: gas
+    mw: 0.0300061
+    enthalpy:
+      model: builtin:polynomial
+      parameters:
+        coefficients:
+        - 30.0
+        - 0.005
+        h_form_ref: 90000.0
+    viscosity:
+      model: builtin:quadratic_viscosity
+      parameters:
+        t_ref: 298.15
+        a0: 1.8e-05
+        a1: 3.0e-08
+    notes: Illustrative coefficients; valid only as an authoring example.
+  NO2:
+    name: Nitrogen dioxide
+    chemical_key: NO2
+    phase: gas
+    mw: 0.0460055
+    enthalpy:
+      model: builtin:polynomial
+      parameters:
+        coefficients:
+        - 37.0
+        - 0.02
+        - -5.0e-06
+        h_form_ref: 33000.0
+    viscosity:
+      model: builtin:quadratic_viscosity
+      parameters:
+        t_ref: 298.15
+        a0: 1.5e-05
+        a1: 3.0e-08
+    notes: Illustrative coefficients; valid only as an authoring example.
+  N2:
+    name: Nitrogen
+    chemical_key: N2
+    phase: gas
+    mw: 0.0280134
+    enthalpy:
+      model: builtin:polynomial
+      parameters:
+        coefficients:
+        - 30.0
+        - 0.004
+        - 1.0e-06
+        t_ref: 298.15
+        h_form_ref: 0.0
+    viscosity:
+      model: builtin:quadratic_viscosity
+      parameters:
+        t_ref: 1000.0
+        a0: 4.15082118e-05
+        a1: 2.78501267e-08
+        a2: -6.09391431e-12
+    source: Built-in molecular weight and viscosity; illustrative plugin Cp/enthalpy
+    notes: Changes only the built-in nitrogen Cp polynomial. Choose Use this as replacement
+      to apply it; installation alone changes no cases.

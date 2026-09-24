@@ -1,14 +1,14 @@
 # Scientific plugins
 
-Open a project and choose **Plugins** beside **Project** in the menu bar. Built-in definitions are always available. **Register plugin** imports a `.msplugin` archive into the project; **Export** shares one plugin independently. Copying the project folder carries its plugins with it.
+Open a project and choose **Plugins** beside **Project** in the menu bar. Built-in definitions are always available. **Register plugin** imports a `.msplugin` archive or a folder selected through its `manifest.yaml` into the project; **Export** shares one plugin independently. Copying the project folder carries its plugins with it.
 
 Enabling a plugin makes its definitions available in the Chemistry pickers. It does not change a case's component list. The pickers, graphs and recorded reports show each definition's source. Bed and Program labels, including their preview legends, show only the formula.
 
 ## Species and parameter variants
 
-Choose **Create plugin**, enter its name, then use **Add species** for each species you want in it. Saving returns to the same plugin and selects the new species. IDs are generated automatically. **Register plugin** imports an existing archive; **Export** shares the selected plugin.
+Choose **Create plugin**, enter its name, then use **Add species** for each species you want in it. Saving returns to the same plugin and selects the new species. IDs are generated automatically. **Register plugin** imports an existing manifest or archive; **Export** shares the selected plugin.
 
-Select a built-in species or reaction and choose **Create variant** to make an independent plugin copy. Name the plugin, edit the values and save. A species variant can change its name, molecular weight, polynomial or Shomate heat capacity/enthalpy and quadratic gas viscosity. Double-click a definition in your plugin to edit it; double-click a built-in definition to create a variant.
+Select a built-in species or reaction and choose **Create variant** to make an independent plugin copy. Name the plugin, edit the values and save. A species variant can change its name, molecular weight, polynomial or Shomate heat capacity/enthalpy and quadratic gas viscosity. Custom enthalpy correlations declared in the same plugin also appear in the species editor, with their declared parameters and units. Double-click a definition in your plugin to edit it; double-click a built-in definition to create a variant.
 
 **Save** checks the values and saves the plugin. Invalid values stay in the open editor with an explanation. **Cancel**, Escape and closing the editor discard changes without creating files or drafts. Saving unchanged values does nothing.
 
@@ -22,11 +22,11 @@ In the plugin browser, selecting a family shows its complete definition; selecti
 
 Reaction details include declared editable parameters, current values, defaults, units and bounds. Built-in reactions and their parameter variants show the parameters used by that reaction; shared parameters are marked. External families without per-reaction grouping show their family parameter list with an explicit label. Choose **Edit** on the selected reaction to change its parameters; values belonging only to other reactions are preserved. Select the family to edit all its parameters. **Create variant** makes a separate copy.
 
-To switch existing ordinary cases, select a definition and choose **Replace uses in project**. The preview lists the affected cases and reusable definitions. Applying it preserves component/instance IDs, compositions and bindings. A replacement species must preserve chemical key and phase; a replacement mechanism must preserve reaction IDs and species roles. This action leaves study selections and saved runs unchanged. Editing the contents of a plugin already selected by a study does affect its future runs.
+To switch existing ordinary cases, select the species or reaction family you want to use and choose **Use this as replacement…**. Then select the existing definition to replace; the list contains only compatible definitions currently used in the project. The confirmation explicitly names the old and new definitions and lists the affected cases and reusable definitions. Applying it preserves component/instance IDs, compositions and bindings. A replacement species must preserve chemical key and phase; a replacement mechanism must preserve reaction IDs and species roles. This action leaves study selections and saved runs unchanged. Editing the contents of a plugin already selected by a study does affect its future runs.
 
 ## Saving and execution
 
-There is one current copy of each project plugin, stored at `plugins/<plugin-id>/current/`. Saving replaces that copy atomically. There are no revision choices or version increments. Registering an archive with the same plugin ID asks before replacing the project's copy. Creating a variant gives it a separate identity.
+There is one current copy of each project plugin, stored at `plugins/<plugin-id>/current/`. Saving replaces that copy atomically. There are no revision choices or version increments. Registering a plugin with the same plugin ID asks before replacing the project's copy. Creating a variant gives it a separate identity.
 
 Cases and studies use the current contents of their selected plugins. Editing a selected plugin marks old results stale; no new baseline or study rebuild is required just for a plugin edit. Unrelated plugins do not affect results. Removing or disabling a plugin still used by inputs is blocked with a list of its users.
 
@@ -38,9 +38,13 @@ Python plugins require local approval before execution. Approval covers the code
 
 Copy one of the example folders from `packed_bed/examples/plugins/`:
 
-- `data`: illustrative NH3 with built-in correlations.
-- `kinetics`: an illustrative water-gas-shift rate in one Python file.
-- `correlation`: a numerical and symbolic inverse-temperature Cp correlation.
+- `ammonia`: NH3, a custom enthalpy correlation and N2 + 3 H2 → 2 NH3 kinetics.
+- `nitrogen_oxides`: NO, NO2 and a built-in nitrogen parameter variant, without Python.
+- `enthalpy_overrides`: CO2 and H2O variants using one custom enthalpy correlation.
+
+See the [example walkthrough](packed_bed/examples/plugins/README.md) for registration, replacement, formulas and archive creation. Each plugin works independently.
+
+The [Waste iron plugin](plugins/waste_iron/README.md) transfers the fitted oxidation/reduction kinetics and SiO2/Al2O3 property definitions from `waste_iron_kinetics` at `9660e5d`. Its folder can be registered directly or exported as an independent archive.
 
 The example coefficients demonstrate the API; they are not validated scientific datasets. Work on your own copy of the folder. For Python development, regenerate catalogue metadata from the implementation with:
 
@@ -52,7 +56,7 @@ generate_metadata("my-plugin")  # Executes your local Python factories.
 pack_plugin("my-plugin", "my-plugin.msplugin")
 ```
 
-Register the archive in the application and use **Check** or **Enable**. The GUI browses the manifest without importing Python code. A disagreement between the manifest and Python declarations blocks execution. There are no public `extension check/pack` commands.
+Register the folder’s `manifest.yaml` directly, or register the archive, then use **Check** or **Enable**. The GUI browses the manifest without importing Python code. Metadata generation fills reaction and parameter declarations from Python and omits unused defaults. A disagreement between the manifest and Python declarations blocks execution. There are no public `extension check/pack` commands.
 
 A plugin contains `manifest.yaml`, Python modules and any local resources. Use relative imports between your modules, and locate included resources relative to `__file__`. Use only Python's standard library and the application's bundled libraries (`numpy`, `scipy`, `yaml`, `pydantic`, `xarray`, `matplotlib`, `daetools`, `pyUnits`, and the public `packed_bed.plugins` API). There are no plugin dependencies, pip installs, downloads or extra runtimes. Include any custom species/correlations needed by your mechanisms. Cloning a custom plugin copies the entire package under a new identity, preserving attribution without a live dependency on the original.
 
@@ -79,18 +83,17 @@ Current project and snapshot formats are supported. Obsolete project migrations,
 Existing built-in inputs retain their identifiers. Optional mappings in `chemistry.yaml` make custom choices explicit:
 
 ```yaml
-gas_species: [CO, CO2, H2, H2O, water_custom]
+gas_species: [N2, H2, NH3]
 species_definitions:
-  water_custom: lab:water
-reaction_families: [shift]
+  NH3: example_ammonia:NH3
+reaction_families: [ammonia]
 mechanisms:
-  shift:
-    definition: example_kinetics:shift
-    bindings: {H2O: water_custom}
-reaction_ids: [shift/shift]
+  ammonia:
+    definition: example_ammonia:synthesis
+reaction_ids: [ammonia/synthesis]
 ```
 
-The program composition maps use these component IDs, including both waters. Solid selections remain in `solids.yaml`; their optional definition references use the same `species_definitions` map. Existing built-in mechanism instance names retain their legacy reaction IDs even after project replacement. Other instances use `<instance>/<local-reaction-id>`.
+The program composition maps use these component IDs. Add explicit `bindings` in a mechanism selection when a role should use a different component ID. Solid selections remain in `solids.yaml`; their optional definition references use the same `species_definitions` map. Existing built-in mechanism instance names retain their legacy reaction IDs even after project replacement. Other instances use `<instance>/<local-reaction-id>`.
 
 `load_case` discovers a containing project and uses its current plugins; run snapshots use their saved copies. Standalone inputs can put a `definitions.json` next to `run.yaml` with `{"root": "relative/path/to/project", "lock": {"builtin": "<fingerprint>", "plugins": {"lab": "<hash>"}}}`. CLI batches copy the selected plugins into each generated case folder and write this descriptor with `root: "."`, so the case folder can be moved independently. For manually prepared descriptors, the referenced plugin folders must travel with the inputs; there is no machine-global plugin dependency.
 

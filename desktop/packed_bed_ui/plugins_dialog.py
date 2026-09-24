@@ -1,5 +1,6 @@
 """One project catalogue tree, with scoped plugin and definition actions."""
 from uuid import uuid4
+from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QGroupBox, QHBoxLayout, QHeaderView,
@@ -9,7 +10,7 @@ from PyQt6.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QGroupBox, 
 from packed_bed.plugins.catalogue import split_ref
 from packed_bed.plugins.storage import inspect_package, has_code, code_approved
 from .catalogue_widgets import DefinitionDetails
-from .editor_widgets import action_button, choose_items, dialog_buttons
+from .editor_widgets import action_button, dialog_buttons
 from .plugin_forms import PluginEditor, PluginCheck, available_key
 
 
@@ -37,7 +38,9 @@ class PluginsDialog(QDialog):
         right = QWidget()
         details = QVBoxLayout(right)
         self.add_actions(details, 'Definitions', (('Add species…', self.add_species), ('Create variant…', self.variant),
-            ('Edit…', self.edit), ('Replace uses in project…', self.replace)))
+            ('Edit…', self.edit), ('Use this as replacement…', self.replace)))
+        self.actions['Use this as replacement…'].setToolTip(
+            'Replace an existing species or reaction family across the project with the selected definition.')
         self.details = DefinitionDetails()
         details.addWidget(self.details, 1)
         self.uses = QLabel()
@@ -148,7 +151,7 @@ class PluginsDialog(QDialog):
         self.actions['Remove'].setEnabled(local)
         self.actions['Edit…'].setEnabled(local and editable)
         self.actions['Create variant…'].setEnabled(editable)
-        self.actions['Replace uses in project…'].setEnabled(editable and len(selection) == 2 and enabled)
+        self.actions['Use this as replacement…'].setEnabled(editable and len(selection) == 2 and enabled)
         self.uses.setText('Used by: ' + ('; '.join(self.project.plugins.users(provider)) or 'No current cases or studies'))
         if not available:
             self.details.setPlainText(self.catalogue_errors[provider])
@@ -163,9 +166,12 @@ class PluginsDialog(QDialog):
                                       f'{len(manifest.species)} species, {len(manifest.mechanisms)} reaction families')
 
     def add(self):
-        path, _ = QFileDialog.getOpenFileName(self, 'Register plugin archive', '', 'MultiSolid plugins (*.msplugin *.zip)')
+        path, _ = QFileDialog.getOpenFileName(self, 'Register plugin', '', 'MultiSolid plugins (manifest.yaml *.msplugin *.zip)')
         if not path:
             return
+        path = Path(path)
+        if path.name == 'manifest.yaml':
+            path = path.parent
         with inspect_package(path) as package:
             previous = next((entry for entry in self.project.plugins.entries if entry['id'] == package.manifest.id), None)
             replacing = bool(previous and self.catalogue.hashes.get(previous['id']) != package.digest)
@@ -255,28 +261,29 @@ class PluginsDialog(QDialog):
             self.project.plugins.export(ident, path)
 
     def replace(self):
-        kind, source = self.selection()
+        kind, target = self.selection()
         choices = {}
         catalogue, _ = self.project.plugins.browse_catalogue()
-        for ref in catalogue.entries(kind):
-            if ref == source:
+        for source in catalogue.entries(kind):
+            if source == target:
                 continue
             try:
-                self.project.plugins.replacement_uses(kind, source, ref)
-                choices[ref] = (catalogue.label(kind, ref), ref)
+                uses = self.project.plugins.replacement_uses(kind, source, target)
+                if uses:
+                    choices[f'{catalogue.label(kind, source)} [{source}]'] = (source, uses)
             except ValueError:
                 continue
-        added = choose_items(self, 'Choose one compatible replacement', choices, [])
-        if not added:
+        if not choices:
+            self.checker.message('No compatible definitions in ordinary cases or reusable definitions can be replaced with this selection.')
             return
-        if len(added) != 1:
-            raise ValueError('Choose exactly one replacement.')
-        target = added[0]
-        uses = self.project.plugins.replacement_uses(kind, source, target)
-        if not uses:
-            raise ValueError('No ordinary cases or reusable definitions use this definition.')
-        answer = QMessageBox.question(self, 'Replace uses in project',
-            f'{catalogue.label(kind, source)}\n→ {catalogue.label(kind, target)}\n\n' + '\n'.join(uses)
+        replacement = f'{catalogue.label(kind, target)} [{target}]'
+        chosen, accepted = QInputDialog.getItem(self, 'Choose existing definition to replace',
+            f'Use {replacement}\n\ninstead of:', list(choices), 0, False)
+        if not accepted:
+            return
+        source, uses = choices[chosen]
+        answer = QMessageBox.question(self, 'Confirm replacement in project',
+            f'Replace: {chosen}\nWith: {replacement}\n\nAffected inputs:\n' + '\n'.join(uses)
             + '\n\nComponent IDs, compositions and bindings stay the same. Study selections and saved runs are unchanged. Apply these edits?',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if answer == QMessageBox.StandardButton.Yes:

@@ -178,16 +178,16 @@ def test_all_builtin_editing_contracts_and_hidden_dependencies():
         resolve_parameters(specs, {'R0_M.H2': 0.0})
 
 
-@pytest.mark.parametrize('name', ['data', 'kinetics', 'correlation'])
+@pytest.mark.parametrize('name', ['nitrogen_oxides', 'ammonia', 'enthalpy_overrides'])
 def test_examples_pack_clone_and_load_without_original(tmp_path, name):
     source = tmp_path / 'source'
     shutil.copytree(EXAMPLES / name, source)
-    if name != 'data':
+    if name != 'nitrogen_oxides':
         generate_metadata(source)
     archive = pack_plugin(source, tmp_path / 'example.msplugin')
     entry = copy_package(archive, tmp_path / 'project')
     cat = catalogue_from_project(tmp_path / 'project', [{**entry, 'enabled': True}])
-    with pytest.raises(ValueError, match='before execution') if name != 'data' else __import__('contextlib').nullcontext():
+    with pytest.raises(ValueError, match='before execution') if name != 'nitrogen_oxides' else __import__('contextlib').nullcontext():
         check_package(archive)
     approve_hash(code_hash(cat.paths[entry['id']]))
     assert check_package(archive) is None
@@ -208,6 +208,85 @@ def test_examples_pack_clone_and_load_without_original(tmp_path, name):
         'p = package.__enter__(); check_package(p.folder, approved=(p.digest,)); package.__exit__(None, None, None)', str(cloned)],
                             cwd=tmp_path, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('name', ['ammonia', 'nitrogen_oxides', 'enthalpy_overrides'])
+def test_example_properties_have_consistent_numeric_and_symbolic_enthalpy(tmp_path, name):
+    from daetools.pyDAE import Constant
+    from pyUnits import J, K, mol
+    from packed_bed.properties import PROPERTY_REGISTRY
+    cat = catalogue(EXAMPLES / name, tmp_path)
+    manifest = next(iter(cat.manifests.values()))
+    chemistry, solids = inputs(list(manifest.species), ['Ni'], species_definitions={
+        key: f'{manifest.id}:{key}' for key in manifest.species})
+    environment = materialize_definitions(select_definitions(chemistry, solids, cat), cat,
+                                          approved=tuple(cat.hashes.values()))
+    for key, definition in manifest.species.items():
+        record = environment.properties.get_record(key)
+        correlation = record.enthalpy
+        temperatures = np.linspace(*definition.temperature_range, 12)
+        np.testing.assert_allclose((correlation.value(temperatures + .001) - correlation.value(temperatures - .001)) / .002,
+                                   correlation.cp_value(temperatures), rtol=1e-7)
+        assert np.all(correlation.cp_value(temperatures) > 0)
+        assert np.all(record.viscosity.value(temperatures) > 0)
+        for t in temperatures:
+            assert correlation.dae_expression(Constant(t * K)).Node.Quantity.scaleTo(J / mol).value == pytest.approx(correlation.value(t))
+            assert correlation.cp_dae_expression(Constant(t * K)).Node.Quantity.scaleTo(J / (mol * K)).value == pytest.approx(correlation.cp_value(t))
+        if key in ('N2', 'CO2', 'H2O'):
+            builtin = PROPERTY_REGISTRY.get_record(key)
+            assert record.mw == builtin.mw and record.viscosity == builtin.viscosity
+            assert correlation.value(298.15) == pytest.approx(builtin.enthalpy.value(298.15))
+            assert correlation.cp_value(600) != pytest.approx(builtin.enthalpy.cp_value(600))
+
+
+def test_ammonia_reaction_conserves_mass_and_uses_bindings_and_editable_rate(tmp_path):
+    from daetools.pyDAE import Constant
+    from pyUnits import m, mol, s
+    from packed_bed.reactions import KineticsContext
+    folder = tmp_path / 'ammonia'
+    shutil.copytree(EXAMPLES / 'ammonia', folder)
+    data = yaml.safe_load((folder / 'manifest.yaml').read_text())
+    data['mechanisms']['synthesis']['values'] = {'k': .002}
+    (folder / 'manifest.yaml').write_text(yaml.safe_dump(data))
+    cat = catalogue(folder, tmp_path)
+    gases = ['feed', 'H2', 'product']
+    chemistry, solids = inputs(gases, ['Ni'], ['ammonia'], ['ammonia/synthesis'],
+        species_definitions={'feed': 'builtin:N2', 'product': 'example_ammonia:NH3'},
+        mechanisms={'ammonia': {'definition': 'example_ammonia:synthesis'}})
+    env = materialize_definitions(select_definitions(chemistry, solids, cat), cat, approved=tuple(cat.hashes.values()))
+    reaction = env.reaction_network.reactions[0]
+    assert reaction.stoichiometry == {'feed': -1, 'H2': -3, 'product': 2}
+    assert sum(n * env.properties.get_record(key).mw for key, n in reaction.stoichiometry.items()) == pytest.approx(0, abs=1e-12)
+    assert sum(n * env.properties.enthalpy_value(key, 298.15) for key, n in reaction.stoichiometry.items()) < 0
+    class Model:
+        concentrations = [2, 6, 0]
+        def c_gas(self, index, _):
+            return Constant(self.concentrations[index] * mol / m**3)
+    model = Model()
+    context = KineticsContext(model, 0, dict(zip(gases, range(3))), {'Ni': 0})
+    rate = lambda: env.rate_hooks[0](context).Node.Quantity.scaleTo(mol / (m**3 * s)).value
+    assert rate() == pytest.approx(.002 * 2 * 6)
+    for index in (0, 1):
+        model.concentrations = [2, 6, 0]
+        model.concentrations[index] = 0
+        assert rate() == 0
+
+
+def test_metadata_generation_fills_declarations_and_is_compact_and_repeatable(tmp_path):
+    folder = tmp_path / 'ammonia'
+    shutil.copytree(EXAMPLES / 'ammonia', folder)
+    path = folder / 'manifest.yaml'
+    data = yaml.safe_load(path.read_text())
+    for key in ('gases', 'solids', 'reactions', 'parameters'):
+        data['mechanisms']['synthesis'].pop(key)
+    path.write_text(yaml.safe_dump(data))
+    generated = generate_metadata(folder)
+    assert generated.mechanisms['synthesis'].reactions[0].stoichiometry['NH3'] == 2
+    text = path.read_text()
+    assert 'maximum: null' not in text and 'catalyst_species: []' not in text
+    generate_metadata(folder)
+    assert path.read_text() == text
+    check_package(folder, approved=(package_hash(folder),))
 
 
 @pytest.mark.parametrize('name', ['../manifest.yaml', '/manifest.yaml', 'CON.txt', 'dir\\bad.py', 'name?.py'])
@@ -256,11 +335,11 @@ def test_partial_locks_are_not_treated_as_builtin_defaults(tmp_path):
 def test_code_approval_survives_parameter_edits_but_not_code_or_resource_changes(tmp_path):
     from packed_bed.plugins.storage import code_hash, code_approved
     folder = tmp_path / 'source'
-    shutil.copytree(EXAMPLES / 'kinetics', folder)
+    shutil.copytree(EXAMPLES / 'ammonia', folder)
     approve_hash(code_hash(folder))
     manifest = folder / 'manifest.yaml'
     data = yaml.safe_load(manifest.read_text())
-    data['mechanisms']['shift']['values']['k0'] = 2e-5
+    data['mechanisms']['synthesis']['values'] = {'k': 2e-5}
     manifest.write_text(yaml.safe_dump(data))
     assert code_approved(folder)
     assert check_package(folder) is None
@@ -275,7 +354,7 @@ def test_code_approval_survives_parameter_edits_but_not_code_or_resource_changes
 
 def test_relative_modules_initializers_and_resources_survive_archive_inspection(tmp_path):
     folder = tmp_path / 'source'
-    shutil.copytree(EXAMPLES / 'correlation', folder)
+    shutil.copytree(EXAMPLES / 'enthalpy_overrides', folder)
     (folder / '__init__.py').write_text('from .helper import VALUE\n')
     (folder / 'helper.py').write_text('from pathlib import Path\nVALUE = int(Path(__file__).with_name("value.txt").read_text())\n')
     (folder / 'value.txt').write_text('42')
@@ -288,4 +367,3 @@ def test_relative_modules_initializers_and_resources_survive_archive_inspection(
     installed = tmp_path / 'project/plugins' / entry['id'] / 'current'
     shutil.rmtree(folder)
     assert check_package(installed, approved=(digest,)) is None
-

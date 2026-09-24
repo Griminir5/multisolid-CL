@@ -1,0 +1,82 @@
+id: example_ammonia
+name: Example ammonia
+description: Adds NH3, an inverse-square heat capacity correlation and N2 + 3 H2 ->
+  2 NH3 kinetics.
+source: Illustrative API example; coefficients and rate law are not validated scientific
+  data.
+species:
+  NH3:
+    name: Ammonia
+    chemical_key: NH3
+    phase: gas
+    mw: 0.01703052
+    enthalpy:
+      model: inverse_square
+      parameters:
+        cp_inf: 70.0
+        deficit: 35.0
+        t_ref: 298.15
+        h_ref: -46000.0
+    viscosity:
+      model: builtin:quadratic_viscosity
+      parameters:
+        t_ref: 298.15
+        a0: 1.0e-05
+        a1: 3.0e-08
+        a2: 0.0
+    notes: Illustrative gas properties, not a fitted ammonia dataset.
+mechanisms:
+  synthesis:
+    name: Ammonia synthesis
+    implementation: kinetics:create
+    gases:
+    - N2
+    - H2
+    - NH3
+    solids: []
+    reactions:
+    - id: synthesis
+      name: N2 + 3 H2 → 2 NH3
+      phase: gas_gas
+      stoichiometry:
+        N2: -1.0
+        H2: -3.0
+        NH3: 2.0
+      required_species:
+      - N2
+      - H2
+      - NH3
+      source_reference: Illustrative plugin example
+      notes: Irreversible, first order in each reactant. No catalyst, equilibrium
+        or pressure fit.
+    parameters:
+      k:
+        default: 0.001
+        unit: m^3 bed/(mol*s)
+        description: Rate coefficient using concentrations per bed volume
+        minimum: 0.0
+correlations:
+  inverse_square:
+    kind: enthalpy
+    implementation: enthalpy:create
+    parameters:
+      cp_inf:
+        default: 70.0
+        unit: J/(mol*K)
+        description: High-temperature Cp
+        minimum: 1.0
+      deficit:
+        default: 35.0
+        unit: J/(mol*K)
+        description: Cp deficit at Tref
+        minimum: 0.0
+      t_ref:
+        default: 298.15
+        unit: K
+        description: Reference temperature
+        minimum: 1.0
+      h_ref:
+        default: -46000.0
+        unit: J/mol
+        description: Enthalpy at Tref
+    name: Inverse-square Cp

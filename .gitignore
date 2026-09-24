@@ -26,6 +26,7 @@ packed_bed/examples/default_batch_case/output/
 !packed_bed/examples/plugins/**/
 !packed_bed/examples/plugins/**/*.yaml
 !packed_bed/examples/plugins/**/*.py
+!packed_bed/examples/plugins/*.md
 
 active_learning_optimization
 alex_repro

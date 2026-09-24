@@ -65,7 +65,7 @@ def generate_metadata(folder):
     updated = Manifest.model_validate(data)
     temporary = folder / '.manifest.tmp'
     try:
-        temporary.write_text(yaml.safe_dump(updated.model_dump(mode='json'), sort_keys=False), encoding='utf-8')
+        temporary.write_text(yaml.safe_dump(updated.model_dump(mode='json', exclude_defaults=True), sort_keys=False, allow_unicode=True), encoding='utf-8')
         temporary.replace(folder / 'manifest.yaml')
     finally:
         temporary.unlink(missing_ok=True)
