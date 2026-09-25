@@ -1,0 +1,128 @@
+id: waste_iron
+name: Waste iron
+description: Waste iron oxidation/reduction kinetics, silica properties and revised
+  alpha-alumina enthalpy from the waste_iron_kinetics branch.
+source: waste_iron_kinetics at 9660e5d497265393f49e5a4c51b6c348650415b5
+species:
+  SiO2:
+    name: Silicon Dioxide
+    chemical_key: SiO2
+    phase: solid
+    mw: 0.060084
+    enthalpy:
+      model: builtin:polynomial
+      parameters:
+        t_ref: 298.15
+        h_form_ref: -910857.0
+        coefficients:
+        - 44.8838385
+        - 0.118994056
+        - -0.000186293338
+        - 1.24813193e-07
+        - -2.97296354e-11
+    source: waste_iron_kinetics d19a65c; Property_Estimation/enth_hcap_data/sio2
+    notes: Branch quartic Cp fit. Source data span 298.15–1996 K, including phase
+      transitions; this single polynomial does not represent discontinuities explicitly.
+    temperature_range:
+    - 298.15
+    - 1996.0
+  Al2O3:
+    name: Aluminium Oxide (alpha)
+    chemical_key: Al2O3
+    phase: solid
+    mw: 0.101961
+    enthalpy:
+      model: builtin:polynomial
+      parameters:
+        t_ref: 298.15
+        h_form_ref: -1675692.0
+        coefficients:
+        - 80.2373934
+        - 0.17015037
+        - -0.000258981509
+        - 1.87231587e-07
+        - -4.94199681e-11
+    source: waste_iron_kinetics d19a65c; Property_Estimation/enth_hcap_data/al2o3-alpha
+    notes: Branch quartic Cp fit replacing the built-in constant Cp. Select this definition
+      explicitly or choose Use this as replacement.
+    temperature_range:
+    - 298.15
+    - 1800.0
+mechanisms:
+  fe_waste:
+    name: Waste iron redox
+    implementation: kinetics:create
+    gases:
+    - O2
+    - H2
+    - H2O
+    solids:
+    - Fe
+    - Fe2O3
+    reactions:
+    - id: fe_waste_oxidation
+      name: Waste iron oxidation by O2
+      phase: gas_solid
+      stoichiometry:
+        Fe: -1.0
+        O2: -0.75
+        Fe2O3: 0.5
+      required_species:
+      - Fe
+      - O2
+      - Fe2O3
+      source_reference: Waste iron branch 9660e5d; Aya data; Solid-State kinetic modelling
+        (iron waste based catalyst).pdf
+      notes: One-step Fe to Fe2O3 random-pore oxidation with saturating O2 availability.
+    - id: fe_waste_reduction
+      name: Waste hematite reduction by H2
+      phase: gas_solid
+      stoichiometry:
+        Fe2O3: -1.0
+        H2: -3.0
+        Fe: 2.0
+        H2O: 3.0
+      required_species:
+      - Fe
+      - H2
+      - Fe2O3
+      - H2O
+      source_reference: Waste iron branch 9660e5d; Aya data; Solid-State kinetic modelling
+        (iron waste based catalyst).pdf
+      notes: One-step Fe2O3 to Fe reduction with fitted rational/Padé solid terms
+        and a mass-transfer rate limit.
+    parameters:
+      K0.H2:
+        default: 0.1382
+        unit: s^-1 (mol/m^3 gas)^-0.7554
+        description: H2 reduction prefactor
+        minimum: 0.0
+      ACTIVATION_ENERGY_J_PER_MOL.H2:
+        default: 37318.0
+        unit: J/mol
+        description: H2 reduction activation energy
+        minimum: 0.0
+      K_MT.H2:
+        default: 0.018
+        unit: s^-1
+        description: Reduction mass-transfer rate limit
+        minimum: 1.0e-30
+      OXIDATION_RATE_CONSTANT_S_INV:
+        default: 0.0073738573592314
+        unit: s^-1
+        description: Oxidation rate constant
+        minimum: 0.0
+      OXIDATION_O2_HALF_SATURATION_MOLM3:
+        default: 1.0
+        unit: mol/m^3 gas
+        description: O2 half-saturation concentration
+        minimum: 1.0e-30
+      OXIDATION_RANDOM_PORE_PSI:
+        default: 8.0
+        unit: dimensionless
+        description: Oxidation random-pore parameter
+        minimum: 0.0
+    source: Aya iron waste data; implementation from waste_iron_kinetics at 9660e5d.
+    notes: Gas concentrations use gas volume; rates and solid inventories use total
+      bed volume. Select either or both reactions. This family is distinct from built-in
+      iron_he.
