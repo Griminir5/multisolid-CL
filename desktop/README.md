@@ -157,6 +157,60 @@ its sheets, sizes, and any compatibility issues before replacing the current
 configuration. Each applied template is an independent editable copy. Templates
 contain no results, case identity, or run provenance.
 
+## Project Results
+
+Click **Results…** beside **Run all included cases**. A dialog first asks which
+cases to make available in Results. Only cases whose latest run succeeded and
+whose result files are present can be selected. Select cases individually or
+check a study group; filtering also matches factor selections. **Select all** and
+**Clear all** affect every eligible case, including cases hidden by the filter.
+These checkboxes are independent of Run all inclusion. Cancel keeps the project
+case list open. **Select cases…** inside Results reopens the same dialog.
+
+The worksheet controls work like the case Report tab, with **Case** as another
+axis. Choose what rows represent, then **Add columns…**:
+
+- **Time** rows with five cases and three outlet species give 15 value columns.
+- **Position** rows compare profiles at explicitly selected recorded times.
+- **Case** rows compare individual recorded values. Time defaults to **Last**;
+  First/Last resolves separately for each case. This does not calculate an average.
+
+Shared rows must have the same recorded coordinates. For different grids, use
+**Split by case** to replace the current sheet with a separate, editable worksheet
+for each case, or select row coordinates recorded in all referenced cases. The
+export never interpolates or silently matches nearby samples. Cell positions and
+face positions remain separate axes.
+
+All expands to explicit columns when added, using each case's own grid. Saved
+columns keep their case identities and coordinate selections. Missing cases or
+coordinates remain visible for repair after a rerun or study rebuild. First/Last
+follows the retained run's endpoints; add columns again to include new cases or
+coordinates. **Refresh results** reloads the current retained data.
+
+Preview shows up to 20 rows and 12 columns; **Export workbook…** exports the full
+selection as native Excel Tables. The fixed **Results information** sheet includes
+run identities, study selections, retained inputs, status, staleness, available
+balance diagnostics and exact per-case coordinates for every value column.
+Successful but stale results can be exported if their selected data and snapshot
+are readable. Missing quantities or samples block the affected worksheet with a reason.
+
+**Save as template…** saves the worksheet layout as JSON, without run data or case
+identities. **Apply template…** previews the sheets, sizes, compatibility and case
+mapping before replacing the layout. Select the same number of cases as the
+template; its case positions map to the selected cases in their displayed order.
+Applied templates are independent copies, and edits do not change the template file.
+
+For a failed run, open the individual case's **Report** tab to export any saved
+partial data. A normal solver failure can retain samples recorded before the
+failure. These show the state at reporting times, not rejected solver iterations
+or necessarily the exact failure instant. A hard crash, forced stop, or failure
+before recording may leave no exportable data; consult **Open latest run log** too.
+
+Use Excel for your own averages, integrals and plots. Project Results layouts
+autosave and support draft recovery independently of case Report definitions and
+scientific inputs. Export can be cancelled; an existing workbook is replaced only
+after success. Existing individual-case plot windows remain available.
+
 ## Parameter studies
 
 Run the intended baseline case successfully first. **New Parameter Study** accepts
@@ -295,6 +349,8 @@ retained runs as Interrupted.
 | `packed_bed_ui/project.py` | Project/case storage, imports, readiness, and run preparation |
 | `packed_bed_ui/execution.py` | Start, monitor, and stop the project's worker with Qt |
 | `packed_bed_ui/worker.py` | Verify/activate snapshots, collect logs, publish status, call the shared engine loop |
+| `packed_bed_ui/results.py` | Project Results, using the shared Report worksheet controls |
+| `packed_bed_ui/project_results.py` | Case-axis selections, native-grid validation and project Excel export |
 | `../packed_bed/batch.py` | Shared case scheduling, concurrency, thread limits, and worker cleanup |
 | `../packed_bed/preview.py` | Scientific preview arrays without Qt or plotting imports |
 

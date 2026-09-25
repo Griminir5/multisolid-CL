@@ -311,21 +311,21 @@ def plan_sheet(schema, sheet):
             "headings": headings, "columns": resolved, "selection": sheet["rows"]}
 
 
-def plan_workbook(schema, definition):
+def plan_workbook(schema, definition, *, information_title=INFORMATION, sheet_planner=plan_sheet):
     if not isinstance(definition, dict) or definition.get("version") != 1:
         raise ValueError("Unsupported report definition version.")
     if not isinstance(definition.get("sheets"), list) or not definition["sheets"]:
         raise ValueError("Add a data sheet to export.")
-    tables, errors, names = [], [], {INFORMATION.casefold()}
+    tables, errors, names = [], [], {information_title.casefold()}
     for sheet in definition["sheets"]:
         name = sheet.get("name", "") if isinstance(sheet, dict) else ""
         try:
             if (not isinstance(name, str) or not name.strip() or len(name) > 31
                     or re.search(r"[\\/*?:\[\]\x00-\x1f]", name) or name.startswith("'") or name.endswith("'")
                     or name.casefold() in names or name.casefold() == "history"):
-                raise ValueError("Use a unique Excel sheet name (1–31 characters); Case information is reserved.")
+                raise ValueError(f"Use a unique Excel sheet name (1–31 characters); {information_title} is reserved.")
             names.add(name.casefold())
-            tables.append(plan_sheet(schema, sheet))
+            tables.append(sheet_planner(schema, sheet))
         except (ValueError, KeyError, TypeError, AttributeError) as exc:
             errors.append(f"{name or 'Unnamed sheet'}: {exc}")
     if errors:
@@ -423,59 +423,73 @@ def write_workbook(run_folder, definition, destination, *, fingerprint=None, can
         raise ValueError("Choose an .xlsx file.")
     if destination.resolve().is_relative_to(run_folder.resolve()):
         raise ValueError("Save the workbook outside the replaceable run folder.")
+    with xr.open_dataset(run_folder / "output" / RESULTS_FILENAME, engine="scipy") as dataset:
+        schema = describe_dataset(dataset)
+        tables = plan_workbook(schema, definition)
+        information = run_information(run_folder, fingerprint)
+        validate_information(information, tables, schema)
+        write_tables(destination, tables, information_rows(information, tables, schema),
+                     lambda table: table_rows(dataset, table, cancelled=cancelled), cancelled=cancelled)
+
+
+def write_tables(destination, tables, information, rows, *, information_title=INFORMATION,
+                 cancelled=lambda: False):
+    """Shared streaming Excel writer for case reports and project results."""
+    destination = Path(destination)
+    if destination.suffix.lower() != ".xlsx":
+        raise ValueError("Choose an .xlsx file.")
     workbook, temporary = None, None
     try:
-        with xr.open_dataset(run_folder / "output" / RESULTS_FILENAME, engine="scipy") as dataset:
-            schema = describe_dataset(dataset)
-            tables = plan_workbook(schema, definition)
-            information = run_information(run_folder, fingerprint)
-            validate_information(information, tables, schema)
+        if cancelled():
+            raise ExportCancelled()
+        workbook = Workbook(write_only=True)
+        def append(ws, row, *, header=False):
+            cells = []
+            for value in row:
+                cell = WriteOnlyCell(ws, value=excel_value(value))
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"  # User labels and metadata are literal, never formulas.
+                if header:
+                    cell.font = Font(bold=True)
+                    cell.alignment = Alignment(wrap_text=True)
+                cells.append(cell)
+            ws.append(cells)
+        ws = workbook.create_sheet(information_title)
+        ws.column_dimensions["A"].width = 25
+        ws.column_dimensions["B"].width = 48
+        ws.column_dimensions["C"].width = 48
+        for count, row in enumerate(information, 1):
+            if count > MAX_ROWS or len(row) > MAX_COLUMNS:
+                raise ValueError(f"{information_title} exceeds Excel's size limits.")
             if cancelled():
                 raise ExportCancelled()
-            workbook = Workbook(write_only=True)
-            def append(ws, row, *, header=False):
-                cells = []
-                for value in row:
-                    cell = WriteOnlyCell(ws, value=excel_value(value))
-                    if isinstance(cell.value, str):
-                        cell.data_type = "s"  # User labels and metadata are literal, never formulas.
-                    if header:
-                        cell.font = Font(bold=True)
-                        cell.alignment = Alignment(wrap_text=True)
-                    cells.append(cell)
-                ws.append(cells)
-            ws = workbook.create_sheet(INFORMATION)
-            ws.column_dimensions["A"].width = 25
-            ws.column_dimensions["B"].width = 48
-            ws.column_dimensions["C"].width = 48
-            for row in information_rows(information, tables, schema):
+            append(ws, row)
+        for i, table in enumerate(tables, 1):
+            ws = workbook.create_sheet(table["name"])
+            ws.freeze_panes = "B2"
+            ws.row_dimensions[1].height = 60
+            for j in range(len(table["headings"])):
+                ws.column_dimensions[get_column_letter(j + 1)].width = 20 if j == 0 else 32
+            native = Table(displayName=f"Report{i}",
+                           ref=f"A1:{get_column_letter(len(table['headings']))}{len(table['rows']) + 1}",
+                           tableColumns=[TableColumn(id=j, name=h) for j, h in enumerate(table["headings"], 1)])
+            native.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+            native.autoFilter = AutoFilter(ref=native.ref)
+            # Column definitions are explicit: write-only worksheets cannot infer headers.
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="In write-only mode you must add table columns manually")
+                ws.add_table(native)
+            append(ws, table["headings"], header=True)
+            for row in rows(table):
                 if cancelled():
                     raise ExportCancelled()
                 append(ws, row)
-            for i, table in enumerate(tables, 1):
-                ws = workbook.create_sheet(table["name"])
-                ws.freeze_panes = "B2"
-                ws.row_dimensions[1].height = 60
-                for j in range(len(table["headings"])):
-                    ws.column_dimensions[get_column_letter(j + 1)].width = 20 if j == 0 else 32
-                native = Table(displayName=f"Report{i}",
-                               ref=f"A1:{get_column_letter(len(table['headings']))}{len(table['rows']) + 1}",
-                               tableColumns=[TableColumn(id=j, name=h) for j, h in enumerate(table["headings"], 1)])
-                native.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
-                native.autoFilter = AutoFilter(ref=native.ref)
-                # Column definitions are explicit: write-only worksheets cannot infer headers.
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", message="In write-only mode you must add table columns manually")
-                    ws.add_table(native)
-                append(ws, table["headings"], header=True)
-                for row in table_rows(dataset, table, cancelled=cancelled):
-                    append(ws, row)
-            with NamedTemporaryFile(dir=destination.parent, prefix=".report-", suffix=".xlsx", delete=False) as f:
-                temporary = Path(f.name)
-            workbook.save(temporary)
-            if cancelled():
-                raise ExportCancelled()
-            temporary.replace(destination)
+        with NamedTemporaryFile(dir=destination.parent, prefix=".report-", suffix=".xlsx", delete=False) as f:
+            temporary = Path(f.name)
+        workbook.save(temporary)
+        if cancelled():
+            raise ExportCancelled()
+        temporary.replace(destination)
     finally:
         if workbook:
             for ws in workbook.worksheets:

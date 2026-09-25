@@ -220,14 +220,15 @@ class ColumnsDialog(QDialog):
 
 
 class ExportWorker(QThread):
-    def __init__(self, arguments, parent=None):
+    def __init__(self, arguments, parent=None, writer=write_workbook):
         super().__init__(parent)
+        self.writer = writer
         self.arguments, self.error, self.cancelled = arguments, "", False
         self.cancel_requested = False
 
     def run(self):
         try:
-            write_workbook(**self.arguments, cancelled=lambda: self.cancel_requested or self.isInterruptionRequested())
+            self.writer(**self.arguments, cancelled=lambda: self.cancel_requested or self.isInterruptionRequested())
         except ExportCancelled:
             self.cancelled = True
         except Exception as exc:
@@ -235,7 +236,7 @@ class ExportWorker(QThread):
 
 
 class ExportDialog(QDialog):
-    def __init__(self, arguments, parent=None):
+    def __init__(self, arguments, parent=None, writer=write_workbook):
         super().__init__(parent)
         self.setWindowTitle("Export workbook")
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
@@ -244,7 +245,7 @@ class ExportDialog(QDialog):
         self.cancel = action_button("Cancel", self.reject)
         layout.addWidget(self.message)
         layout.addWidget(self.cancel)
-        self.worker = ExportWorker(arguments, self)
+        self.worker = ExportWorker(arguments, self, writer)
         self.worker.finished.connect(self.accept)
         QTimer.singleShot(0, self.worker.start)
 
@@ -261,12 +262,17 @@ class ExportDialog(QDialog):
 
 class TemplateDialog(QDialog):
     """Review a portable layout in this case before replacing the current report."""
-    def __init__(self, schema, definition, removed=0, parent=None):
+    def __init__(self, schema, definition, removed=0, parent=None, *,
+                 sheet_planner=plan_sheet, workbook_planner=plan_workbook, note=""):
         super().__init__(parent)
         self.setWindowTitle("Apply report template")
         self.resize(850, 400)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Applying this template replaces the current report configuration."))
+        if note:
+            details = QLabel(note)
+            details.setWordWrap(True)
+            layout.addWidget(details)
         if removed:
             layout.addWidget(QLabel(f"{removed} row selections or columns have coordinates unavailable in this case and will be removed."))
         table = QTableWidget(len(definition["sheets"]), 4)
@@ -276,9 +282,9 @@ class TemplateDialog(QDialog):
         for row, sheet in enumerate(definition["sheets"]):
             size, message = "", "Ready"
             try:
-                planned = plan_sheet(schema, sheet)
+                planned = sheet_planner(schema, sheet)
                 size = f"{len(planned['rows'])} rows × {len(planned['headings'])} columns"
-                plan_workbook(schema, {"version": 1, "sheets": [sheet]})
+                workbook_planner(schema, {"version": 1, "sheets": [sheet]})
                 if sheet["name"].casefold() in names:
                     raise ValueError("Use a unique worksheet name.")
             except (ValueError, KeyError, TypeError) as exc:
@@ -299,7 +305,11 @@ class TemplateDialog(QDialog):
 
 
 class ReportPage(QWidget):
-    def __init__(self, editor):
+    information_title = INFORMATION
+    plan_sheet = staticmethod(plan_sheet)
+    columns_dialog = ColumnsDialog
+
+    def __init__(self, editor=None):
         super().__init__()
         self.editor, self.case = editor, None
         self.definition = {"version": 1, "sheets": []}
@@ -355,7 +365,7 @@ class ReportPage(QWidget):
         ])
         self.columns.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.info_view = QComboBox()
-        self.info_view.addItems(["Case information", "Column dictionary"])
+        self.info_view.addItems([self.information_title, "Column dictionary"])
         rl.addWidget(self.info_view)
         self.table = QTableWidget()
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -387,7 +397,8 @@ class ReportPage(QWidget):
         self.name.textEdited.connect(self.rename_sheet)
         self.axis.currentIndexChanged.connect(self.change_axis)
         self.info_view.currentIndexChanged.connect(self.preview)
-        self.editor.tabs.currentChanged.connect(self.tab_changed)
+        if editor is not None:
+            self.editor.tabs.currentChanged.connect(self.tab_changed)
 
     def actions(self, layout, entries):
         row = QHBoxLayout()
@@ -473,7 +484,7 @@ class ReportPage(QWidget):
     def rebuild_sheets(self, index):
         self.sheets.blockSignals(True)
         self.sheets.clear()
-        self.sheets.addItems([INFORMATION, *[s.get("name", "") for s in self.definition["sheets"]]])
+        self.sheets.addItems([self.information_title, *[s.get("name", "") for s in self.definition["sheets"]]])
         self.sheets.setCurrentRow(index)
         self.sheets.blockSignals(False)
         self.select_sheet()
@@ -505,20 +516,24 @@ class ReportPage(QWidget):
                 old = self.row_layout.takeAt(0).widget()
                 old.hide()
                 old.deleteLater()
-            axis = self.schema["axes"].get(sheet["axis"], {"label": sheet["axis"], "unit": "", "values": None, "error": "Axis unavailable"})
+            axis = self.row_axis_description(sheet)
             self.rows = CoordinatePicker(axis, sheet["rows"])
             self.row_layout.addWidget(self.rows)
             self.rows.changed.connect(self.change_rows)
             for column in sheet["columns"]:
                 try:
                     one = {**sheet, "rows": {"mode": "first"}, "columns": [column], "column_rules": []}
-                    label = plan_sheet(self.schema, one)["headings"][1]
+                    label = self.plan_sheet(self.schema, one)["headings"][1]
                 except (ValueError, KeyError, TypeError) as exc:
                     label = f"{column.get('label', column.get('quantity', 'Column'))} — {exc}"
                 self.columns.addItem(label)
                 self.columns.item(self.columns.count() - 1).setToolTip(label)
         self.loading = False
         self.preview()
+
+    def row_axis_description(self, sheet):
+        return self.schema["axes"].get(sheet["axis"], {
+            "label": sheet["axis"], "unit": "", "values": None, "error": "Axis unavailable"})
 
     def changed(self):
         if self.loading or self.case is None:
@@ -599,21 +614,12 @@ class ReportPage(QWidget):
         sheet = self.sheet
         if sheet is None or sheet["axis"] not in self.schema["axes"]:
             return
-        dialog = ColumnsDialog(self.schema, sheet["axis"], MAX_COLUMNS - 1 - len(sheet["columns"]), self)
+        dialog = self.columns_dialog(self.schema, sheet["axis"], MAX_COLUMNS - 1 - len(sheet["columns"]), self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            def identity(column):
-                try:
-                    fixed = {}
-                    for dim, selector in column["fixed"].items():
-                        values = self.schema["axes"][dim]["values"]
-                        fixed[dim] = scalar(values[resolve_selector(values, selector, dim)[0]])
-                except (ValueError, KeyError, TypeError):
-                    fixed = column["fixed"]  # Unresolved columns remain editable.
-                return json.dumps([column["quantity"], fixed], sort_keys=True)
-            existing = {identity(c) for c in sheet["columns"]}
+            existing = {self.column_identity(c) for c in sheet["columns"]}
             added = False
             for column in dialog.columns():
-                key = identity(column)
+                key = self.column_identity(column)
                 if key not in existing:
                     sheet["columns"].append(column)
                     existing.add(key)
@@ -624,6 +630,16 @@ class ReportPage(QWidget):
                 sheet.setdefault("column_rules", []).append(dialog.rule)
             self.select_sheet()
             self.changed()
+
+    def column_identity(self, column):
+        try:
+            fixed = {}
+            for dim, selector in column["fixed"].items():
+                values = self.schema["axes"][dim]["values"]
+                fixed[dim] = scalar(values[resolve_selector(values, selector, dim)[0]])
+        except (ValueError, KeyError, TypeError):
+            fixed = column["fixed"]  # Unresolved columns remain editable.
+        return json.dumps([column["quantity"], fixed], sort_keys=True)
 
     def remove_columns(self):
         if self.sheet is not None:
@@ -776,7 +792,7 @@ class ReportPage(QWidget):
             self.error.setText(str(exc))
             return
         name = re.sub(r'[\\/:*?"<>|]', "_", self.case.name).strip(". ")[:80] or "Report"
-        chooser = QFileDialog(self, "Export workbook", str(self.case.project.root / f"{name}.xlsx"), "Excel workbook (*.xlsx)")
+        chooser = QFileDialog(self, "Export workbook", str(self.case.root / f"{name}.xlsx"), "Excel workbook (*.xlsx)")
         chooser.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
         chooser.setDefaultSuffix("xlsx")
         if chooser.exec() != QDialog.DialogCode.Accepted:

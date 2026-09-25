@@ -6,7 +6,8 @@ Each run writes an xarray dataset in NetCDF format and a JSON manifest.
 
 A small PyQt6 desktop client now lives in [desktop/](desktop/README.md).
 It supports projects with multiple cases, draft run settings, shared previews,
-and Run case / Run all execution. Each case keeps one latest run; rerunning
+Run case / Run all execution, and project Excel reports with Case as a selectable
+axis. Each case keeps one latest run; rerunning
 replaces its results, and input edits mark retained results stale. See its README for setup and the remaining work
 toward [PLAN.md](PLAN.md).
 

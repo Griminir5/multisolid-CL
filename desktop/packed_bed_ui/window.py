@@ -17,6 +17,7 @@ from .project import Project
 from .study_editor import StudyEditor, choose_baseline
 from .definition_editor import DefinitionLibrary
 from .navigation import NewProjectDialog, ProjectLocations, display_timestamp
+from .results import ResultsPage, CaseSelectionDialog
 
 
 class MainWindow(QMainWindow):
@@ -67,6 +68,8 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(self.home)
         self.project_title = QLabel()
         layout.addWidget(self.project_title)
+        self.results_button = QPushButton("Results…")
+        self.results_button.clicked.connect(self._show_results)
         self.mutation_buttons = []
         menu = self.menuBar().addMenu("Project")
         self.project_actions = []
@@ -118,9 +121,13 @@ class MainWindow(QMainWindow):
         self.run_all_button = QPushButton("Run all cases")
         self.run_all_button.clicked.connect(self._run_all)
         execution_actions.addWidget(self.run_all_button)
+        execution_actions.addWidget(self.results_button)
         layout.addLayout(execution_actions)
         layout.addWidget(QLabel("Running a case replaces its previous results. Duplicate a case first if you want to keep both."))
         self.pages.addWidget(self.home)
+        self.results = ResultsPage()
+        self.results.back.connect(self._show_cases)
+        self.pages.addWidget(self.results)
 
         self.case_page = QWidget()
         case_layout = QVBoxLayout(self.case_page)
@@ -167,10 +174,11 @@ class MainWindow(QMainWindow):
         control = QApplication.focusWidget()
         if control is not None and self.isAncestorOf(control):
             control.clearFocus()  # Commit delegates and editingFinished before saving.
-        saved = self.editor.save() and self.study_editor.save()
+        saved = self.editor.save() and self.study_editor.save() and self.results.save()
         if not saved:
             reason = self.editor.validation.text() if self.editor.dirty else (
-                self.editor.report.save_note.text() if self.editor.report.dirty else self.study_editor.issue.text())
+                self.editor.report.save_note.text() if self.editor.report.dirty else
+                self.study_editor.issue.text() if self.study_editor.dirty else self.results.save_note.text())
             self.statusBar().showMessage(f"Navigation cannot complete until the draft is saved. {reason}")
         return saved
 
@@ -361,6 +369,7 @@ class MainWindow(QMainWindow):
             self.project_lock.unlock()
         self.project_lock = lock
         self.study_editor.clear()
+        self.results.clear()
         if self.project is not None:
             self.project.on_edit = None
         self.project = project
@@ -543,6 +552,7 @@ class MainWindow(QMainWindow):
         if self.project_lock is not None:
             self.project_lock.unlock()
         self.study_editor.clear()
+        self.results.clear()
         if self.project is not None:
             self.project.on_edit = None
         self.project_lock = self.project = self.editor.case = None
@@ -562,6 +572,19 @@ class MainWindow(QMainWindow):
         if self.project is not None:
             self.setWindowTitle(f"{self.project.metadata['name']} — MultiSolid")
         self.pages.setCurrentWidget(self.home)
+
+    def _show_results(self):
+        if self.project is None or self.runner.active or not self._save_editors():
+            return
+        self.study_editor.stop_preview()
+        chosen = self.project.metadata.get("results_report", {}).get("case_ids", [])
+        dialog = CaseSelectionDialog(self.project, chosen, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.selected_cases():
+            return
+        if self.results.set_project(self.project):
+            self.results.set_selected_cases(dialog.selected_cases())
+            self.pages.setCurrentWidget(self.results)
+            self.setWindowTitle(f"Results — {self.project.metadata['name']} — MultiSolid")
 
     def _show_case(self, case):
         if not self._save_editors():
@@ -620,6 +643,8 @@ class MainWindow(QMainWindow):
         if self.project is not None:
             self.project.executing = active
         self.study_editor.setEnabled(not active)
+        self.results_button.setEnabled(not active)
+        self.results.setEnabled(not active and self.results.supported)
         if active:
             self.study_editor.stop_preview()
         for button in self.mutation_buttons:

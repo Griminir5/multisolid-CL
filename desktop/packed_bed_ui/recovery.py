@@ -40,11 +40,16 @@ class Drafts:
         for path in sorted(self.folder.glob("*.json")):
             draft = read_json(path)
             kind, ident, data = draft.get("kind"), draft.get("id"), draft.get("data")
-            if (draft.get("version") != 1 or kind not in ("case", "study") or not isinstance(data, dict)
+            if (draft.get("version") != 1 or kind not in ("case", "study", "results") or not isinstance(data, dict)
                     or not isinstance(ident, str) or path != self.path(kind, ident)
                     or not isinstance(draft.get("updated_at"), str)):
                 raise ValueError(f"Cannot read recovery draft: {path.name}")
-            if kind == "case" and ident in cases:
+            if kind == "results" and ident == "project":
+                from .project_results import results_definition
+                results_definition(data)
+                current = self.project.metadata.get("results_report", {"version": 1, "case_ids": [], "sheets": []})
+                name = "Project results report"
+            elif kind == "case" and ident in cases:
                 case = cases[ident]
                 if (not isinstance(data.get("metadata"), dict) or data["metadata"].get("id") != ident
                         or not isinstance(data["metadata"].get("name"), str)
@@ -67,7 +72,18 @@ class Drafts:
     def apply(self, draft):
         """Only called after the user chooses recovery. No execution state changes."""
         data, ident = deepcopy(draft["data"]), draft["id"]
-        if draft["kind"] == "case":
+        if draft["kind"] == "results":
+            previous = self.project.metadata.get("results_report")
+            self.project.metadata["results_report"] = data
+            try:
+                self.project.save()
+            except Exception:
+                if previous is None:
+                    self.project.metadata.pop("results_report", None)
+                else:
+                    self.project.metadata["results_report"] = previous
+                raise
+        elif draft["kind"] == "case":
             case = next(case for case in self.project.cases if case.id == ident)
             before = case_payload(case)
             case.documents = data["documents"]
