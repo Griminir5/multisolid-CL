@@ -12,6 +12,8 @@ from PyQt6.QtWidgets import (
 
 STATE_LABELS = {
     "not_run": "Not run", "queued": "Queued", "preparing": "Preparing",
+    "checking_cache": "Checking cache", "waiting_for_compilation": "Waiting for compilation",
+    "generating": "Generating model", "compiling": "Compiling",
     "initialising": "Initialising", "running": "Running", "writing_results": "Writing results",
     "completed": "Succeeded", "failed": "Failed", "cancelled": "Cancelled", "interrupted": "Interrupted",
 }

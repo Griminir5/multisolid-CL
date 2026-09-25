@@ -1,0 +1,44 @@
+name: Compiled runtime
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['packed_bed/compiled/**', 'packed_bed/processes.py', 'tools/*compiled*', 'tools/build_compiled_runtime.py', '.github/workflows/compiled-runtime.yml']
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install '.[compiled]' pytest pefile
+      - if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
+      - if: runner.os == 'Linux'
+        run: python tools/build_compiled_runtime.py --work build/native --prefix build/native-prefix
+      - if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          export CMAKE_GENERATOR=Ninja
+          "$(cygpath -u "$pythonLocation")/python.exe" tools/build_compiled_runtime.py --work build/native --prefix build/native-prefix
+      - if: runner.os == 'Linux'
+        run: |
+          python -c "from pathlib import Path; from tools.build_compiled_runtime import fetch; print(fetch('zig_linux', Path('build/native')))"
+          python tools/bundle_compiled.py --compiler build/native/zig_linux-source/zig-x86_64-linux-0.16.0 --runtime build/native-prefix --destination desktop/vendor/compiled
+      - if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          "$(cygpath -u "$pythonLocation")/python.exe" -c "from pathlib import Path; from tools.build_compiled_runtime import fetch; print(fetch('zig_windows', Path('build/native')))"
+          "$(cygpath -u "$pythonLocation")/python.exe" tools/bundle_compiled.py --compiler build/native/zig_windows-source/zig-x86_64-windows-0.16.0 --runtime build/native-prefix --destination desktop/vendor/compiled
+      - run: python -m pytest tests/compiled/test_managed.py tests/compiled/test_runtime.py tests/test_processes.py -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiled-runtime-${{ runner.os }}
+          path: desktop/vendor/compiled

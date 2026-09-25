@@ -4,7 +4,7 @@ import pytest
 
 
 @pytest.mark.parametrize(
-    "linear_solver", ("superlu", "band", "band_scalar", "band_avx2", "band_reciprocal")
+    "linear_solver", ("superlu", "klu", "band", "band_scalar", "band_avx2", "band_reciprocal")
 )
 @pytest.mark.parametrize("step_growth_threshold", (2.0, 1.25))
 @pytest.mark.parametrize(
@@ -23,6 +23,13 @@ def test_scaled_native_callbacks_preserve_known_dae_solution(
     from packed_bed.compiled.compiler import compile_kernel
     from packed_bed.compiled.graph import Graph
     from packed_bed.compiled.runtime import NativeIDA, callback_source
+
+    if linear_solver == "klu":
+        from packed_bed.compiled.runtime import check_runtime, load_runtime_library
+        try:
+            load_runtime_library(check_runtime(), "sunlinsolklu")
+        except RuntimeError as exc:
+            pytest.skip(str(exc))  # The packaged smoke check requires KLU.
 
     nonlinear_library = None
     if nonlinear_refresh_interval:
@@ -169,5 +176,4 @@ void jacobian(double,const double*,const double*,double,double*) {}
         solver.kernel = library
     with pytest.raises(RuntimeError, match="Compiled IDA"):
         solver.solve([0., 1.])
-
 

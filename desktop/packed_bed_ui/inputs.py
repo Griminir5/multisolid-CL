@@ -90,8 +90,8 @@ def input_readiness(documents, extensions=(), *, catalogue=None):
         if catalogue is not None:
             from packed_bed.plugins.storage import require_approval
             require_approval(catalogue, case.selection.lock)
-        if case.run.solver.backend != "daetools" or case.run.solver.name != "superlu":
-            raise ValueError("Select DAETools / SuperLU for the desktop runtime.")
+        from packed_bed.solver_support import require_desktop_solver
+        require_desktop_solver(case)
     except (ValueError, TypeError, KeyError, OSError) as exc:
         errors = exc.__cause__.errors() if isinstance(exc.__cause__, ValidationError) else []
         missing = any(error["type"] == "missing" or error.get("input") in (None, "") for error in errors)

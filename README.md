@@ -210,7 +210,10 @@ The IDAS defaults are `suppress_algebraic_errors: false`, `max_nonlinear_iterati
 The default example changes these values and uses `relative_tolerance: 1.0e-3`.
 Compare important results with a stricter tolerance before you use a new solver configuration.
 
-**Use the compiled CPU backend.** Install the optional runtime with
+**Use the compiled CPU backend.** The desktop's managed distribution includes its
+compiler and native libraries for Linux x64 and Windows x64; see the
+[compiled runtime guide](desktop/COMPILED.md) for building that distribution.
+For source/CLI use without a managed bundle, install the optional runtime with
 `python -m pip install -e ".[compiled]"` and a native C++17 compiler:
 
 | Platform | Compiler |
@@ -221,7 +224,7 @@ Compare important results with a stricter tolerance before you use a new solver 
 
 On Linux/macOS, activate the Python environment with `source .venv/bin/activate`.
 The compiler is detected on `PATH`; set `CXX` to a compiler executable name or full path to override it.
-The adapter uses the bundled libraries from the pinned `scikit-sundae==1.1.3` wheel
+Without a managed bundle, the adapter uses the libraries from the pinned `scikit-sundae==1.1.3` wheel
 (SUNDIALS 7.5.0, double precision, 32-bit indices). Arbitrary system or Conda SUNDIALS
 installations are not interchangeable with this ABI. Wheel availability limits the supported
 platforms; see [the runtime's platform support](https://scikit-sundae.readthedocs.io/en/stable/user_guide/installation.html#platform-support).
@@ -234,7 +237,7 @@ Set these entries under `solver` in the case's `run.yaml` (retain any other solv
 ```yaml
 solver:
   backend: compiled
-  name: superlu  # Also supports superlu_mt and band.
+  name: superlu  # Also superlu_mt, band, and klu with the managed runtime.
 ```
 
 Then run the case normally:
@@ -243,7 +246,14 @@ Then run the case normally:
 python -m packed_bed packed_bed/examples/default_case/run.yaml
 ```
 
-The first run compiles a model-specific kernel; later runs reuse `.packed_bed_cache` beside the case.
+KLU is available under both backends as `klu`; `trilinos_klu` remains a compatible
+alias. Compiled KLU requires the managed runtime because the wheel omits KLU.
+Standard KLU uses DAE Tools' Amesos adapter; Compiled uses it for initialization
+and SUNDIALS KLU for integration. Neither substitutes another solver.
+
+The first run compiles a model-specific kernel; later CLI runs reuse `.packed_bed_cache` beside the case.
+Desktop workers always share `.packed_bed_cache` at the project root, outside
+replaceable run folders. It is excluded from archives and scientific fingerprints.
 Kernels use `.dll`, `.so` or `.dylib` as appropriate; cache keys include the platform, CPU architecture,
 compiler and build flags. Set `PACKED_BED_COMPILED_CACHE` to share a cache directory.
 AVX2 acceleration is detected at runtime; other CPUs use scalar kernels. The optional
@@ -290,21 +300,19 @@ Use `python -m packed_bed batch --help` for the batch options.
 **Compare solver timings.** From the repository, run:
 
 ```sh
-python -m tools.benchmark_solvers --output untracked/solver_timings --repeats 3
+python -m tools.benchmark_compiled --cases packed_bed/examples/default_case/run.yaml --output untracked/solver_timings --solvers superlu klu band --workers 1 2 --repeats 3
 ```
 
-This times the default case and all four batch conditions sequentially, using one numerical
-thread and a fresh Python process for each run. Each solver gets a first run and three repeats;
-compiled repeats must hit the kernel cache. Physics, tolerances and reports stay the same;
-plot rendering is disabled. `--scope default` or `--scope batch` selects one example.
-Use a new output directory for each benchmark. The output contains `summary.csv`, raw
-measurements, environment details, report differences, copied cases and per-run logs.
-The main timing includes initialization, compilation, integration and output writing;
-process startup and imports are recorded separately. Batch timing is the sum of sequential
-case times, so it does not measure the speedup from multiple batch workers.
-For a stricter cross-check, add `--rtol 1e-6 --atol 1e-9`; these overrides apply equally
-to all three solvers. Peak report differences are recorded in `comparisons.json`.
-Measured example timings and numerical differences are in the
+Install the desktop package and stage the managed runtime first. Supply multiple
+case paths to measure concurrent runs with distinct kernels. Each solver and worker
+limit gets an independent project, a Standard baseline, a first Compiled run, and
+cached repeats. The timings include worker startup, initialization, compilation,
+integration, and output; batch elapsed time measures concurrent makespan.
+The benchmark checks matching coordinates and numerical agreement, and requires
+cache hits on repeats. Inputs, tolerances, and outputs stay the same between runs.
+Use a new output directory. It retains `summary.csv`, raw measurements, per-attempt
+manifests and logs, reference datasets, and quantity differences. Historical example
+timings from the earlier source/CLI benchmark are in the
 [solver benchmark report](docs/solver_benchmarks.md).
 
 **Select reports and plots.** Reports determine the contents of `results.nc`.
@@ -447,4 +455,56 @@ The language reference for this README is [ASD-STE100, Issue 9](https://www.asd-
 
 ## Scientific plugins
 
-Projects support portable species, property and kinetic plugins, including in-app parameter variants and externally authored Python implementations. See [PLUGINS.md](PLUGINS.md) for the Plugins browser, examples, package format and engine API.
+Projects support species, property and kinetics plugins, including parameter
+variants made in the app and implementations written in Python. Open a project
+and choose **Plugins** beside **Project** in the menu bar.
+
+**Receiving a project archive**
+
+1. Choose **Project → Import project archive…**, select the `.msproject` file,
+   and choose a name and location for the new project.
+2. Open **Plugins** to see the included plugins. All their files are already in
+   the imported project; no separate download, installation or pip command is needed.
+3. Follow the action for each plugin below, then run the cases normally. Existing
+   cases retain their plugin selections; there is no need to select them again.
+
+| Plugin status | What to do |
+| --- | --- |
+| Enabled data-only plugin | Nothing. It is ready to use. |
+| Enabled Python plugin showing **Needs local approval** | Select it, click **Allow code…**, and approve only if you trust its source. Wait for **Checks passed.** |
+| Disabled plugin | Select it and click **Enable** if you want to use it. Python plugins also request approval when their code has not already been approved locally. Wait for the check to finish. |
+
+**Adding or sharing a plugin separately**
+
+Choose **Plugins → Register plugin…** and select a `.msplugin` archive or the
+plugin folder's `manifest.yaml`. New data-only plugins are enabled after validation;
+new Python plugins start disabled. Select **Enable** and follow the approval/check
+flow above. In the case's **Chemistry** tab, select the plugin's species or reaction
+families as needed. Enabling a plugin makes its definitions available; it does not
+automatically change existing cases.
+
+To share one plugin, select it in **Plugins** and choose **Export…**. To share
+cases and their plugins together, use **Project → Export project…**. Project
+archives include registered plugins, including disabled ones, but exclude results
+and local code approvals.
+
+**Plugin safety**
+
+Importing a project archive and browsing plugin details do not execute its Python
+code. **Allow code…**, **Enable** and **Check** can execute plugin code after
+approval, even before a simulation starts. Only approve code from a source you
+trust. It runs with your user permissions and can access files and other resources
+available to the application. The separate check and simulation processes are
+**not a security sandbox**. A successful check verifies compatibility; it is not
+a security audit or proof that the scientific model is correct.
+
+Approval is stored locally for the plugin's code and resources. It does not
+travel with an archive or another user's project. Unchanged code already approved
+locally does not need approval again. Editing parameter values does not require
+new approval; changing Python code or included resources does. If you decline
+approval, you can still inspect the project, but cases needing that code cannot
+run. Failed checks show details in the Plugins window; use **Cancel check** to
+stop a check, or ask the plugin author to resolve the reported errors.
+
+See [the plugin guide](PLUGINS.md) for creating species and parameter variants,
+Python authoring examples, the package format and the engine API.

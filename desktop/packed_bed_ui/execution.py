@@ -40,6 +40,7 @@ class RunController(QObject):
         self.process.setStandardOutputFile(str(path.parent / "execution.log"))
         environment = QProcessEnvironment.systemEnvironment()
         environment.insert("PYTHONUNBUFFERED", "1")
+        environment.insert("PACKED_BED_COMPILED_CACHE", str(path.parent / ".packed_bed_cache"))
         self.process.setProcessEnvironment(environment)
         args = ["--project-worker", str(path)]
         if not getattr(sys, "frozen", False):

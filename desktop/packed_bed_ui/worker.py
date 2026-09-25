@@ -34,7 +34,7 @@ def verify_snapshot(folder: Path):
         raise ValueError("Snapshot outputs must stay within the run folder.")
     if case.definitions.selection.to_dict() != metadata.get('definitions'):
         raise ValueError('Snapshot definitions no longer match the saved selection.')
-    require_desktop_solver(case)
+    require_desktop_solver(case, native=True)
     return case
 
 
@@ -61,19 +61,38 @@ def activate_snapshot(pending: Path) -> Path:
 @contextmanager
 def diagnostic_log(path: Path):
     """Capture both Python and native solver output in this case's latest log."""
+    missing_streams = []
     for stream in (sys.stdout, sys.stderr):
         if stream is not None:
             stream.flush()
-    saved = [os.dup(fd) for fd in (1, 2)]
+    saved = []
+    for fd in (1, 2):
+        try:
+            saved.append(os.dup(fd))
+        except OSError:
+            # Windows GUI executables may start without standard descriptors.
+            null = os.open(os.devnull, os.O_WRONLY)
+            if null != fd:
+                os.dup2(null, fd)
+                os.close(null)
+            saved.append(os.dup(fd))
     try:
         with path.open("wb") as log:
             os.dup2(log.fileno(), 1)
             os.dup2(log.fileno(), 2)
+            for name, fd in (("stdout", 1), ("stderr", 2)):
+                if getattr(sys, name) is None:
+                    stream = os.fdopen(os.dup(fd), "w", encoding="utf-8", errors="replace")
+                    setattr(sys, name, stream)
+                    missing_streams.append(name)
             yield
     finally:
         for stream in (sys.stdout, sys.stderr):
             if stream is not None:
                 stream.flush()
+        for name in missing_streams:
+            getattr(sys, name).close()
+            setattr(sys, name, None)
         for fd, original in zip((1, 2), saved):
             os.dup2(original, fd)
             os.close(original)
@@ -88,10 +107,16 @@ def run_snapshot(folder: str | Path, on_status=None) -> int:
     except OSError:
         traceback.print_exc()
         return 1
-    started = perf_counter()
+    from packed_bed.processes import worker_started_at
+    started = worker_started_at if worker_started_at is not None else perf_counter()
+    details_so_far = {}
+    os.environ["PACKED_BED_COMPILED_CACHE"] = str(folder.parents[2] / ".packed_bed_cache")
+    snapshot = read_json(folder / "snapshot.json")
+    cancel_file = folder.parents[2] / (".cancel-" + snapshot["attempt_id"])
 
     def status(state, **details):
-        value = {"state": state, "elapsed_s": perf_counter() - started, "started_at": started, **details}
+        details_so_far.update(details)
+        value = {**details_so_far, "state": state, "elapsed_s": perf_counter() - started, "started_at": started}
         write_json(folder / "status.json", value)
         if on_status is not None:
             on_status(value)
@@ -102,9 +127,21 @@ def run_snapshot(folder: str | Path, on_status=None) -> int:
             case = verify_snapshot(folder)
             from packed_bed.simulation import run_case
 
-            result = run_case(case, on_status=status)
-            status("completed", plot_errors=result.plot_errors)
+            def progress(details):
+                details = dict(details)
+                status(details.pop("state"), **details)
+
+            result = run_case(case, on_status=status, on_progress=progress,
+                              cancel_requested=cancel_file.exists)
+            elapsed = perf_counter() - started
+            status("completed", plot_errors=result.plot_errors, end_to_end_s=elapsed,
+                   solver_stats=result.solver_stats,
+                   message=(result.solver_stats.get("cache_reason", "") +
+                            f" · {case.run.solver.backend} / {case.run.solver.name} · {elapsed:.2f} s"))
             return 0
+        except InterruptedError as exc:
+            status("cancelled", message=str(exc))
+            return 1
         except Exception as exc:
             traceback.print_exc()
             status("failed", message=str(exc))
@@ -138,6 +175,7 @@ def run_project_job(path: str | Path, *, case_worker=run_prepared_case) -> int:
 
 
 def _execute_project_job(path, case_worker):
+    os.environ["PACKED_BED_COMPILED_CACHE"] = str(path.parent / ".packed_bed_cache")
     job = read_json(path)
     attempt_id = job["attempt_id"]
     if not re.fullmatch(r"[a-f0-9]{32}", attempt_id) or job.get("state") != "queued":
@@ -184,7 +222,7 @@ def _execute_project_job(path, case_worker):
                 value.update(state={"success": "completed", "simulation_failed": "failed",
                                     "cancelled": "cancelled"}[record.status],
                              elapsed_s=value.get("elapsed_s", record.runtime_s) if record.status == "success" else (record.runtime_s or 0.0),
-                             message=record.error)
+                             **({"message": record.error} if record.error else {}))
                 if current:
                     write_json(folder / "status.json", value)
         job["elapsed_s"] = perf_counter() - started

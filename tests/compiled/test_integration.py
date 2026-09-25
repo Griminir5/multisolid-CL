@@ -60,12 +60,19 @@ def _small_reactive_case(tmp_path, backend, gas_voidage_mode="bed_and_particle")
     )
 
 
-@pytest.mark.parametrize("linear_solver, gas_voidage_mode", (("superlu", "bed_and_particle"), ("band", "bed_only")))
+@pytest.mark.parametrize("linear_solver, gas_voidage_mode", (("superlu", "bed_and_particle"), ("klu", "bed_and_particle"), ("band", "bed_only")))
 def test_reactive_run_reports_cache_and_tight_reference(
     native_tools, tmp_path, monkeypatch, linear_solver, gas_voidage_mode
 ):
     from packed_bed.reports import load_dataset
     from packed_bed.simulation import run_case
+
+    if linear_solver == "klu":
+        from packed_bed.compiled.runtime import check_runtime, load_runtime_library
+        try:
+            load_runtime_library(check_runtime(), "sunlinsolklu")
+        except RuntimeError as exc:
+            pytest.skip(str(exc))
 
     monkeypatch.setenv("PACKED_BED_COMPILED_CACHE", str(tmp_path / "cache"))
     reference = run_case(_small_reactive_case(tmp_path, "daetools", gas_voidage_mode))
@@ -88,6 +95,15 @@ def test_reactive_run_reports_cache_and_tight_reference(
     second = run_case(case, retain_reporter=True)
     assert not first.solver_stats["cache_hit"]
     assert second.solver_stats["cache_hit"]
+    if linear_solver == "klu":
+        index = next((tmp_path / "cache").glob("model-*.json"))
+        record = json.loads(index.read_text())
+        # A permutation still passes range/uniqueness checks but would feed the
+        # kernel the wrong state vector if metadata integrity were unchecked.
+        record["keep"][0], record["keep"][1] = record["keep"][1], record["keep"][0]
+        index.write_text(json.dumps(record))
+        repaired = run_case(case)
+        assert repaired.solver_stats["cache_reason"] == "Cached files missing or damaged"
     assert (
         first.solver_stats["fixed_states_removed"] == 7
     )  # He, inert solid, heat loss.
@@ -189,8 +205,8 @@ def test_scalar_reactor_fallback_matches_detected_cpu(native_tools, tmp_path, mo
     }))
     detected = run_case(case)
     expected = load_dataset(detected.results_path)
-    monkeypatch.setattr(compiled, "supports_avx2", lambda: False)
-    monkeypatch.setattr(band, "supports_avx2", lambda: False)
+    monkeypatch.setattr(compiled, "supports_avx2", lambda *args: False)
+    monkeypatch.setattr(band, "supports_avx2", lambda *args: False)
     scalar = run_case(case)
     actual = load_dataset(scalar.results_path)
     assert scalar.solver_stats["residual_lanes"] == 1
@@ -237,8 +253,8 @@ def test_trace_chemistry_and_heterogeneous_solids_match_reference(
     if scalar:
         # Exercise a complete reactor without AVX2, including the CPU fallback
         # for the optional SLEEF exponential implementation.
-        monkeypatch.setattr(compiled, "supports_avx2", lambda: False)
-        monkeypatch.setattr(band, "supports_avx2", lambda: False)
+        monkeypatch.setattr(compiled, "supports_avx2", lambda *args: False)
+        monkeypatch.setattr(band, "supports_avx2", lambda *args: False)
     documents, _ = cases()[case_name]
     reports = {}
     for profile in ("reference", "compiled"):

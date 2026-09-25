@@ -82,8 +82,14 @@ class MainWindow(QMainWindow):
             ("Reusable definitions…", self._definitions, None),
         ):
             action = menu.addAction(label, callback)
+            action.setProperty("requires_project", callback not in (self._new_project, self._open))
             if shortcut is not None:
                 action.setShortcut(shortcut)
+            self.project_actions.append(action)
+        for label, callback, required in (("Export project…", self._export_archive, True),
+                                          ("Import project archive…", self._import_archive, False)):
+            action = menu.addAction(label, callback)
+            action.setProperty("requires_project", required)
             self.project_actions.append(action)
         self.recent_menu = menu.addMenu("Recent projects")
         self.plugins_action = self.menuBar().addAction('Plugins', self._plugins)
@@ -304,6 +310,52 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Open existing project", filter="MultiSolid project (project.json)")
         if path:
             self.open_project(path)
+
+    def _archive_transfer(self, writer, title, **arguments):
+        from .report import ExportDialog
+        dialog = ExportDialog(arguments, self, writer, title=title, message=f"{title}…")
+        dialog.exec()
+        dialog.worker.wait()
+        dialog.deleteLater()
+        if dialog.worker.error:
+            raise ValueError(dialog.worker.error)
+        return None if dialog.worker.cancelled else dialog.worker.value
+
+    def _export_archive(self):
+        if self.project is None or self.runner.active or not self._save_editors():
+            return
+        from .project_archive import export_project
+        chooser = QFileDialog(self, "Export project inputs — results excluded",
+            str(self.project.root.with_name(self.project.root.name + ".msproject")), "MultiSolid project archive (*.msproject)")
+        chooser.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        chooser.setDefaultSuffix("msproject")
+        if chooser.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            result = self._archive_transfer(export_project, "Export project", project=self.project,
+                                           destination=chooser.selectedFiles()[0])
+            self.statusBar().showMessage(f"Exported {result}" if result else "Export cancelled.")
+        except (OSError, ValueError) as exc:
+            self._error(exc)
+
+    def _import_archive(self):
+        if self.runner.active or not self._save_editors():
+            return
+        from .project_archive import archive_name, import_project
+        path, _ = QFileDialog.getOpenFileName(self, "Import project archive", "",
+                                             "MultiSolid project archive (*.msproject *.zip)")
+        if not path:
+            return
+        try:
+            name = archive_name(path)
+            def create(destination, name):
+                return self._archive_transfer(import_project, "Import project", source=path,
+                                              destination=destination, name=name)
+            dialog = NewProjectDialog(self.locations, self, creator=create, name=name)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.open_project(dialog.path)
+        except (OSError, ValueError) as exc:
+            self._error(exc)
 
     def open_project(self, path):
         if self.runner.active:
@@ -534,8 +586,8 @@ class MainWindow(QMainWindow):
     def _update_project_actions(self):
         self.plugins_action.setEnabled(self.project is not None and not self.runner.active)
         self.cancel_button.setVisible(self.project is not None)
-        for index, action in enumerate(self.project_actions):
-            action.setEnabled(not self.runner.active and (index < 2 or self.project is not None))
+        for action in self.project_actions:
+            action.setEnabled(not self.runner.active and (not action.property("requires_project") or self.project is not None))
         self.recent_menu.setEnabled(not self.runner.active)
 
     def _save_project(self):

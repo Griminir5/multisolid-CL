@@ -11,6 +11,7 @@ import logging
 import math
 import multiprocessing as mp
 import os
+import signal
 from pathlib import Path
 from queue import Empty
 import re
@@ -564,20 +565,29 @@ class _ActiveCaseWorker:
     payload: tuple | str | None = None
 
 
+from .processes import worker_entry, kill_group
+
+
 def _terminate_process(process) -> None:
     if process.pid is None:
         return
     if not process.is_alive():
         process.join()
+        kill_group(process.pid, signal.SIGKILL) if os.name != "nt" else None
         return
+    kill_group(process.pid)
     process.terminate()
     process.join(_PROCESS_TERMINATE_GRACE_S)
+    if os.name != "nt":
+        kill_group(process.pid, signal.SIGKILL)
     if process.is_alive():
         process.kill()
         process.join()
 
 
 def _close_worker(worker: _ActiveCaseWorker) -> None:
+    if os.name != "nt" and worker.process.pid is not None:
+        kill_group(worker.process.pid, signal.SIGKILL)
     worker.result_queue.close()
     worker.process.close()
 
@@ -643,13 +653,13 @@ def run_cases_in_processes(
                 started_at = perf_counter()
                 result_queue = context.Queue(maxsize=1)
                 process = context.Process(
-                    target=case_worker or _run_case_worker,
-                    args=(
+                    target=worker_entry,
+                    args=(case_worker or _run_case_worker, (
                         case.run_path,
                         generate_artifacts_fn,
                         run_case_fn,
                         result_queue,
-                    ),
+                    ), started_at),
                 )
                 worker = _ActiveCaseWorker(process, result_queue, record, started_at)
                 active.append(worker)

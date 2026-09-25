@@ -14,10 +14,19 @@ Source: M. A. San Pio et al., *Chemical Engineering Science* 175 (2018),
 56–71, [doi:10.1016/j.ces.2017.09.044](https://doi.org/10.1016/j.ces.2017.09.044).
 
 - `copper_sio2_san_pio` (`copper_sio2.py`) contains the two
-  pseudo-homogeneous CuO → Cu2O → Cu hydrogen-reduction steps. SiO2 is treated
-  as an inert support, so the family requires no aluminium or spinel species.
+  pseudo-homogeneous CuO → Cu2O → Cu hydrogen-reduction steps and the
+  Cu + ½O2 → CuO oxidation step. SiO2 is treated as an inert support, so the
+  family requires no aluminium or spinel species.
 - `copper_al2o3_san_pio` (`copper_al2o3.py`) contains those support-independent
-  reductions plus the Al2O3-specific spinel reduction and oxidation steps.
+  reductions, Cu → CuO oxidation, and the Al2O3-specific spinel reduction
+  and oxidation steps.
+
+Both families use the Cu oxidation rate law `r = k(T) c_Cu sqrt(p_O2)` with
+oxygen partial pressure in bar, but the paper fits different Arrhenius
+parameters: Table 5 gives `A = 0.193 s^-1 bar^-1/2` and `Ea = 180 J/mol` for
+SiO2, while Table 9 gives `A = 0.854 s^-1 bar^-1/2` and `Ea = 830 J/mol` for
+Al2O3. The SiO2 oxidation hook copies the Al2O3 rate expression and smooth
+positive-pressure regularization, using the SiO2-specific parameter defaults.
 
 The source states that CuO-to-Cu reduction is independent of the support and
 extends that base model with CuAl2O4/CuAlO2 chemistry for the Al2O3 carrier.

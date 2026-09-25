@@ -201,6 +201,7 @@ class SolverConfig(ConfigModel):
     backend: Literal["daetools", "compiled"] = "daetools"
     name: Literal[
         "trilinos_klu",
+        "klu",
         "trilinos_umfpack",
         "trilinos_lapack",
         "trilinos_aztecoo",
@@ -277,9 +278,9 @@ class RunConfig(ConfigModel):
                 "step_growth_threshold currently requires solver.backend: compiled."
             )
         if self.solver.backend == "compiled":
-            if self.solver.name not in {"superlu", "superlu_mt", "band"}:
+            if self.solver.name not in {"superlu", "superlu_mt", "klu", "trilinos_klu", "band"}:
                 raise ValueError(
-                    "The compiled backend requires solver.name: superlu, superlu_mt or band."
+                    "The compiled backend requires solver.name: superlu, superlu_mt, klu or band."
                 )
             if self.simulation.report_time_derivatives:
                 raise ValueError(

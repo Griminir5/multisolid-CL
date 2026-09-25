@@ -240,7 +240,7 @@ def test_compiled_backend_rejects_unsupported_configuration(tmp_path, invalid):
     run = documents["run.yaml"]
     run["solver"].update(backend="compiled", name="superlu")
     if invalid == "solver":
-        run["solver"]["name"] = "trilinos_klu"
+        run["solver"]["name"] = "trilinos_umfpack"
     elif invalid == "derivatives":
         run["simulation"]["report_time_derivatives"] = True
     elif invalid == "incidence":

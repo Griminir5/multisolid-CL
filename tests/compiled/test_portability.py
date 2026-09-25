@@ -9,6 +9,14 @@ import pytest
 from packed_bed.compiled import compiler, runtime
 
 
+@pytest.fixture(autouse=True)
+def source_toolchain_discovery(monkeypatch):
+    # This module exercises legacy host/wheel discovery, even when a managed
+    # development bundle is staged beside the repository.
+    monkeypatch.setattr(compiler, "bundle_root", lambda: None)
+    monkeypatch.setattr(runtime, "bundle_root", lambda: None)
+
+
 @pytest.fixture
 def cpp_toolchain():
     try:
@@ -41,7 +49,7 @@ def test_native_exports_cache_invalidation_and_failure(cpp_toolchain, tmp_path, 
     assert other_platform not in {path, updated}
     with pytest.raises(RuntimeError, match="compilation failed"):
         compiler.compile_kernel("this is not C++", cache)
-    assert not list(cache.glob("compile-*"))
+    assert not list(cache.glob("*-tmp-*"))
 
 
 @pytest.mark.parametrize("system,suffix,link", (
@@ -68,9 +76,10 @@ def test_platform_build_commands(monkeypatch, tmp_path, system, suffix, link):
             assert "-ffp-contract=off" in command
             assert not any(arg.startswith("/arch") for arg in command)
         (cwd / ("kernel" + suffix)).write_bytes(b"native library placeholder")
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+        return ""
 
-    monkeypatch.setattr(compiler.subprocess, "run", run)
+    from packed_bed import processes
+    monkeypatch.setattr(processes, "run_compiler", run)
     library, metadata = compiler.compile_kernel(
         "PB_EXPORT void entry() {}", tmp_path,
         extra_flags=compiler.simd_flags(avx2=True, fma=True),
@@ -103,6 +112,7 @@ def test_wheel_library_discovery(monkeypatch, tmp_path, system, filename):
     expected.touch()
     # Other components must not be mistaken for this module.
     (tmp_path / filename.replace("core", "ida")).touch()
+    monkeypatch.setattr(runtime, "_dll_directory", lambda folder: None)
     monkeypatch.setattr(runtime.C, "CDLL", lambda path: path)
     assert runtime.load_runtime_library(tmp_path, "core") == str(expected)
     with pytest.raises(RuntimeError, match="found 0"):
@@ -147,4 +157,4 @@ def test_non_x86_uses_scalar_without_compiling_a_probe(monkeypatch):
 
     monkeypatch.setattr(band.platform, "machine", lambda: "arm64")
     monkeypatch.setattr(band, "compile_kernel", lambda *a: pytest.fail("Unexpected CPU probe"))
-    assert not band.supports_avx2.__wrapped__()
+    assert not band.supports_avx2()

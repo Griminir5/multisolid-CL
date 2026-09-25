@@ -10,6 +10,7 @@ build/
 **/.packed_bed_cache/
 dist/
 desktop/vendor/graphviz/
+desktop/vendor/compiled/
 
 Barin_Extraction/Thermochemical Data of Pure Substances - 1995 - Barin.pdf
 

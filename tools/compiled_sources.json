@@ -1,0 +1,32 @@
+{
+  "sundials": {
+    "version": "7.5.0",
+    "url": "https://github.com/LLNL/sundials/releases/download/v7.5.0/sundials-7.5.0.tar.gz",
+    "sha256": "089ac659507def738b7a65b574ffe3a900d38569e3323d9709ebed3e445adecc"
+  },
+  "suitesparse": {
+    "version": "7.7.0",
+    "url": "https://codeload.github.com/DrTimothyAldenDavis/SuiteSparse/tar.gz/refs/tags/v7.7.0",
+    "sha256": "529b067f5d80981f45ddf6766627b8fc5af619822f068f342aab776e683df4f3"
+  },
+  "superlu_mt": {
+    "version": "4.0.1",
+    "url": "https://codeload.github.com/xiaoyeli/superlu_mt/tar.gz/refs/tags/v4.0.1",
+    "sha256": "b6de5c8ebf8fa6c7c0d607f0607f522454315632ae55b70babf908b94e9602cb"
+  },
+  "openblas": {
+    "version": "0.3.30",
+    "url": "https://codeload.github.com/OpenMathLib/OpenBLAS/tar.gz/refs/tags/v0.3.30",
+    "sha256": "27342cff518646afb4c2b976d809102e368957974c250a25ccc965e53063c95d"
+  },
+  "zig_linux": {
+    "version": "0.16.0",
+    "url": "https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz",
+    "sha256": "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00"
+  },
+  "zig_windows": {
+    "version": "0.16.0",
+    "url": "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip",
+    "sha256": "68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e"
+  }
+}

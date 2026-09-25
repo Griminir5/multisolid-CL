@@ -95,9 +95,22 @@ The Bed and Program previews use the engine's actual smoothed programs, feed mix
 repetition, GHSV conversion, and sampled solid profiles. Plot toolbars support
 zoom, pan, and image saving. Advanced scientific settings survive import/save;
 an unsupported solver blocks execution rather than being silently replaced.
-The backend dropdown disables Compiled, and the solver dropdown identifies
-choices unavailable in the current desktop runtime. Advanced solver settings
-open in a separate dialog.
+Choose **Standard** or **Compiled** in General. Standard offers SuperLU,
+SuperLU_MT, KLU, UMFPACK, LAPACK, AztecOO with ILUT/Ifpack/ML, and SUNDIALS
+GMRES with Ifpack. These reuse the bundled DAE Tools adapters; Pardiso remains
+unavailable in the desktop. Compiled offers SuperLU, SuperLU_MT, KLU, and Band
+when the managed runtime is installed. The dropdown explains unavailable choices. Switching to an incompatible
+backend or solver asks once before updating the affected settings; Cancel keeps
+the original inputs. Advanced solver settings open in a separate dialog.
+
+Compiled runs build automatically and reuse `project/.packed_bed_cache/`, shared
+by the project's cases and studies. The first build can take several minutes;
+later compatible runs reuse it. Progress includes cache checking, waiting,
+generation, and compilation. Cancel stops workers and compiler children. The cache
+survives reruns, is excluded from project archives, and can be deleted while idle.
+A writable project is required. KLU factorization is serial on both backends.
+The packaged application supplies its compiler and libraries; source developers
+can stage the same bundle using the [compiled runtime guide](COMPILED.md).
 
 For a non-repeating program, the horizon is calculated from the longest channel
 and is disabled in General. Every non-empty channel must have the same duration;
@@ -114,6 +127,27 @@ Reaction families expose an **+ Species** action for their declared requirements
 A new zone splits the final zone's extent and starts with blank material values.
 The first zone starts at zero and the final zone ends at the bed length. Changing
 a multi-zone bed's length offers fixed or proportionally scaled internal boundaries.
+
+## Share project inputs
+
+Choose **Project → Export project…** to save a `.msproject` archive. This includes
+every case (including unfinished drafts), reusable definitions, parameter studies,
+Report/Results layouts and registered plugins. Results, run snapshots, logs and
+local settings are excluded. Save the archive outside the project folder; a
+cancelled or failed export leaves an existing archive unchanged.
+
+Choose **Project → Import project archive…**, available even before opening a
+project. Select the archive, then choose a project name and parent location using
+the normal creation form. The destination must be a new folder. A successful
+import opens the project and adds it to Recent projects. Imported cases start at
+**Not run**; their saved report layouts can be used again after running the cases.
+Established study baselines and studies awaiting rebuild retain their state.
+
+Archives carry the current plugin catalogue, including unused/disabled plugins.
+Importing and browsing never execute supplied Python code or grant local approval.
+Use **Plugins → Allow code… / Enable** when needed. Missing/incompatible packages,
+damaged archives and unsafe file paths block import with an explanation. Transfers
+run in a cancellable dialog while the project is idle.
 
 ## Excel reports
 
@@ -321,8 +355,8 @@ swap. Attempt identities distinguish worker events; they are not run history.
 Input/metadata files use atomic replacement. Study and definition writes use a staged directory transaction. Rebuilding commits
 project metadata only after staging the complete replacement case set. Before that
 commit, recovery restores old cases; after it, recovery deletes temporary backups.
-Recovery runs before loading case inputs. General case-draft recovery and project
-archives remain pending.
+Recovery runs before loading case inputs. Project archives transfer saved
+definitions and exclude recovery checkpoints and run data.
 
 The application reads the current project format (3) and run-snapshot format (1).
 Older project formats are rejected rather than migrated. Project and solver locks
@@ -384,4 +418,23 @@ Qt checks run offscreen; real solver checks skip when DAETools is absent.
 
 ## Project plugins
 
-Use **Plugins** beside **Project** in the menu bar to register, enable, inspect, create, edit or export scientific plugins. Species and reaction pickers display their sources; reaction-family bindings select among multiple definitions of the same chemical species. See [the plugin guide](../PLUGINS.md) for authoring and revision behavior.
+Open **Plugins** beside **Project** in the menu bar. To add a standalone plugin,
+choose **Register plugin…** and select its `.msplugin` file or `manifest.yaml`.
+Select **Enable** for a disabled plugin, then choose its definitions in the case's
+**Chemistry** tab. Species and reaction pickers display their sources.
+
+Plugins included in an imported `.msproject` archive are already installed in
+that project. Enabled data-only plugins work immediately. For a Python plugin
+marked **Needs local approval**, select it, click **Allow code…**, and approve
+only if you trust the source. Wait for **Checks passed.**, then run the cases;
+their existing plugin selections are preserved. Disabled plugins remain disabled
+until you select **Enable**. No separate plugin download or pip install is needed.
+
+Importing and browsing do not execute supplied code. Approval allows Python code
+to run during checks and simulations with your user permissions; the worker
+processes are **not a security sandbox**. Checks do not establish that a plugin is
+safe or scientifically correct. Approval stays on your computer. Changes to code
+or resources require approval again; parameter-only edits do not.
+
+See [plugin setup, sharing and safety](../README.md#scientific-plugins) for the
+full workflow and [the plugin guide](../PLUGINS.md) for authoring examples.

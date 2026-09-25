@@ -1,4 +1,4 @@
-"""San Pio pseudo-homogeneous reduction mechanism for CuO on inert SiO2."""
+"""San Pio pseudo-homogeneous redox mechanism for CuO on inert SiO2."""
 
 from __future__ import annotations
 
@@ -18,6 +18,13 @@ REDUCTION_COEFFICIENTS = {
 REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL = {
     "cuo": 0.15e3,
     "cu2o": 1.79e3,
+}
+# Table 5 uses the same Cu oxidation rate law as Al2O3, with a separate SiO2 fit.
+OXIDATION_COEFFICIENTS = {
+    "cu_to_cuo": 1.93e-1,
+}
+OXIDATION_ACTIVATION_ENERGIES_J_PER_MOL = {
+    "cu_to_cuo": 0.18e3,
 }
 
 
@@ -45,6 +52,12 @@ def _positive_pressure(partial_pressure_bar):
             partial_pressure_bar**2
             + Constant((2.0 * MIN_PARTIAL_PRESSURE_BAR) ** 2)
         )
+    )
+
+
+def _arrhenius(coefficient: float, activation_energy: float, temperature_k):
+    return Constant(coefficient) * Exp(
+        -Constant(activation_energy / GAS_CONSTANT_J_PER_MOL_K) / temperature_k
     )
 
 
@@ -77,9 +90,23 @@ def reduce_cu2o(context: KineticsContext):
     return _reduction_rate(context, "Cu2O", "cu2o")
 
 
+def oxidize_cu(context: KineticsContext):
+    oxygen_pressure = _positive_pressure(_partial_pressure_bar(context, "O2"))
+    rate = (
+        _arrhenius(
+            context.parameters["OXIDATION_COEFFICIENTS"]["cu_to_cuo"],
+            context.parameters["OXIDATION_ACTIVATION_ENERGIES_J_PER_MOL"]["cu_to_cuo"],
+            _temperature_k(context),
+        )
+        * _solid_concentration(context, "Cu")
+        * Sqrt(oxygen_pressure)
+    )
+    return Constant(1.0 * mol / (m**3 * s)) * rate
+
+
 FAMILY = ReactionFamily(
     name="copper_sio2_san_pio",
-    required_gas_species=("H2", "H2O"),
+    required_gas_species=("H2", "H2O", "O2"),
     required_solid_species=("Cu", "Cu2O", "CuO"),
     reactions=(
         ReactionDefinition(
@@ -100,10 +127,20 @@ FAMILY = ReactionFamily(
             source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
             notes="Pseudo-homogeneous support-inert cuprite reduction from Table 4.",
         ),
+        ReactionDefinition(
+            id="cu_sio2_oxidation_1_san_pio",
+            name="Cu oxidation to CuO on CuO/SiO2",
+            phase="gas_solid",
+            stoichiometry={"O2": -0.5, "Cu": -1.0, "CuO": 1.0},
+            required_species=("O2", "Cu", "CuO"),
+            source_reference="San Pio et al., Chemical Engineering Science 175 (2018) 56-71",
+            notes="Pseudo-homogeneous Cu oxidation from Eq. (28), with SiO2 parameters from Table 5.",
+        ),
     ),
     kinetics_hooks={
         "cuo_h2_reduction_sio2_san_pio": reduce_cuo,
         "cu2o_h2_reduction_sio2_san_pio": reduce_cu2o,
+        "cu_sio2_oxidation_1_san_pio": oxidize_cu,
     },
 )
 
@@ -117,4 +154,6 @@ from ..parameters import parameter_group
 PARAMETERS = {
     **parameter_group("REDUCTION_COEFFICIENTS", REDUCTION_COEFFICIENTS, "1/s", "Reduction coefficients", minimum=0),
     **parameter_group("REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL", REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL, "J/mol", "Reduction activation energies j per mol", minimum=0),
+    **parameter_group("OXIDATION_COEFFICIENTS.cu_to_cuo", OXIDATION_COEFFICIENTS['cu_to_cuo'], "1/s", "Cu oxidation; pressure factor is sqrt(p/(100000 Pa))", minimum=0),
+    **parameter_group("OXIDATION_ACTIVATION_ENERGIES_J_PER_MOL", OXIDATION_ACTIVATION_ENERGIES_J_PER_MOL, "J/mol", "Oxidation activation energies j per mol", minimum=0),
 }

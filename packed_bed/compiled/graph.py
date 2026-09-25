@@ -323,7 +323,16 @@ def export_model(simulation):
         (x for eq in simulation.model.Equations for x in eq.EquationExecutionInfos),
         key=lambda x: x.EquationIndex,
     )
-    roots = [g.from_dae(x.Node, mapping) for x in infos]
+    roots = []
+    for info in infos:
+        from .cache import check_cancelled
+        check_cancelled()
+        try:
+            roots.append(g.from_dae(info.Node, mapping))
+        except (KeyError, NotImplementedError) as exc:
+            raise ValueError(f"Compiled execution does not support expression {exc} in equation "
+                             f"{info.Equation.Name}. Check the selected property/kinetics definitions "
+                             "or explicitly select Standard execution.") from exc
     variables = {
         mapping[v.OverallIndex + i]: v.Name
         for v in simulation.model.Variables

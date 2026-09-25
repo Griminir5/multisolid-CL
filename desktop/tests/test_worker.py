@@ -1,4 +1,6 @@
 from importlib.util import find_spec
+from functools import partial
+from multiprocessing import get_context
 import os
 from pathlib import Path
 import subprocess
@@ -28,12 +30,15 @@ def test_tampered_snapshot_fails_without_retry_in_place(tmp_path, source_case):
     assert not (folder / "output").exists()
 
 
-def fake_prepared_case(run_path, generate_artifacts_fn, run_case_fn, result_queue):
+def fake_prepared_case(run_path, generate_artifacts_fn, run_case_fn, result_queue, *, barrier):
     from time import perf_counter, sleep
     folder = activate_snapshot(Path(run_path).parent.parent)
     snapshot = read_json(folder / "snapshot.json")
     started = perf_counter()
     write_json(folder / "status.json", {"state": "running", "started_at": started, "elapsed_s": 0.0})
+    # Establish overlap deliberately; process startup can exceed the synthetic
+    # work duration on a busy build host without violating the worker limit.
+    barrier.wait(timeout=30)
     sleep(0.4)
     failed = snapshot["case_name"] == "First"
     write_json(folder / "status.json", {"state": "failed" if failed else "completed", "elapsed_s": 0.4})
@@ -61,7 +66,8 @@ def test_run_all_continues_after_failure_and_obeys_worker_and_thread_limits(tmp_
     for index, case in enumerate(project.cases):
         case.documents["run"]["solver"]["threads"] = 1 + index % 2
     path = project.prepare_execution(project.cases, max_workers=workers)
-    assert run_project_job(path, case_worker=fake_prepared_case) == 1
+    worker = partial(fake_prepared_case, barrier=get_context("spawn").Barrier(workers))
+    assert run_project_job(path, case_worker=worker) == 1
     assert [case.state()["state"] for case in project.cases] == ["failed", "completed", "completed", "completed"]
     assert read_json(path)["state"] == "failed"
     timing = [read_json(case.run_folder / "timing.json") for case in project.cases]

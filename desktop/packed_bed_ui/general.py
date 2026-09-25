@@ -2,13 +2,15 @@
 
 from PyQt6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox,
-    QHBoxLayout, QLineEdit, QSpinBox, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from packed_bed.axial_schemes import SUPPORTED_SCHEMES
 from packed_bed.config.models import SolverConfig
 from packed_bed.plotting import PLOT_REGISTRY
 from packed_bed.reports import REPORT_REGISTRY
+from packed_bed.solver_support import DESKTOP_SOLVERS, SOLVER_LABELS, require_desktop_solver
+from types import SimpleNamespace
 
 from .editor_widgets import SelectionList, action_button, display, number
 
@@ -38,25 +40,26 @@ class GeneralPage(QWidget):
 
         solver, form = form_panel("Solver")
         self.backend = editor.field(form, ("run", "solver", "backend"), "Backend", options=[
-            ("DAE Tools", "daetools"), ("Compiled — unavailable", "compiled"),
+            ("Standard", "daetools"), ("Compiled", "compiled"),
         ], default="daetools")
-        self.backend.model().item(1).setEnabled(False)
         self.solver = editor.field(form, ("run", "solver", "name"), "Linear solver", options=[
             ("SuperLU", "superlu"),
-            *[(key.replace("_", " ").title(), key) for key in SolverConfig.model_fields["name"].annotation.__args__
+            *[(SOLVER_LABELS.get(key, key.replace("_", " ").title()), key) for key in SolverConfig.model_fields["name"].annotation.__args__
               if key != "superlu"],
         ])
-        # Keep imported solver selections visible, without offering unsupported runtimes.
-        for index in range(1, self.solver.count()):
-            item = self.solver.model().item(index)
-            item.setEnabled(False)
-            item.setToolTip("This solver is not available in the desktop runtime.")
-        editor.field(form, ("run", "solver", "threads"), "Number of threads (0 = environment)",
+        for widget, key in ((self.backend, "backend"), (self.solver, "name")):
+            widget.currentIndexChanged.disconnect()
+            widget.currentIndexChanged.connect(lambda _, widget=widget, key=key: self.select_solver(key, widget.currentData()))
+        threads = editor.field(form, ("run", "solver", "threads"), "Number of threads (0 = environment)",
                      kind="spin", bounds=(0, 1024), default=0)
+        threads.setToolTip("KLU factorization is serial. This setting still controls other applicable numerical work.")
         editor.field(form, ("run", "solver", "relative_tolerance"), "Relative tolerance")
         editor.field(form, ("run", "solver", "suppress_algebraic_errors"), "Suppress algebraic errors",
                      kind="check", default=False)
         form.addRow(action_button("Advanced solver settings…", self.advanced))
+        self.cache_status = QLabel("Cache checked when the run starts")
+        self.cache_status.setWordWrap(True)
+        form.addRow(self.cache_status)
         layout.addWidget(solver, 1)
 
         output = QWidget()
@@ -78,8 +81,64 @@ class GeneralPage(QWidget):
         layout.addWidget(output, 1)
 
     def load(self):
+        self.update_solver_choices()
         self.reports.set_values(self.editor.get(("run", "outputs", "requested_reports"), []))
         self.plots.set_values(self.editor.get(("run", "outputs", "requested_plots"), []))
+
+    def update_solver_choices(self):
+        backend = self.editor.get(("run", "solver", "backend"), "daetools")
+        self.cache_status.setVisible(backend == "compiled")
+        for index in range(self.solver.count()):
+            name = self.solver.itemData(index)
+            enabled, reason = True, ""
+            try:
+                require_desktop_solver(SimpleNamespace(run=SimpleNamespace(solver=SimpleNamespace(backend=backend, name=name))))
+            except ValueError as exc:
+                enabled, reason = False, str(exc)
+            item = self.solver.model().item(index)
+            item.setEnabled(enabled)
+            item.setToolTip(reason)
+
+    def select_solver(self, key, value):
+        editor = self.editor
+        if editor.loading or editor.read_only or editor.case is None:
+            return
+        settings = dict(editor.get(("run", "solver"), {}))
+        settings[key] = value
+        backend = settings.get("backend", "daetools")
+        repairs = {}
+        if settings.get("name") not in DESKTOP_SOLVERS.get(backend, ()):
+            repairs[("run", "solver", "name")] = "superlu"
+        for option in ("scale_residuals", "step_growth_threshold", "nonlinear_refresh_interval", "vector_exponentials", "band_reciprocals"):
+            default = SolverConfig.model_fields[option].default
+            incompatible = backend != "compiled" or (option == "band_reciprocals" and settings.get("name") != "band")
+            if incompatible and settings.get(option, default) != default:
+                repairs[("run", "solver", option)] = default
+        if backend == "compiled":
+            for path in (("run", "simulation", "report_time_derivatives"), ("run", "outputs", "solver_incidence_matrix")):
+                if editor.get(path, False):
+                    repairs[path] = False
+        if repairs:
+            changes = "\n".join(f"{path[-1].replace('_', ' ')} → {new}" for path, new in repairs.items())
+            answer = QMessageBox.question(self, "Update solver settings", "This selection requires these changes:\n\n" + changes,
+                                          QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+                                          QMessageBox.StandardButton.Cancel)
+            if answer != QMessageBox.StandardButton.Ok:
+                widget = self.backend if key == "backend" else self.solver
+                widget.blockSignals(True)
+                widget.setCurrentIndex(widget.findData(editor.get(("run", "solver", key))))
+                widget.blockSignals(False)
+                return
+        # Commit the accepted changes before scheduling a single autosave.
+        from .inputs import set_value
+        for path, new in {("run", "solver", key): value, **repairs}.items():
+            set_value(editor.case.documents, path, new)
+        for widget, name in ((self.backend, "backend"), (self.solver, "name")):
+            widget.blockSignals(True)
+            widget.setCurrentIndex(widget.findData(editor.get(("run", "solver", name))))
+            widget.blockSignals(False)
+        self.update_solver_choices()
+        editor.queue_edit()
 
     def advanced(self):
         dialog = QDialog(self)
@@ -111,7 +170,9 @@ class GeneralPage(QWidget):
                 control = QLineEdit(display(value))
             control.setAccessibleName(label)
             control.setObjectName(key)
-            control.setEnabled("(compiled)" not in label)
+            compiled = self.editor.get(("run", "solver", "backend"), "daetools") == "compiled"
+            control.setEnabled(("(compiled)" not in label or compiled) and
+                               (key != "band_reciprocals" or self.editor.get(("run", "solver", "name")) == "band"))
             form.addRow(label, control)
             controls[key] = (control, value)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)

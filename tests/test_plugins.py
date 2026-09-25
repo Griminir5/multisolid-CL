@@ -113,6 +113,44 @@ def test_parameter_instances_do_not_mutate_globals_and_selected_ni_mw_reaches_ra
         baseline.matches(changed, solids)
 
 
+@pytest.mark.parametrize('temperature,pressure,oxygen,copper', [
+    (873.15, 1e5, 0.21, 1000.0),
+    (1073.15, 2e5, 0.05, 3000.0),
+    (1273.15, 1e5, 0.0, 1000.0),
+    (873.15, 1e5, -1e-8, 1000.0),
+    (1073.15, 1e5, 0.21, 0.0),
+])
+def test_copper_oxidation_rate_law_matches_between_supports(temperature, pressure, oxygen, copper):
+    from daetools.pyDAE import Constant
+    from pyUnits import K, Pa, mol, m, s
+    from packed_bed.kinetics import copper_al2o3, copper_sio2
+    from packed_bed.reactions import KineticsContext
+
+    class Model:
+        def T(self, _): return Constant(temperature * K)
+        def P(self, _): return Constant(pressure * Pa)
+        def y_gas(self, index, _): return Constant([oxygen][index])
+        def c_sol(self, index, _): return Constant([copper][index] * mol / m**3)
+
+    context = KineticsContext(Model(), 0, {'O2': 0}, {'Cu': 0})
+    reference = copper_al2o3.oxidize_cu(replace(
+        context, parameters=resolve_parameters(copper_al2o3.PARAMETERS)
+    )).Node.Quantity.scaleTo(mol / (m**3 * s)).value
+    # Compare the rate laws with identical parameters despite support-specific defaults.
+    overrides = {
+        key: spec.default for key, spec in copper_al2o3.PARAMETERS.items()
+        if key.endswith('.cu_to_cuo')
+    }
+    actual = copper_sio2.FAMILY.kinetics_hooks['cu_sio2_oxidation_1_san_pio'](replace(
+        context, parameters=resolve_parameters(copper_sio2.PARAMETERS, overrides)
+    )).Node.Quantity.scaleTo(mol / (m**3 * s)).value
+    assert math.isfinite(actual)
+    assert actual >= 0.0
+    assert actual == pytest.approx(reference, rel=1e-12, abs=0.0)
+    if copper == 0.0:
+        assert actual == 0.0
+
+
 def check_rates(family, parameters, properties):
     from packed_bed.reactions import KineticsContext
     from packed_bed.parameters import freeze

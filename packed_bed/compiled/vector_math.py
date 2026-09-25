@@ -8,28 +8,40 @@ from .compiler import compile_kernel
 CPU_SOURCE = """
 #if defined(_MSC_VER)
 #include <intrin.h>
-PB_EXPORT int has_fma3() {
-    int registers[4]; __cpuid(registers, 1);
-    return (registers[2] & (1 << 12)) != 0;
+static void cpuid(int leaf, int sub, unsigned* r) {
+    __cpuidex(reinterpret_cast<int*>(r), leaf, sub);
 }
-#else
+static unsigned long long xcr0() { return _xgetbv(0); }
+#elif defined(__x86_64__) || defined(__i386__)
+#include <cpuid.h>
+static void cpuid(int leaf, int sub, unsigned* r) {
+    __cpuid_count(leaf, sub, r[0], r[1], r[2], r[3]);
+}
+static unsigned long long xcr0() {
+    unsigned lo, hi;
+    __asm__ volatile ("xgetbv" : "=a"(lo), "=d"(hi) : "c"(0));
+    return (static_cast<unsigned long long>(hi) << 32) | lo;
+}
+#endif
 PB_EXPORT int has_avx2() {
-#if defined(__x86_64__) || defined(__i386__)
-    __builtin_cpu_init();
-    return __builtin_cpu_supports("avx2") != 0;
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__)
+    unsigned r[4]; cpuid(0,0,r); if(r[0]<7)return 0;
+    cpuid(1,0,r);
+    if((r[2] & ((1u<<27)|(1u<<28))) != ((1u<<27)|(1u<<28)))return 0;
+    if((xcr0() & 6) != 6)return 0;
+    cpuid(7,0,r); return (r[1] & (1u<<5)) != 0;
 #else
     return 0;
 #endif
 }
 PB_EXPORT int has_fma3() {
-#if defined(__x86_64__) || defined(__i386__)
-    __builtin_cpu_init();
-    return __builtin_cpu_supports("fma") != 0;
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__)
+    if(!has_avx2())return 0;
+    unsigned r[4]; cpuid(1,0,r); return (r[2] & (1u<<12)) != 0;
 #else
     return 0;
 #endif
 }
-#endif
 """
 
 

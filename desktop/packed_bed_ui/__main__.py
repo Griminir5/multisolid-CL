@@ -15,7 +15,16 @@ def main(argv=None) -> int:
     parser.add_argument("--worker", type=Path, metavar="RUN_FOLDER", help=argparse.SUPPRESS)
     parser.add_argument("--project-worker", type=Path, metavar="EXECUTION_FILE", help=argparse.SUPPRESS)
     parser.add_argument('--check-plugin', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--check-compiled', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.check_compiled:
+        from packed_bed.simulation import create_linear_solver
+        from packed_bed.solver_support import DESKTOP_SOLVERS
+        for name in DESKTOP_SOLVERS["daetools"]:
+            create_linear_solver(name)
+        from packed_bed.compiled.smoke import check
+        check()
+        return 0
     if args.check_plugin is not None:
         from packed_bed.plugins.check import check_package
         from packed_bed.plugins.storage import package_hash

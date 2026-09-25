@@ -59,7 +59,7 @@ def test_family_requirements_are_local_to_the_mechanism() -> None:
     assert NICKEL_FAMILY.required_solid_species == ("Ni", "NiO")
     assert REFORMING_FAMILY.required_solid_species == ("Ni",)
     assert not ({"Al2O3", "CuAl2O4", "CuAlO2"} & set(NICKEL_FAMILY.required_solid_species))
-    assert COPPER_SIO2_FAMILY.required_gas_species == ("H2", "H2O")
+    assert COPPER_SIO2_FAMILY.required_gas_species == ("H2", "H2O", "O2")
     assert COPPER_SIO2_FAMILY.required_solid_species == ("Cu", "Cu2O", "CuO")
     assert not {
         "Al2O3",
@@ -83,11 +83,14 @@ def test_copper_support_families_have_distinct_reaction_ids() -> None:
 
     network = build_reaction_network(
         COPPER_SIO2_FAMILY.reaction_ids,
-        ("H2", "H2O"),
+        ("H2", "H2O", "O2"),
         ("Cu", "Cu2O", "CuO"),
         families=(COPPER_SIO2_FAMILY,),
     )
     assert network.reaction_ids == COPPER_SIO2_FAMILY.reaction_ids
+    oxidation_index = network.reaction_ids.index("cu_sio2_oxidation_1_san_pio")
+    assert tuple(row[oxidation_index] for row in network.gas_source_matrix) == (0.0, 0.0, -0.5)
+    assert tuple(row[oxidation_index] for row in network.solid_source_matrix) == (-1.0, 0.0, 1.0)
 
 
 def test_catalog_contains_only_selected_families() -> None:

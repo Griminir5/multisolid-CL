@@ -17,9 +17,11 @@ from scipy.sparse import csc_matrix
 
 from .band import supports_avx2
 from .codegen import emit_model
-from .compiler import compile_kernel, library_suffix, platform_identity, simd_flags
+from .compiler import compile_kernel, library_suffix, platform_identity, simd_flags, compiler_flags
+from .bundle import bundle_root, engine_fingerprint
+from .cache import cache_lock, check_cancelled, progress, valid_library, write_record
 from .graph import export_model
-from .runtime import NativeIDA, callback_source, check_runtime
+from .runtime import NativeIDA, callback_source, check_runtime, runtime_identity
 from .structure import (
     band_layout,
     eliminate_fixed_states,
@@ -44,6 +46,7 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
     """Generate an exact sparse Jacobian and kernels for the initialized model."""
     from .compiler import compiler_identity
 
+    progress("checking_cache", message="Checking the exact initialized model cache.")
     check_runtime()
     started = perf_counter()
     cache_directory = cache_directory.resolve()
@@ -55,23 +58,27 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
     # compiler too. Otherwise a compiler update could keep loading an old binary.
     toolchain, compiler_version = compiler_identity()
     digest.update(platform_identity().encode())
-    digest.update(str(toolchain).encode())
+    digest.update(("managed" if bundle_root() else str(toolchain)).encode())
     digest.update(compiler_version.encode())
-    sources = list(Path(__file__).parent.glob("*.py")) + list(
-        Path(__file__).parent.glob("*.hpp")
-    )
-    for path in sorted(sources):
-        digest.update(path.read_bytes())
-    vectorize = supports_avx2()
+    digest.update(engine_fingerprint().encode())
+    digest.update(runtime_identity().encode())
+    digest.update(repr(compiler_flags()).encode())
+    probe_metadata = {}
+    vectorize = supports_avx2(cache_directory, probe_metadata)
     digest.update(b"AVX2 cells" if vectorize else b"scalar cells")
     requested = simulation.case.run.solver.vector_exponentials
     vector_exponentials, cpu_metadata = select_vector_exponentials(
         cache_directory, requested, vectorize
     )
-    cpu_compile_s = cpu_metadata.get("vector_math_cpu_compile_s", 0.0)
+    cpu_metadata.update(probe_metadata)
+    cpu_compile_s = cpu_metadata.get("vector_math_cpu_compile_s", 0.0) + cpu_metadata.get("cpu_compile_s", 0.0)
+    cpu_wait_s = cpu_metadata.get("cpu_wait_s", 0.0)
+    cpu_cache_hit = cpu_metadata.get("vector_math_cpu_cache_hit", True) and cpu_metadata.get("cpu_cache_hit", True)
     digest.update(b"SLEEF exp" if vector_exponentials else b"scalar exp")
-    linear_solver = "band" if simulation.case.run.solver.name == "band" else "superlu"
+    linear_solver = ({"band": "band", "klu": "klu", "trilinos_klu": "klu"}
+                     .get(simulation.case.run.solver.name, "superlu"))
     digest.update(linear_solver.encode())
+    digest.update(simulation.case.run.solver.name.encode())
     # Fixed-state elimination embeds constants from differential initial data.
     # Algebraic IC roundoff and integration tolerances do not define the kernel.
     from daetools.pyDAE import cnDifferential
@@ -100,7 +107,8 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
             sort_keys=True,
         ).encode()
     )
-    cache_index = cache_directory / f"model-{digest.hexdigest()}.json"
+    model_key = digest.hexdigest()
+    cache_index = cache_directory / f"model-{model_key}.json"
     report_variables = []
     report_indices = []
     for variable in simulation.model.Variables:
@@ -111,146 +119,160 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
                 for i in range(variable.NumberOfPoints)
             )
             report_variables.append((variable, slice(begin, len(report_indices))))
-    if cache_index.is_file():
-        cached = json.loads(cache_index.read_text())
-        filename = cached["library"]
-        suffix = library_suffix()
-        # The JSON contains data and a local content-addressed filename only.
-        if (
-            not isinstance(filename, str)
-            or len(filename) != 64 + len(suffix)
-            or not filename.endswith(suffix)
-            or any(c not in "0123456789abcdef" for c in filename[:64])
-        ):
-            raise ValueError("Invalid compiled kernel cache filename.")
-        library_path = cache_directory / filename
-        if library_path.is_file():
-            keep = np.asarray(cached["keep"], dtype=int)
-            sparsity = csc_matrix(
-                (np.ones(len(cached["indices"])), cached["indices"], cached["indptr"]),
-                shape=(len(keep), len(keep)),
-            )
-            metadata = {
-                **cached["metadata"],
-                **cpu_metadata,
-                "cache_hit": cpu_metadata.get("vector_math_cpu_cache_hit", True),
-                "compile_s": cpu_compile_s,
-                "generation_s": perf_counter() - started - cpu_compile_s,
-                "vector_exponentials_requested": requested,
-            }
-            return CompiledModel(
-                _load_kernel(library_path),
-                keep,
-                sparsity,
-                report_variables,
-                len(report_indices),
-                metadata,
-            )
-    graph, keep, residuals, reconstruction, _ = export_model(simulation)
-    locations, groups = state_locations(simulation)
-    keep, residuals, reconstruction, fixed = eliminate_fixed_states(
-        graph,
-        keep,
-        residuals,
-        reconstruction,
-        np.asarray(simulation.Values),
-        groups,
-    )
-    if len(residuals) != len(keep):
-        raise RuntimeError("Algebraic reduction did not produce a square system.")
-    owners = match_rows(graph, residuals, keep)
-    if linear_solver == "band":
-        residuals, keep = reorder_for_band(graph, residuals, keep, owners)
-        owners = np.arange(len(keep))
-    variable_map = {old: new for new, old in enumerate(keep)}
-    jacobian = {
-        (row, variable_map[column]): value
-        for row, residual in enumerate(residuals)
-        for column, value in graph.gradient(residual).items()
-    }
-    rows, columns = zip(*jacobian)
-    sparsity = csc_matrix(
-        (np.ones(len(jacobian)), (rows, columns)),
-        shape=(len(keep), len(keep)),
-    )
-    jacobian_values = [
-        jacobian[row, column]
-        for column in range(len(keep))
-        for row in sparsity.indices[
-            sparsity.indptr[column] : sparsity.indptr[column + 1]
+    with cache_lock(cache_directory, "model-" + model_key) as waiting:
+        if cache_index.is_file():
+            try:
+                cached = json.loads(cache_index.read_text())
+                checksum = cached.pop("record_sha256")
+                if (checksum != hashlib.sha256(json.dumps(cached, sort_keys=True, allow_nan=False).encode()).hexdigest()
+                        or cached["metadata"]["model_sha256"] != model_key):
+                    raise ValueError("Damaged or misplaced model metadata")
+                filename = cached["library"]
+                suffix = library_suffix()
+                if (not isinstance(filename, str) or len(filename) != 64 + len(suffix)
+                        or not filename.endswith(suffix)
+                        or any(c not in "0123456789abcdef" for c in filename[:64])):
+                    raise ValueError("Invalid cache filename")
+                library_path = cache_directory / filename
+                if not valid_library(library_path):
+                    raise ValueError("Missing or damaged native library")
+                keep = np.asarray(cached["keep"], dtype=int)
+                if (keep.ndim != 1 or not len(keep) or len(set(keep)) != len(keep)
+                        or keep.min() < 0 or keep.max() >= simulation.NumberOfEquations):
+                    raise ValueError("Invalid cached state mapping")
+                sparsity = csc_matrix(
+                    (np.ones(len(cached["indices"])), cached["indices"], cached["indptr"]),
+                    shape=(len(keep), len(keep)))
+                sparsity.check_format(full_check=True)
+                metadata = {
+                    **cached["metadata"], **cpu_metadata,
+                    "cache_hit": cpu_cache_hit,
+                    "compile_s": cpu_compile_s,
+                    "cache_wait_s": waiting + cpu_wait_s,
+                    "generation_s": perf_counter() - started - cpu_compile_s - waiting - cpu_wait_s,
+                    "vector_exponentials_requested": requested,
+                    "cache_reason": "Reusing compiled model",
+                }
+                library = _load_kernel(library_path)
+            except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
+                reason = "Cached files missing or damaged"
+            else:
+                progress("checking_cache", message="Reusing compiled model", cache_hit=True,
+                         model_sha256=model_key)
+                return CompiledModel(library, keep, sparsity, report_variables, len(report_indices), metadata)
+        else:
+            reason = "No reusable model for these inputs and runtime"
+        progress("generating", message=reason, cache_hit=False, model_sha256=model_key)
+        graph, keep, residuals, reconstruction, _ = export_model(simulation)
+        locations, groups = state_locations(simulation)
+        keep, residuals, reconstruction, fixed = eliminate_fixed_states(
+            graph,
+            keep,
+            residuals,
+            reconstruction,
+            np.asarray(simulation.Values),
+            groups,
+        )
+        if len(residuals) != len(keep):
+            raise RuntimeError("Algebraic reduction did not produce a square system.")
+        owners = match_rows(graph, residuals, keep)
+        if linear_solver == "band":
+            residuals, keep = reorder_for_band(graph, residuals, keep, owners)
+            owners = np.arange(len(keep))
+        variable_map = {old: new for new, old in enumerate(keep)}
+        jacobian = {
+            (row, variable_map[column]): value
+            for row, residual in enumerate(residuals)
+            for column, value in graph.gradient(residual).items()
+        }
+        rows, columns = zip(*jacobian)
+        sparsity = csc_matrix(
+            (np.ones(len(jacobian)), (rows, columns)),
+            shape=(len(keep), len(keep)),
+        )
+        jacobian_values = [
+            jacobian[row, column]
+            for column in range(len(keep))
+            for row in sparsity.indices[
+                sparsity.indptr[column] : sparsity.indptr[column + 1]
+            ]
         ]
-    ]
-    report_roots = [reconstruction[i] for i in report_indices]
-    source, generation_metadata = emit_model(
-        graph,
-        keep,
-        residuals,
-        jacobian_values,
-        report_roots,
-        sparsity,
-        locations,
-        owners,
-        simulation.case.run.model.axial_cells,
-        vectorize=vectorize,
-        vector_exponentials=vector_exponentials,
-    )
-    source += callback_source(sparsity, linear_solver=linear_solver)
-    generation_s = perf_counter() - started - cpu_compile_s
-    library_path, compilation = compile_kernel(
-        source,
-        cache_directory,
-        extra_flags=simd_flags(
-            avx2=generation_metadata["residual_lanes"] == 4,
-            fma=vector_exponentials,
-        ),
-    )
-    metadata = {
-        **compilation,
-        **generation_metadata,
-        **cpu_metadata,
-        "cache_hit": compilation["cache_hit"]
-        and cpu_metadata.get("vector_math_cpu_cache_hit", True),
-        "compile_s": compilation["compile_s"] + cpu_compile_s,
-        "vector_exponentials_requested": requested,
-        "generation_s": generation_s,
-        "original_unknowns": simulation.NumberOfEquations,
-        "compiler_version": compiler_version,
-        "reduced_unknowns": len(keep),
-        "jacobian_nonzeros": sparsity.nnz,
-        "fixed_states_removed": len(fixed),
-        "linear_solver": linear_solver,
-        "runtime": "SUNDIALS 7.5.0 IDA / "
-        + ("SUNLinSol_Band" if linear_solver == "band" else "SuperLU_MT"),
-    }
-    if linear_solver == "band":
-        upper, lower, _, _ = band_layout(sparsity)
-        metadata.update(upper_bandwidth=upper, lower_bandwidth=lower)
-    record = {
-        "library": library_path.name,
-        "keep": keep,
-        # CPU probe timings and capabilities belong to this process, not the
-        # reusable model. Recompute them even when loading the same library.
-        "metadata": {
-            key: value
-            for key, value in metadata.items()
-            if not key.startswith("vector_math_")
-        },
-        "indices": sparsity.indices.tolist(),
-        "indptr": sparsity.indptr.tolist(),
-    }
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", dir=cache_directory, encoding="utf-8", delete=False
-    ) as temporary:
-        json.dump(record, temporary)
-    Path(temporary.name).replace(cache_index)
-    return CompiledModel(
-        _load_kernel(library_path),
-        np.asarray(keep),
-        sparsity,
-        report_variables,
-        len(report_roots),
-        metadata,
-    )
+        report_roots = [reconstruction[i] for i in report_indices]
+        source, generation_metadata = emit_model(
+            graph,
+            keep,
+            residuals,
+            jacobian_values,
+            report_roots,
+            sparsity,
+            locations,
+            owners,
+            simulation.case.run.model.axial_cells,
+            vectorize=vectorize,
+            vector_exponentials=vector_exponentials,
+        )
+        source += callback_source(sparsity, linear_solver=linear_solver)
+        check_cancelled()
+        generation_s = perf_counter() - started - cpu_compile_s - waiting - cpu_wait_s
+        library_path, compilation = compile_kernel(
+            source,
+            cache_directory,
+            extra_flags=simd_flags(
+                avx2=generation_metadata["residual_lanes"] == 4,
+                fma=vector_exponentials,
+            ),
+        )
+        metadata = {
+            **compilation,
+            **generation_metadata,
+            **cpu_metadata,
+            "cache_hit": compilation["cache_hit"]
+            and cpu_cache_hit,
+            "compile_s": compilation["compile_s"] + cpu_compile_s,
+            "vector_exponentials_requested": requested,
+            "generation_s": generation_s,
+            "model_sha256": model_key,
+            "cache_reason": reason,
+            "cache_wait_s": waiting + cpu_wait_s + compilation.get("cache_wait_s", 0.0),
+            "runtime_identity": runtime_identity(),
+            "axial_cells": simulation.case.run.model.axial_cells,
+            "original_unknowns": simulation.NumberOfEquations,
+            "compiler_version": compiler_version,
+            "reduced_unknowns": len(keep),
+            "jacobian_nonzeros": sparsity.nnz,
+            "fixed_states_removed": len(fixed),
+            "linear_solver": linear_solver,
+            "runtime": "SUNDIALS 7.5.0 IDA / "
+            + {"band": "SUNLinSol_Band", "klu": "SUNLinSol_KLU", "superlu": "SuperLU_MT"}[linear_solver],
+        }
+        if linear_solver == "band":
+            upper, lower, _, _ = band_layout(sparsity)
+            metadata.update(upper_bandwidth=upper, lower_bandwidth=lower)
+        record = {
+            "library": library_path.name,
+            "keep": keep,
+            # CPU probe timings and capabilities belong to this process, not the
+            # reusable model. Recompute them even when loading the same library.
+            "metadata": {
+                key: value
+                for key, value in metadata.items()
+                if not key.startswith(("vector_math_", "cpu_"))
+            },
+            "indices": sparsity.indices.tolist(),
+            "indptr": sparsity.indptr.tolist(),
+        }
+        library = _load_kernel(library_path)
+        check_cancelled()
+        record["record_sha256"] = hashlib.sha256(json.dumps(record, sort_keys=True, allow_nan=False).encode()).hexdigest()
+        write_record(cache_index, record)
+        return CompiledModel(
+            library,
+            np.asarray(keep),
+            sparsity,
+            report_variables,
+            len(report_roots),
+            metadata,
+        )
 
 
 def _load_kernel(library_path):
@@ -313,6 +335,8 @@ def integrate(simulation):
         )
     )
     compiled = prepare_model(simulation, cache)
+    compiled.metadata.update(getattr(simulation, "solver_stats", {}))
+    simulation.solver_stats = compiled.metadata
     band_library = None
     if settings.name == "band":
         from .band import prepare_band_library
@@ -362,6 +386,7 @@ def integrate(simulation):
         np.maximum.at(row_norm, compiled.sparsity.indices, abs(initial_jacobian))
         row_scale = 1.0 / np.maximum(row_norm, 1e-300)
         compiled.metadata["row_scaling"] = "inverse initial Jacobian row maximum (cj=1)"
+    progress("running", message="Integrating compiled model", cache_hit=compiled.metadata["cache_hit"])
     with NativeIDA(
         compiled.library,
         y0,

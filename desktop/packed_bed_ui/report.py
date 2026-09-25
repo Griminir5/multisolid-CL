@@ -224,24 +224,26 @@ class ExportWorker(QThread):
         super().__init__(parent)
         self.writer = writer
         self.arguments, self.error, self.cancelled = arguments, "", False
+        self.value = None
         self.cancel_requested = False
 
     def run(self):
         try:
-            self.writer(**self.arguments, cancelled=lambda: self.cancel_requested or self.isInterruptionRequested())
-        except ExportCancelled:
+            self.value = self.writer(**self.arguments, cancelled=lambda: self.cancel_requested or self.isInterruptionRequested())
+        except (ExportCancelled, InterruptedError):
             self.cancelled = True
         except Exception as exc:
             self.error = str(exc)
 
 
 class ExportDialog(QDialog):
-    def __init__(self, arguments, parent=None, writer=write_workbook):
+    def __init__(self, arguments, parent=None, writer=write_workbook, *,
+                 title="Export workbook", message="Writing workbook…"):
         super().__init__(parent)
-        self.setWindowTitle("Export workbook")
+        self.setWindowTitle(title)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
         layout = QVBoxLayout(self)
-        self.message = QLabel("Writing workbook…")
+        self.message = QLabel(message)
         self.cancel = action_button("Cancel", self.reject)
         layout.addWidget(self.message)
         layout.addWidget(self.cancel)

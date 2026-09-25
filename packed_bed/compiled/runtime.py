@@ -1,6 +1,6 @@
 """Pinned SUNDIALS 7.5 C ABI with native residual and Jacobian callbacks.
 
-The scikit-sundae wheel provides the runtime. Its Python wrapper does
+The managed bundle or scikit-sundae wheel provides the runtime. The wheel wrapper does
 not expose algebraic error suppression or the Newton convergence coefficient;
 this adapter calls the public IDA C API to preserve those case controls.
 No private SUNDIALS structures are accessed.
@@ -8,12 +8,15 @@ No private SUNDIALS structures are accessed.
 
 import ctypes as C
 import math
+import os
+from functools import lru_cache
 import platform
 from pathlib import Path
 
 import numpy as np
 
 from .structure import band_layout
+from .bundle import asset, bundle_root, manifest
 
 P = C.c_void_p
 D = C.c_double
@@ -36,6 +39,13 @@ class CallbackData(C.Structure):
 
 
 def check_runtime():
+    root = bundle_root()
+    if root is not None:
+        data = manifest(root)
+        for name in ("core", "ida", "nvecserial", "sunmatrixsparse", "sunmatrixband",
+                     "sunlinsolband", "sunlinsolklu", "sunlinsolsuperlumt"):
+            asset(root, data["runtime"]["libraries"][name])
+        return root / "lib"
     if platform.system() not in {"Windows", "Linux", "Darwin"} or C.sizeof(P) != 8:
         raise RuntimeError("The compiled backend requires 64-bit Windows, Linux or macOS.")
     try:
@@ -76,7 +86,7 @@ def check_runtime():
 
 
 def load_runtime_library(folder, module):
-    """Load only the verified wheel's libraries, including its bundled dependencies."""
+    """Load libraries from one selected bundle, including its dependencies."""
     system = platform.system()
     if system == "Windows":
         pattern = f"sundials_{module}-*.dll"
@@ -84,18 +94,39 @@ def load_runtime_library(folder, module):
         pattern = f"libsundials_{module}.*.dylib"
     else:
         pattern = f"libsundials_{module}-*.so*"
-    candidates = sorted(folder.glob(pattern))
+    root = folder.parent
+    if (root / "manifest.json").is_file():
+        data = manifest(root)
+        try:
+            candidates = [asset(root, data["runtime"]["libraries"][module])]
+        except KeyError:
+            candidates = []
+    else:
+        candidates = sorted(folder.glob(pattern))
     if len(candidates) != 1:
         raise RuntimeError(
             f"Expected one SUNDIALS {module} library matching {pattern} in {folder}; "
-            f"found {len(candidates)}. Reinstall the scikit-sundae==1.1.3 wheel."
+            f"found {len(candidates)}. Restore the selected compiled runtime."
         )
     try:
+        if system == "Windows":
+            _dll_directory(folder)
         return C.CDLL(str(candidates[0]))
     except OSError as exc:
         raise RuntimeError(
             f"Cannot load SUNDIALS {module} from {candidates[0]}: {exc}"
         ) from exc
+
+
+@lru_cache(None)
+def _dll_directory(folder):
+    return os.add_dll_directory(str(folder))
+
+
+def runtime_identity():
+    folder = check_runtime()
+    root = bundle_root()
+    return manifest(root)["bundle_sha256"] if root else "scikit-sundae-1.1.3/SUNDIALS-7.5.0/double/int32"
 
 
 class NativeIDA:
@@ -139,7 +170,7 @@ class NativeIDA:
         self.nonlinear_refresh_interval = nonlinear_refresh_interval
         if not math.isfinite(step_growth_threshold) or step_growth_threshold < 1.0:
             raise ValueError("Step growth threshold must be finite and at least one.")
-        if linear_solver not in {"superlu", "band"}:
+        if linear_solver not in {"superlu", "klu", "band"}:
             raise ValueError("Unknown native linear solver.")
         self.linear_solver = linear_solver
         if band_library is not None and linear_solver != "band":
@@ -150,7 +181,7 @@ class NativeIDA:
         matrix_modules = (
             ("sunmatrixband", "sunlinsolband")
             if linear_solver == "band"
-            else ("sunmatrixsparse", "sunlinsolsuperlumt")
+            else ("sunmatrixsparse", "sunlinsolklu" if linear_solver == "klu" else "sunlinsolsuperlumt")
         )
         for key in ("core", "nvecserial", "ida", *matrix_modules):
             self.libs[key] = load_runtime_library(folder, key)
@@ -209,8 +240,11 @@ class NativeIDA:
             pointers = fn(
                 "sunmatrixsparse", "SUNSparseMatrix_IndexPointers", C.POINTER(I), P
             )
-            fn("sunlinsolsuperlumt", "SUNLinSol_SuperLUMT", P, P, P, I, P)
-            fn("sunlinsolsuperlumt", "SUNLinSol_SuperLUMTSetOrdering", I, P, I)
+            if linear_solver == "klu":
+                fn("sunlinsolklu", "SUNLinSol_KLU", P, P, P, P)
+            else:
+                fn("sunlinsolsuperlumt", "SUNLinSol_SuperLUMT", P, P, P, I, P)
+                fn("sunlinsolsuperlumt", "SUNLinSol_SuperLUMTSetOrdering", I, P, I)
         self.kernel = kernel
         self.jac_values = np.empty(sparsity.nnz)
         if hasattr(kernel, "report_loop"):
@@ -339,6 +373,8 @@ class NativeIDA:
             raise MemoryError("Jacobian matrix allocation")
         if self.linear_solver == "band":
             self.linear = self.SUNLinSol_Band(self.y, self.matrix, self.ctx)
+        elif self.linear_solver == "klu":
+            self.linear = self.SUNLinSol_KLU(self.y, self.matrix, self.ctx)
         else:
             self.linear = self.SUNLinSol_SuperLUMT(
                 self.y, self.matrix, max(1, threads), self.ctx
@@ -472,7 +508,7 @@ class NativeIDA:
 
 
 def callback_source(sparsity, linear_solver="superlu"):
-    if linear_solver not in {"superlu", "band"}:
+    if linear_solver not in {"superlu", "klu", "band"}:
         raise ValueError("Unknown callback matrix format.")
     rows = ",".join(map(str, sparsity.indices))
     cols = ",".join(map(str, sparsity.indptr))

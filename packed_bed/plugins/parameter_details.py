@@ -21,9 +21,14 @@ def reaction_parameter_groups(definition):
             'ni_reduction_h2_medrano': 'H2', 'ni_reduction_co_medrano': 'CO', 'ni_oxidation_o2_medrano': 'O2',
         }, 'R0_M', 'K0_M_PER_S', 'ACTIVATION_ENERGY_J_PER_MOL')
     if implementation == 'builtin:copper_sio2_san_pio':
-        return coefficients({
-            'cuo_h2_reduction_sio2_san_pio': 'cuo', 'cu2o_h2_reduction_sio2_san_pio': 'cu2o',
-        }, 'REDUCTION_COEFFICIENTS', 'REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL')
+        return {
+            **coefficients({
+                'cuo_h2_reduction_sio2_san_pio': 'cuo', 'cu2o_h2_reduction_sio2_san_pio': 'cu2o',
+            }, 'REDUCTION_COEFFICIENTS', 'REDUCTION_ACTIVATION_ENERGIES_J_PER_MOL'),
+            **coefficients({
+                'cu_sio2_oxidation_1_san_pio': 'cu_to_cuo',
+            }, 'OXIDATION_COEFFICIENTS', 'OXIDATION_ACTIVATION_ENERGIES_J_PER_MOL'),
+        }
     if implementation == 'builtin:copper_al2o3_san_pio':
         return {
             **coefficients({

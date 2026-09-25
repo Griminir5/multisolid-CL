@@ -2,9 +2,9 @@
 
 import ctypes as C
 import platform
-import tempfile
-from functools import lru_cache
+import os
 from pathlib import Path
+import tempfile
 from time import perf_counter
 
 import numpy as np
@@ -13,8 +13,7 @@ from .compiler import compile_kernel, simd_flags
 from .structure import band_layout
 
 
-@lru_cache(None)
-def supports_avx2():
+def supports_avx2(cache_directory=None, metadata=None):
     if platform.machine().lower() not in {"amd64", "x86_64"}:
         return False
     if platform.system() == "Windows":
@@ -24,19 +23,22 @@ def supports_avx2():
         return bool(query(40))  # Includes OS support for AVX registers.
     from .vector_math import CPU_SOURCE
 
-    # GCC/Clang's baseline CPU probe checks OS support too; no AVX instructions
-    # execute until this succeeds. The result is shared by this process only.
-    with tempfile.TemporaryDirectory(prefix="packed-bed-cpu-") as temporary:
-        path, _ = compile_kernel(CPU_SOURCE, Path(temporary))
-        library = C.CDLL(str(path))
-        library.has_avx2.argtypes = []
-        library.has_avx2.restype = C.c_int
-        return bool(library.has_avx2())
+    # The baseline probe checks OS support too. Reuse the binary while querying
+    # this process's CPU; expose its cold compile cost to the run's timings.
+    cache = Path(cache_directory or os.environ.get("PACKED_BED_COMPILED_CACHE", Path(tempfile.gettempdir()) / "packed-bed-cpu"))
+    path, compilation = compile_kernel(CPU_SOURCE, cache)
+    if metadata is not None:
+        metadata.update(cpu_compile_s=compilation["compile_s"], cpu_cache_hit=compilation["cache_hit"],
+                        cpu_kernel_sha256=compilation["kernel_sha256"], cpu_wait_s=compilation.get("cache_wait_s", 0.))
+    library = C.CDLL(str(path))
+    library.has_avx2.argtypes = []
+    library.has_avx2.restype = C.c_int
+    return bool(library.has_avx2())
 
 
 def prepare_band_library(cache_directory, *, vectorize=None, reuse_diagonal=False):
     started = perf_counter()
-    available = supports_avx2()
+    available = supports_avx2(cache_directory)
     if vectorize is None:
         vectorize = available
     if vectorize and not available:

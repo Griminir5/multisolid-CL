@@ -67,7 +67,7 @@ def test_general_fields_persist_and_preserve_advanced_settings(editing):
     assert resolved.run.solver.suppress_algebraic_errors
     assert resolved.run.solver.maximum_order == 3
     assert resolved.run.solver.concentration_absolute_tolerance == 2e-8
-    assert not editor.general.backend.model().item(editor.general.backend.findData("compiled")).isEnabled()
+    assert editor.general.backend.model().item(editor.general.backend.findData("compiled")).isEnabled()
 
 
 def test_advanced_solver_dialog_applies_only_edits(editing, qt_app):

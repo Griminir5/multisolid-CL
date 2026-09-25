@@ -34,6 +34,7 @@ from .reports import (
 
 
 _SOLVER_REGISTRY = {
+    "klu": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("Amesos_Klu", "")),
     "trilinos_klu": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("Amesos_Klu", "")),
     "trilinos_umfpack": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("Amesos_Umfpack", "")),
     "trilinos_lapack": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("Amesos_Lapack", "")),
@@ -126,23 +127,16 @@ def configure_idas(solver_config) -> None:
     daetools_config.SetInteger("daetools.IDAS.MaxOrd", getattr(solver_config, "maximum_order", 5))
 
 
-def _configure_aztecoo_ifpack(linear_solver):
+def _configure_aztecoo(linear_solver):
     from daetools.solvers.aztecoo_options import daeAztecOptions
 
-    linear_solver.NumIters = 1000
-    linear_solver.Tolerance = 1.0e-8
+    # Keep the bundled convergence/preconditioner defaults. A fixed 1e-8
+    # relative linear tolerance loses precision for near-zero initial residuals.
     parameters = linear_solver.ParameterList
-    parameters.set_int("AZ_solver", daeAztecOptions.AZ_gmres)
-    parameters.set_int("AZ_kspace", 100)
-    parameters.set_int("AZ_scaling", daeAztecOptions.AZ_none)
-    parameters.set_int("AZ_reorder", 0)
-    parameters.set_int("AZ_conv", daeAztecOptions.AZ_r0)
+    # DAE Tools requests AZ_reuse between Jacobian setups; retain the factors.
     parameters.set_int("AZ_keep_info", 1)
     parameters.set_int("AZ_output", daeAztecOptions.AZ_none)
     parameters.set_int("AZ_diagnostics", daeAztecOptions.AZ_none)
-    parameters.set_int("fact: level-of-fill", 3)
-    parameters.set_float("fact: absolute threshold", 1.0e-5)
-    parameters.set_float("fact: relative threshold", 1.0)
     return linear_solver
 
 
@@ -169,7 +163,7 @@ def create_linear_solver(name: str):
     solver = factory(*arguments)
     if name == "sundials_gmres_ifpack":
         return _configure_sundials_ifpack(solver)
-    return _configure_aztecoo_ifpack(solver) if name.endswith("_ifpack") else solver
+    return _configure_aztecoo(solver) if name.startswith("trilinos_aztecoo") else solver
 
 
 def _configure_reporting(
@@ -194,14 +188,16 @@ def execute_simulation(
     data_reporter=None,
     after_initialize=None,
     on_status: Callable[[str], None] | None = None,
+    on_progress: Callable[[dict], None] | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
 ):
     """Initialize, run, finalize, and flush reports through one execution path."""
 
     case = simulation.case
     compiled = case.run.solver.backend == "compiled"
     if compiled:
-        if case.run.solver.name not in {"superlu", "superlu_mt", "band"}:
-            raise ValueError("The compiled backend requires solver.name: superlu, superlu_mt or band.")
+        if case.run.solver.name not in {"superlu", "superlu_mt", "klu", "trilinos_klu", "band"}:
+            raise ValueError("The compiled backend requires solver.name: superlu, superlu_mt, klu or band.")
         if case.run.simulation.report_time_derivatives:
             raise ValueError("The compiled backend does not yet support report_time_derivatives: true.")
         if case.run.outputs.solver_incidence_matrix:
@@ -245,22 +241,40 @@ def execute_simulation(
     try:
         if on_status is not None:
             on_status("initialising")
+        initialization_started = perf_counter()
         simulation.Initialize(solver, reporter, log)
         initialized = True
         if after_initialize is not None:
             after_initialize(simulation, solver)
         simulation.SolveInitial()
-        if on_status is not None:
-            on_status("running")
+        initialization_s = perf_counter() - initialization_started
+        initialization_implementation = ("Amesos_Klu" if initial_solver_name in {"klu", "trilinos_klu"}
+                                         else initial_solver_name)
+        simulation.solver_stats = dict(initialization_s=initialization_s,
+            requested_solver=case.run.solver.name, initialization_solver=initialization_implementation,
+            axial_cells=case.run.model.axial_cells, original_unknowns=simulation.NumberOfEquations)
+        if cancel_requested is not None and cancel_requested():
+            raise InterruptedError("Execution cancelled.")
         if compiled:
             from .compiled import integrate
 
-            process, simulation.solver_stats = integrate(simulation)
+            from .compiled.cache import build_events
+
+            def compiled_progress(details):
+                if on_status is not None:
+                    on_status(details["state"])
+                if on_progress is not None:
+                    on_progress(details)
+
+            with build_events(compiled_progress, cancel_requested):
+                process, simulation.solver_stats = integrate(simulation)
             if hasattr(reporter, "accept_process"):
                 reporter.accept_process(process)
             else:
                 returned_reporter = SimpleNamespace(Process=process)
         else:
+            if on_status is not None:
+                on_status("running")
             integration_started = perf_counter()
             simulation.Run()
             simulation.solver_stats = {
@@ -268,6 +282,11 @@ def execute_simulation(
                 "runtime": f"DAETools IDAS / {case.run.solver.name}",
                 "integrator": dict(solver.IntegratorStats),
             }
+        simulation.solver_stats.update(initialization_s=initialization_s,
+            requested_solver=case.run.solver.name, initialization_solver=initialization_implementation,
+            integration_solver=({"klu": "SUNLinSol_KLU", "superlu": "SUNLinSol_SuperLUMT", "band": "SUNLinSol_Band"}
+                                [simulation.solver_stats["linear_solver"]] if compiled else initialization_implementation),
+            axial_cells=case.run.model.axial_cells, original_unknowns=simulation.NumberOfEquations)
     finally:
         if initialized:
             # DAETools performed only initialization for this backend. Its normal
@@ -279,8 +298,10 @@ def execute_simulation(
     finish = getattr(returned_reporter, "finish", None)
     if on_status is not None:
         on_status("writing_results")
+    output_started = perf_counter()
     if finish is not None:
         finish()
+    simulation.solver_stats["output_s"] = perf_counter() - output_started
     return returned_reporter
 
 
@@ -290,6 +311,8 @@ def run_case(
     *,
     retain_reporter: bool = False,
     on_status: Callable[[str], None] | None = None,
+    on_progress: Callable[[dict], None] | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> RunResult:
     """Run one resolved case and write its dataset and manifest.
 
@@ -300,6 +323,7 @@ def run_case(
     solver_artifacts: dict[str, Path] = {}
     stage = "model construction"
     dataset_reporter = None
+    simulation = None
     result = RunResult(case=case, output_directory=case.output_directory)
     started_at = perf_counter()
     try:
@@ -325,7 +349,10 @@ def run_case(
             data_reporter=dataset_reporter,
             after_initialize=after_initialize,
             on_status=on_status,
+            on_progress=on_progress,
+            cancel_requested=cancel_requested,
         )
+        output_started = perf_counter()
         result = replace(
             result,
             results_path=dataset_reporter.results_path,
@@ -357,12 +384,15 @@ def run_case(
                 artifact_paths={**result.artifact_paths, **plot_paths},
                 plot_errors=plot_errors,
             )
+        simulation.solver_stats["output_s"] += perf_counter() - output_started
+        result = replace(result, runtime_s=perf_counter() - started_at)
         stage = "manifest writing"
         return replace(result, manifest_path=write_run_manifest(result))
     except Exception as exc:
         if stage != "manifest writing":
             failed_result = replace(
                 result, status="failed", runtime_s=perf_counter() - started_at,
+                solver_stats=getattr(simulation, "solver_stats", {}),
                 results_path=getattr(dataset_reporter, "results_path", None),
                 artifact_paths={**dict(artifact_paths or {}), **solver_artifacts, **result.artifact_paths},
             )

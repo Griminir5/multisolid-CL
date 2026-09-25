@@ -63,12 +63,13 @@ def _reactive_case(tmp_path, solver_name):
     )
 
 
-def test_gmres_reactive_trajectory_and_actual_krylov_iterations(tmp_path):
+@pytest.mark.parametrize("solver_name", ("sundials_gmres_ifpack", "trilinos_aztecoo_ifpack"))
+def test_iterative_reactive_trajectory_and_actual_krylov_iterations(tmp_path, solver_name):
     from packed_bed.reports import load_dataset
     from packed_bed.simulation import run_case
 
     direct = run_case(_reactive_case(tmp_path, "superlu"))
-    iterative = run_case(_reactive_case(tmp_path, "sundials_gmres_ifpack"))
+    iterative = run_case(_reactive_case(tmp_path, solver_name))
     expected = load_dataset(direct.results_path)
     actual = load_dataset(iterative.results_path)
     assert actual.time.values[-1] == 100.0
@@ -86,8 +87,10 @@ def test_gmres_reactive_trajectory_and_actual_krylov_iterations(tmp_path):
     np.testing.assert_allclose(
         actual.gas_mole_fraction, expected.gas_mole_fraction, rtol=0, atol=1e-4
     )
-    assert iterative.solver_stats["integrator"]["NumLinIters"] > 0
-    assert iterative.solver_stats["integrator"]["NumPrecSolves"] > 0
+    assert iterative.solver_stats["requested_solver"] == solver_name
+    if solver_name == "sundials_gmres_ifpack":
+        assert iterative.solver_stats["integrator"]["NumLinIters"] > 0
+        assert iterative.solver_stats["integrator"]["NumPrecSolves"] > 0
     assert float(abs(actual.heat_balance_error).max()) < 0.01
 
 

@@ -81,9 +81,7 @@ def scientific_fingerprint(documents: dict[str, dict], extensions: list) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def require_desktop_solver(case: Case | CaseInputs) -> None:
-    if case.run.solver.backend != "daetools" or case.run.solver.name != "superlu":
-        raise ValueError("This starter supports DAETools / SuperLU. Select it explicitly in the case inputs, or use the CLI for this solver.")
+from packed_bed.solver_support import require_desktop_solver
 
 
 @dataclass
@@ -354,6 +352,16 @@ class Project:
                 errors.append(f"{case.name}: {exc}")
         if errors:
             raise ValueError("No cases were started. Resolve these inputs first:\n\n" + "\n\n".join(errors))
+        if any(case.documents["run"]["solver"].get("backend") == "compiled" for case in cases):
+            from tempfile import TemporaryFile
+            cache = self.root / ".packed_bed_cache"
+            try:
+                cache.mkdir(exist_ok=True)
+                with TemporaryFile(dir=cache) as probe:
+                    probe.write(b"cache write check")
+                    probe.flush()
+            except OSError as exc:
+                raise ValueError(f"Compiled execution needs a writable project cache: {cache}. {exc}") from exc
         attempt_id = uuid4().hex
         pending = []
         try:

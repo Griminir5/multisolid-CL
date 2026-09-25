@@ -97,15 +97,16 @@ class ProjectLocations(QObject):
 
 
 class NewProjectDialog(QDialog):
-    def __init__(self, locations, parent=None):
+    def __init__(self, locations, parent=None, *, creator=None, name="New project"):
         super().__init__(parent)
-        self.setWindowTitle("Create new project")
+        self.creator = creator
+        self.setWindowTitle("Import project" if creator else "Create new project")
         self.setMinimumWidth(800)
         self.locations = locations
         self.initial_parent = str(locations.creation_parent)
         self.parent_chosen = False
         form = QFormLayout(self)
-        self.name = QLineEdit("New project")
+        self.name = QLineEdit(name)
         self.location = QLineEdit(self.initial_parent)
         self.name.setAccessibleName("Project name")
         self.location.setAccessibleName("Location")
@@ -125,7 +126,7 @@ class NewProjectDialog(QDialog):
         self.error.setWordWrap(True)
         form.addRow(self.error)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Create project")
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Import project" if creator else "Create project")
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         form.addRow(self.buttons)
@@ -155,7 +156,10 @@ class NewProjectDialog(QDialog):
     def accept(self):
         from .project import Project
         try:
-            self.project = Project.create(self.path, self.name.text().strip())
+            self.project = (self.creator or Project.create)(self.path, self.name.text().strip())
+            if self.project is None:
+                self.error.setText("Import cancelled.")
+                return
         except (OSError, ValueError) as exc:
             self.error.setText(str(exc))
             return

@@ -11,6 +11,7 @@ import pytest
 
 from packed_bed.config import load_case
 from packed_bed.properties import PROPERTY_REGISTRY
+from packed_bed.solver_support import DESKTOP_SOLVERS, require_desktop_solver
 from test_initialization import _write_inert_case
 
 
@@ -166,6 +167,28 @@ def test_ordinary_run_writes_one_dataset_and_manifest(tmp_path: Path) -> None:
     assert result.balance_errors == {}
     assert manifest["status"] == "success"
     assert manifest["outputs"]["results"]["path"] == str(result.results_path)
+
+
+@pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
+@pytest.mark.parametrize("name", DESKTOP_SOLVERS["daetools"])
+def test_bundled_standard_solvers_complete_inert_case(tmp_path, name):
+    from packed_bed.reports import load_dataset
+    from packed_bed.simulation import run_case
+
+    case = _with_reports(load_case(_write_inert_case(tmp_path)),
+                         ("temperature", "pressure", "gas_mole_fraction"))
+    case = replace(case, run=case.run.model_copy(update={
+        "solver": case.run.solver.model_copy(update={"name": name, "threads": 1}),
+    }))
+    require_desktop_solver(case, native=True)
+    result = run_case(case)
+    actual = load_dataset(result.results_path)
+    assert result.status == "success"
+    assert result.solver_stats["requested_solver"] == name
+    assert actual.time.values[-1] == 0.01
+    np.testing.assert_allclose(actual.temperature, 300.0, rtol=0, atol=1e-6)
+    np.testing.assert_allclose(actual.gas_mole_fraction, 1.0, rtol=0, atol=1e-8)
+    assert float(actual.pressure.min()) >= 100000.0
 
 
 @pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
