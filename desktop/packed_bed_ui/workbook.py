@@ -4,10 +4,10 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from itertools import product
 import json
+import logging
 from math import prod
 from pathlib import Path
 import re
-from tempfile import NamedTemporaryFile
 import warnings
 
 import numpy as np
@@ -18,15 +18,25 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableColumn, TableStyleInfo
 from openpyxl.worksheet.filters import AutoFilter
+from openpyxl.worksheet._writer import WorksheetWriter
 
 from packed_bed.report_schema import describe_dataset, quantity_catalog
 from packed_bed.reports import RESULTS_FILENAME, TIME_ATOL
+from packed_bed.file_io import atomic_output, retry_file_operation
 
 from .project import read_documents, read_json
 
 
 INFORMATION = "Case information"
 MAX_ROWS, MAX_COLUMNS = 1_048_576, 16_384
+_LOGGER = logging.getLogger(__name__)
+
+
+class _WorksheetWriter(WorksheetWriter):
+    """Apply the file policy to openpyxl's XML cleanup, including during save."""
+
+    def cleanup(self):
+        retry_file_operation(super().cleanup)
 
 
 class ExportCancelled(Exception):
@@ -438,12 +448,22 @@ def write_tables(destination, tables, information, rows, *, information_title=IN
     destination = Path(destination)
     if destination.suffix.lower() != ".xlsx":
         raise ValueError("Choose an .xlsx file.")
-    workbook, temporary = None, None
+    workbook = None
+
+    def check_cancelled():
+        if cancelled():
+            raise ExportCancelled()
+
     try:
         if cancelled():
             raise ExportCancelled()
         workbook = Workbook(write_only=True)
         def append(ws, row, *, header=False):
+            # Configure our writer before openpyxl creates its default one. Sheet
+            # settings are complete here; write_top must precede the first row.
+            if ws._writer is None:
+                ws._writer = _WorksheetWriter(ws)
+                ws._writer.write_top()
             cells = []
             for value in row:
                 cell = WriteOnlyCell(ws, value=excel_value(value))
@@ -484,22 +504,22 @@ def write_tables(destination, tables, information, rows, *, information_title=IN
                 if cancelled():
                     raise ExportCancelled()
                 append(ws, row)
-        with NamedTemporaryFile(dir=destination.parent, prefix=".report-", suffix=".xlsx", delete=False) as f:
-            temporary = Path(f.name)
-        workbook.save(temporary)
-        if cancelled():
-            raise ExportCancelled()
-        temporary.replace(destination)
+        with atomic_output(destination, before_replace=check_cancelled) as temporary:
+            # Own the OS handle even if openpyxl raises while assembling the ZIP.
+            with temporary.open("w+b") as stream:
+                workbook.save(stream)
     finally:
         if workbook:
             for ws in workbook.worksheets:
-                if not ws.closed:
-                    ws.close()
-                if ws._writer:
-                    try:
+                try:
+                    if not ws.closed:
+                        ws.close()
+                    if ws._writer:
                         ws._writer.cleanup()
-                    except FileNotFoundError:
-                        pass
+                except FileNotFoundError:
+                    pass  # A successful save already removed this XML file.
+                except OSError as exc:
+                    # A leftover scratch file must not mask cancellation/the
+                    # export error, or report a valid published workbook as bad.
+                    _LOGGER.warning("Could not clean up worksheet %s: %s", ws.title, exc)
             workbook.close()
-        if temporary:
-            temporary.unlink(missing_ok=True)

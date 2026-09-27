@@ -7,6 +7,7 @@ from time import perf_counter
 
 from PyQt6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, pyqtSignal
 
+from packed_bed.file_io import retry_file_operation
 from .project import TERMINAL_STATES, read_json, write_json
 
 
@@ -98,11 +99,11 @@ class RunController(QObject):
                         write_json(root / "run/status.json", value)
                 pending = root / f".pending-{job['attempt_id']}"
                 if pending.exists():
-                    shutil.rmtree(pending)
+                    retry_file_operation(shutil.rmtree, pending)
             except FileNotFoundError:
                 pending = root / f".pending-{job['attempt_id']}"
                 if pending.exists():
-                    shutil.rmtree(pending)
+                    retry_file_operation(shutil.rmtree, pending)
             except (OSError, ValueError) as exc:
                 value["message"] = f"Could not finish saving execution status: {exc}"
         job["state"] = "cancelled" if self.cancelling or job.get("state") == "cancelled" else ("completed" if exit_code == 0 else "failed")

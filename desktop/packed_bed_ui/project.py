@@ -17,6 +17,7 @@ import yaml
 
 from packed_bed.config import Case, CaseInputs
 from packed_bed.config.load import read_yaml_mapping, inspect_case, inspect_case_file
+from packed_bed.file_io import retry_file_operation, write_text
 from packed_bed.parameters import plain
 
 from .inputs import scientific_documents
@@ -35,15 +36,6 @@ class NeedsStudyUpdate(ValueError):
 
 def write_json(path: Path, value: dict) -> None:
     write_text(path, json.dumps(value, indent=2, allow_nan=False) + "\n")
-
-
-def write_text(path: Path, text: str) -> None:
-    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    try:
-        temporary.write_text(text, encoding="utf-8")
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def read_json(path: Path) -> dict:
@@ -321,7 +313,7 @@ class Project:
             raise ValueError("This case does not belong to the project.")
         index = self.cases.index(case)
         removed = self.root / f".deleted-{case.id}"
-        case.root.rename(removed)
+        retry_file_operation(case.root.rename, removed)
         self.cases.pop(index)
         self.metadata["cases"].pop(index)
         try:
@@ -329,9 +321,9 @@ class Project:
         except Exception:
             self.cases.insert(index, case)
             self.metadata["cases"].insert(index, case.metadata)
-            removed.rename(case.root)
+            retry_file_operation(removed.rename, case.root)
             raise
-        shutil.rmtree(removed)
+        retry_file_operation(shutil.rmtree, removed)
 
     def prepare_execution(self, cases: list[ProjectCase], *, max_workers: int | None = None) -> Path:
         if max_workers is None:
@@ -383,7 +375,7 @@ class Project:
         for case in self.cases:
             previous = case.root / ".previous-run"
             if previous.exists() and not case.run_folder.exists():
-                previous.rename(case.run_folder)
+                retry_file_operation(previous.rename, case.run_folder)
             if case.run_folder.exists():
                 path = case.run_folder / "status.json"
                 try:
@@ -394,7 +386,7 @@ class Project:
                     status.update(state="interrupted", message="The application closed before this run completed.")
                     write_json(path, status)
             if previous.exists():
-                shutil.rmtree(previous)
+                retry_file_operation(shutil.rmtree, previous)
             for pending in case.root.glob(".pending-*"):
                 if pending.is_dir():
-                    shutil.rmtree(pending)
+                    retry_file_operation(shutil.rmtree, pending)

@@ -16,6 +16,7 @@ from typing import Any, Callable, Mapping
 import numpy as np
 
 from .config import Case
+from .file_io import atomic_output, write_text
 
 
 RESULTS_FILENAME = "results.nc"
@@ -418,9 +419,8 @@ def extract_dataset(process, case: Case):
 def write_dataset(dataset, path: str | Path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    dataset.to_netcdf(temporary, engine="scipy")
-    temporary.replace(path)
+    with atomic_output(path) as temporary:
+        dataset.to_netcdf(temporary, engine="scipy")
     return path
 
 
@@ -642,9 +642,7 @@ def write_run_manifest(
     if failure_stage is not None or traceback_text is not None:
         manifest["failure"] = {"stage": failure_stage, "traceback": traceback_text}
     path = result.output_directory / MANIFEST_FILENAME
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
-    temporary.replace(path)
+    write_text(path, json.dumps(manifest, indent=2, sort_keys=True))
     return path
 
 

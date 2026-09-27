@@ -9,14 +9,13 @@ from pathlib import Path
 import re
 import shutil
 import stat
-from tempfile import TemporaryDirectory
 import unicodedata
-from uuid import uuid4
 from zipfile import ZipFile, BadZipFile, ZIP_DEFLATED, ZIP_STORED
 
 import yaml
 
 from packed_bed.config.load import read_yaml_mapping
+from packed_bed.file_io import TemporaryDirectory, atomic_output
 from packed_bed.plugins.catalogue import builtin_fingerprint, split_ref
 from packed_bed.plugins.storage import _relative, inspect_package, package_files
 
@@ -307,8 +306,7 @@ def export_project(project, destination, *, cancelled=lambda: False):
         raise ValueError("Wait for execution to finish before exporting.")
     if destination.is_relative_to(root) or destination.resolve().is_relative_to(root):
         raise ValueError("Save the archive outside the project folder.")
-    temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
-    try:
+    with atomic_output(destination, before_replace=lambda: _check(cancelled)) as temporary:
         with TemporaryDirectory(prefix="multisolid-export-") as staging:
             staging = Path(staging)
             _, files = _payload(root, exporting=True, cancelled=cancelled)
@@ -328,9 +326,6 @@ def export_project(project, destination, *, cancelled=lambda: False):
             with _open_archive(temporary):
                 pass  # Include the descriptor in the final size/file checks.
             _check(cancelled)
-            temporary.replace(destination)
-    finally:
-        temporary.unlink(missing_ok=True)
     return destination
 
 

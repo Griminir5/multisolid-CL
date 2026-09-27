@@ -12,6 +12,7 @@ import yaml
 
 from packed_bed.batch import load_batch_spec
 from packed_bed.config.load import read_yaml_mapping, resolve_path
+from packed_bed.file_io import retry_file_operation
 
 from .inputs import BED_RUN_FIELDS, definition_payload, new_step_ids
 from .project import (DOCUMENTS, ProjectCase, input_hashes, portable_documents, read_documents,
@@ -73,7 +74,7 @@ def recover_study_transaction(root):
         return
     manifest = folder / "transaction.json"
     if not manifest.exists():
-        shutil.rmtree(folder)  # Only staging occurred; active files were never touched.
+        retry_file_operation(shutil.rmtree, folder)  # Only staging occurred; active files were never touched.
         return
     transaction = read_json(manifest)
     committed = read_json(root / "project.json").get("study_transaction") == transaction["id"]
@@ -84,11 +85,11 @@ def recover_study_transaction(root):
             staged = folder / "new" / str(index)
             if previous.exists():
                 if target.exists():
-                    shutil.rmtree(target)
+                    retry_file_operation(shutil.rmtree, target)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                previous.rename(target)
+                retry_file_operation(previous.rename, target)
             elif not operation["existed"] and not staged.exists() and target.exists():
-                shutil.rmtree(target)
+                retry_file_operation(shutil.rmtree, target)
     else:
         # Execution summaries are diagnostic, and must not reference deleted cases.
         path = root / "execution.json"
@@ -101,7 +102,7 @@ def recover_study_transaction(root):
                 for ident in transaction.get("deleted_case_ids", []):
                     job.get("cases", {}).pop(ident, None)
                 write_json(path, job)
-    shutil.rmtree(folder)
+    retry_file_operation(shutil.rmtree, folder)
 
 
 def _json(value):
@@ -184,10 +185,10 @@ class StudyStore:
                 if operation["existed"]:
                     previous = transaction / "old" / str(index)
                     previous.parent.mkdir(parents=True, exist_ok=True)
-                    target.rename(previous)
+                    retry_file_operation(target.rename, previous)
                 if operation["replacement"]:
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    (transaction / "new" / str(index)).rename(target)
+                    retry_file_operation((transaction / "new" / str(index)).rename, target)
             metadata = deepcopy(metadata)
             metadata["study_transaction"] = identity
             write_json(root / "project.json", metadata)

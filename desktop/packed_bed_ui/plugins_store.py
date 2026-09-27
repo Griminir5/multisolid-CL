@@ -1,7 +1,7 @@
 """One current copy of each project plugin, saved with existing transactions."""
 from copy import deepcopy
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from packed_bed.file_io import TemporaryDirectory
 from uuid import uuid4
 
 from packed_bed.plugins.catalogue import Catalogue, builtin_fingerprint, split_ref

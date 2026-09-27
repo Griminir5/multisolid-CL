@@ -17,7 +17,7 @@ from packed_bed.batch import (
     load_batch_spec,
     run_batch_file,
 )
-from packed_bed import batch
+from packed_bed import batch, file_io
 from packed_bed.config import resolve_case
 from packed_bed.reports import RunResult
 
@@ -512,10 +512,10 @@ def test_csv_write_retries_until_reader_closes(tmp_path, monkeypatch):
             assert path.read_bytes() == previous
             reader.close()
 
-        monkeypatch.setattr(batch, "sleep", close_reader_on_retry)
+        monkeypatch.setattr(file_io, "sleep", close_reader_on_retry)
         record.status = "success"
         batch._write_records_csv(path, (record,), ())
-    assert delays == [batch._SUMMARY_REPLACE_DELAYS_S[0]]
+    assert delays == [file_io._RETRY_DELAYS_S[0]]
     with path.open(newline="") as handle:
         assert next(csv.DictReader(handle))["status"] == "success"
     assert list(tmp_path.iterdir()) == [path]
@@ -528,11 +528,11 @@ def test_csv_write_bounds_retries_and_preserves_snapshot_while_locked(tmp_path, 
     batch._write_records_csv(path, (record,), ())
     previous = path.read_bytes()
     delays = []
-    monkeypatch.setattr(batch, "sleep", delays.append)
+    monkeypatch.setattr(file_io, "sleep", delays.append)
     record.status = "success"
     with path.open("r"), pytest.raises(PermissionError):
         batch._write_records_csv(path, (record,), ())
-    assert delays == list(batch._SUMMARY_REPLACE_DELAYS_S)
+    assert delays == list(file_io._RETRY_DELAYS_S)
     assert path.read_bytes() == previous
     assert list(tmp_path.iterdir()) == [path]
 
@@ -553,7 +553,7 @@ def test_locked_checkpoint_does_not_interrupt_cases(tmp_path, monkeypatch, caplo
         return write_records(path, records, axes)
 
     monkeypatch.setattr(batch, "_write_records_csv", hold_reader_during_first_completion)
-    monkeypatch.setattr(batch, "sleep", lambda _delay: None)
+    monkeypatch.setattr(file_io, "sleep", lambda _delay: None)
     result = run_batch_file(_write_two_case_batch(tmp_path, workers=workers), run_case_fn=_successful_fake_run)
     assert locked
     assert [record.status for record in result.records] == ["success", "success"]
@@ -577,7 +577,7 @@ def test_persistent_final_lock_reports_summary_error_after_cases_complete(tmp_pa
         return write_records(path, records, axes)
 
     monkeypatch.setattr(batch, "_write_records_csv", hold_reader_until_batch_returns)
-    monkeypatch.setattr(batch, "sleep", lambda _delay: None)
+    monkeypatch.setattr(file_io, "sleep", lambda _delay: None)
     try:
         with pytest.raises(RuntimeError, match="Could not write final batch summary") as error:
             run_batch_file(_write_two_case_batch(tmp_path), run_case_fn=_successful_fake_run)
@@ -618,6 +618,6 @@ def test_csv_write_does_not_retry_unrelated_permission_errors(tmp_path, monkeypa
         raise PermissionError("unrelated access error")
 
     monkeypatch.setattr(Path, "replace", deny_replace)
-    monkeypatch.setattr(batch, "sleep", lambda _delay: pytest.fail("Unexpected retry"))
+    monkeypatch.setattr(file_io, "sleep", lambda _delay: pytest.fail("Unexpected retry"))
     with pytest.raises(PermissionError, match="unrelated access error"):
         batch._write_records_csv(path, (record,), ())

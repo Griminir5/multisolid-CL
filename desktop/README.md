@@ -358,6 +358,15 @@ commit, recovery restores old cases; after it, recovery deletes temporary backup
 Recovery runs before loading case inputs. Project archives transfer saved
 definitions and exclude recovery checkpoints and run data.
 
+File publication and temporary-directory cleanup share the engine's
+[`file_io.py`](../packed_bed/file_io.py) policy. Status files, results, manifests,
+cache records, plugin files and exports use unique temporary files before atomic
+replacement. Brief Windows reader locks are retried for up to 0.75 seconds;
+permanent access errors still surface. Run/study folder swaps use the same retry
+policy while retaining their existing rollback order. Export cancellation is
+checked again before each replacement attempt. Temporary-file and scratch-directory
+cleanup preserve the original failure if cleanup also fails.
+
 The application reads the current project format (3) and run-snapshot format (1).
 Older project formats are rejected rather than migrated. Project and solver locks
 prevent concurrent access. Reopening after an interrupted session marks unfinished

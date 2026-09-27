@@ -2,14 +2,15 @@
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+import hashlib
 import json
 from pathlib import Path
 import shutil
-import tempfile
 from time import perf_counter
 
 from filelock import FileLock, Timeout
 
+from ..file_io import TemporaryDirectory, retry_file_operation, write_text
 from .bundle import file_hash
 
 _callbacks = ContextVar("compiled_callbacks", default=(None, None))
@@ -60,20 +61,7 @@ def cache_lock(directory, key):
 
 
 def write_record(path, record):
-    path = Path(path)
-    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix="record-",
-                                     encoding="utf-8", delete=False) as stream:
-        temporary = Path(stream.name)
-        try:
-            json.dump(record, stream, allow_nan=False)
-        except BaseException:
-            stream.close()
-            temporary.unlink(missing_ok=True)
-            raise
-    try:
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_text(path, json.dumps(record, allow_nan=False))
 
 
 def valid_library(path):
@@ -86,9 +74,16 @@ def valid_library(path):
 
 @contextmanager
 def build_directory(cache, key):
-    """Caller holds key's lock; leftovers therefore have no active builder."""
-    for path in cache.glob(key + "-tmp-*"):
-        if path.is_dir():
-            shutil.rmtree(path)
-    with tempfile.TemporaryDirectory(prefix=key + "-tmp-", dir=cache) as directory:
-        yield Path(directory)
+    """Caller holds key's lock; keep compiler paths short on Windows."""
+    # A full binary SHA in the scratch name pushed real case paths beyond
+    # CreateProcess's working-directory limit, even though Python could open them.
+    # Serialize on the short name too, so a prefix collision cannot remove
+    # another key's live build. Published libraries still use the full SHA.
+    scratch_key = "build-" + hashlib.sha256(key.encode()).hexdigest()[:16]
+    with cache_lock(cache, scratch_key):
+        for prefix in (key, scratch_key):
+            for path in cache.glob(prefix + "-tmp-*"):
+                if path.is_dir():
+                    retry_file_operation(shutil.rmtree, path)
+        with TemporaryDirectory(prefix=scratch_key + "-tmp-", dir=cache) as directory:
+            yield Path(directory)

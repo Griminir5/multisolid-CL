@@ -6,7 +6,6 @@ import ctypes as C
 import hashlib
 import json
 import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -15,6 +14,7 @@ from types import SimpleNamespace
 import numpy as np
 from scipy.sparse import csc_matrix
 
+from ..file_io import TemporaryDirectory
 from .band import supports_avx2
 from .codegen import emit_model
 from .compiler import compile_kernel, library_suffix, platform_identity, simd_flags, compiler_flags
@@ -85,7 +85,7 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
 
     differential = np.asarray(simulation.VariableTypes) == cnDifferential
     digest.update(np.asarray(simulation.Values, dtype=float)[differential].tobytes())
-    with tempfile.TemporaryDirectory(
+    with TemporaryDirectory(
         prefix="fingerprint-", dir=cache_directory
     ) as temporary:
         stacks = Path(temporary) / "equations.bin"

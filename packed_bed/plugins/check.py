@@ -5,6 +5,7 @@ import sys
 import yaml
 
 from packed_bed.parameters import ParameterSpec, plain, resolve_parameters
+from packed_bed.file_io import write_text
 from .catalogue import Catalogue
 from .schema import Manifest
 from .storage import inspect_package, load_factory, package_hash
@@ -63,12 +64,8 @@ def generate_metadata(folder):
                 specs = getattr(sys.modules[factory.__module__], 'PARAMETERS', {})
                 item.update(family_metadata(factory(resolve_parameters(specs, item.get('values', {})))))
     updated = Manifest.model_validate(data)
-    temporary = folder / '.manifest.tmp'
-    try:
-        temporary.write_text(yaml.safe_dump(updated.model_dump(mode='json', exclude_defaults=True), sort_keys=False, allow_unicode=True), encoding='utf-8')
-        temporary.replace(folder / 'manifest.yaml')
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_text(folder / 'manifest.yaml', yaml.safe_dump(
+        updated.model_dump(mode='json', exclude_defaults=True), sort_keys=False, allow_unicode=True))
     return updated
 
 

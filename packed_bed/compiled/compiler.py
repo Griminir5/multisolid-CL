@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from time import perf_counter
 
+from ..file_io import retry_file_operation
 from .bundle import asset, bundle_root, manifest, file_hash
 from .cache import build_directory, cache_lock, check_cancelled, progress, valid_library, write_record
 
@@ -170,7 +171,7 @@ def compile_kernel(
                 print(diagnostics, file=sys.stderr)
             check_cancelled()
             try:
-                (directory / output).replace(library)
+                retry_file_operation((directory / output).replace, library)
             except OSError as exc:
                 raise RuntimeError("Cannot replace a damaged compiled library. Close other runs and retry.") from exc
             checksum = file_hash(library)

@@ -108,3 +108,62 @@ def test_frozen_application_never_falls_back_to_host(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path / "_internal"), raising=False)
     with pytest.raises(RuntimeError, match="runtime is missing"):
         bundle.bundle_root()
+
+
+def test_compile_in_deep_case_cache(native_tools, tmp_path):
+    # round_027's cache is 179 characters; the old build name took it to 264.
+    root = tmp_path.resolve()
+    cache = root / ("x" * max(1, 180 - len(str(root)) - 1))
+    cache.mkdir(parents=True, exist_ok=True)
+    assert len(str(cache)) >= 180
+    source = 'PB_EXPORT double deep_cache_square(double x) { return x*x; }'
+    path, metadata = compile_kernel(source, cache)
+    assert not metadata["cache_hit"]
+    library = ctypes.CDLL(str(path))
+    library.deep_cache_square.argtypes = [ctypes.c_double]
+    library.deep_cache_square.restype = ctypes.c_double
+    assert library.deep_cache_square(4) == 16
+    cached_path, cached = compile_kernel(source, cache)
+    assert cached_path == path and cached["cache_hit"]
+    assert not list(cache.glob("*-tmp-*"))
+
+
+def test_short_build_directory_recovers_leftovers_without_removing_other_builds(tmp_path):
+    from packed_bed.compiled.cache import build_directory
+
+    key = "binary-" + "a" * 64
+    legacy = tmp_path / (key + "-tmp-abandoned")
+    legacy.mkdir()
+    with cache_lock(tmp_path, key), build_directory(tmp_path, key) as directory:
+        assert not legacy.exists()
+        abandoned = directory
+    # Simulate a killed builder leaving files behind.
+    abandoned.mkdir()
+    (abandoned / "kernel.cpp").write_text("partial build")
+    other_key = "binary-" + "b" * 64
+    with cache_lock(tmp_path, other_key), build_directory(tmp_path, other_key) as other:
+        with cache_lock(tmp_path, key), build_directory(tmp_path, key) as directory:
+            assert not abandoned.exists()
+            assert other.is_dir() and directory.is_dir()
+        assert other.is_dir()
+    assert not list(tmp_path.glob("*-tmp-*"))
+
+
+def test_short_build_name_collision_waits_without_removing_live_build(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from packed_bed.compiled import cache
+
+    # Force different full keys to choose the same short scratch name.
+    monkeypatch.setattr(cache, "hashlib", SimpleNamespace(
+        sha256=lambda value: SimpleNamespace(hexdigest=lambda: "0" * 64)))
+    with cache_lock(tmp_path, "first"), cache.build_directory(tmp_path, "first") as directory:
+        marker = directory / "kernel.cpp"
+        marker.write_text("live build")
+        started = time.monotonic()
+        with cache_lock(tmp_path, "second"):
+            with build_events(cancel_requested=lambda: time.monotonic() - started > .2):
+                with pytest.raises(InterruptedError):
+                    with cache.build_directory(tmp_path, "second"):
+                        pytest.fail("Colliding build entered another key's scratch space")
+        assert marker.read_text() == "live build"
+    assert not list(tmp_path.glob("*-tmp-*"))

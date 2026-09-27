@@ -4,7 +4,7 @@ from contextlib import ExitStack
 from pathlib import Path
 import shutil
 import sys
-from tempfile import TemporaryDirectory
+from packed_bed.file_io import TemporaryDirectory
 
 import yaml
 from pydantic import ValidationError

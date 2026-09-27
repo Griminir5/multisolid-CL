@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import shutil
 
 import pytest
@@ -7,6 +8,90 @@ import yaml
 from packed_bed.config import load_case
 from packed_bed_ui.project import Project, input_hashes, read_documents, read_json, write_documents, write_json
 from packed_bed_ui.worker import activate_snapshot
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows read handles block file replacement")
+@pytest.mark.parametrize("filename", ["execution.json", "status.json"])
+def test_status_write_retries_until_reader_closes(tmp_path, monkeypatch, filename):
+    from packed_bed import file_io as storage
+
+    path = tmp_path / filename
+    write_json(path, {"state": "running"})
+    previous = path.read_bytes()
+    delays = []
+    with path.open("r") as reader:
+        def close_reader_on_retry(delay):
+            delays.append(delay)
+            assert path.read_bytes() == previous
+            reader.close()
+
+        monkeypatch.setattr(storage, "sleep", close_reader_on_retry)
+        write_json(path, {"state": "completed"})
+
+    assert len(delays) == 1
+    assert read_json(path) == {"state": "completed"}
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows read handles block file replacement")
+def test_status_write_bounds_retries_and_preserves_locked_snapshot(tmp_path, monkeypatch):
+    from packed_bed import file_io as storage
+
+    path = tmp_path / "status.json"
+    write_json(path, {"state": "running"})
+    previous = path.read_bytes()
+    delays = []
+    monkeypatch.setattr(storage, "sleep", delays.append)
+    with path.open("r"), pytest.raises(PermissionError):
+        write_json(path, {"state": "completed"})
+
+    assert 0 < len(delays) <= 5
+    assert sum(delays) <= 1.0
+    assert path.read_bytes() == previous
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_status_write_does_not_retry_unrelated_permission_errors(tmp_path, monkeypatch):
+    from packed_bed import file_io as storage
+
+    path = tmp_path / "status.json"
+    write_json(path, {"state": "running"})
+
+    def deny_replace(_source, _target):
+        raise PermissionError("unrelated access error")
+
+    monkeypatch.setattr(Path, "replace", deny_replace)
+    monkeypatch.setattr(storage, "sleep", lambda _: pytest.fail("Unexpected retry"))
+    with pytest.raises(PermissionError, match="unrelated access error"):
+        write_json(path, {"state": "completed"})
+
+    assert read_json(path) == {"state": "running"}
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows readers block run folder swaps")
+def test_rerun_waits_for_previous_status_reader(tmp_path, source_case, monkeypatch):
+    from packed_bed import file_io
+
+    project = Project.create(tmp_path / "project")
+    case = project.add_case_from_files(source_case)
+    first = read_json(project.prepare_execution([case]))["attempt_id"]
+    activate_snapshot(case.root / f".pending-{first}")
+    write_json(case.run_folder / "status.json", {"state": "failed"})
+    second = read_json(project.prepare_execution([case]))["attempt_id"]
+    delays = []
+    with (case.run_folder / "status.json").open() as reader:
+        def release(delay):
+            delays.append(delay)
+            assert read_json(case.run_folder / "snapshot.json")["attempt_id"] == first
+            reader.close()
+
+        monkeypatch.setattr(file_io, "sleep", release)
+        activate_snapshot(case.root / f".pending-{second}")
+    assert len(delays) == 1
+    assert read_json(case.run_folder / "snapshot.json")["attempt_id"] == second
+    assert read_json(case.run_folder / "status.json")["state"] == "queued"
+    assert not (case.root / ".previous-run").exists()
 
 
 def test_project_starts_empty_and_owns_multiple_independent_cases(tmp_path, source_case):

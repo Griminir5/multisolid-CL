@@ -14,13 +14,13 @@ import re
 import shutil
 import stat
 import sys
-import tempfile
 import unicodedata
 import zipfile
 
 
 from .catalogue import Catalogue
 from .schema import Manifest
+from ..file_io import TemporaryDirectory, atomic_output, retry_file_operation, write_text
 
 MAX_PACKAGE_BYTES = 100 * 1024 * 1024
 MAX_PACKAGE_FILES = 5000
@@ -170,7 +170,7 @@ def inspect_package(source):
     with ExitStack() as stack:
         folder = Path(source)
         if not folder.is_dir():
-            folder = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='multisolid-plugin-')))
+            folder = Path(stack.enter_context(TemporaryDirectory(prefix='multisolid-plugin-')))
             try:
                 with zipfile.ZipFile(source) as archive:
                     entries = archive.infolist()
@@ -201,7 +201,7 @@ def copy_package(source, destination):
         if not target.resolve().is_relative_to(Path(destination).resolve()):
             raise ValueError('Plugin files must stay within the destination.')
         if target.exists():
-            shutil.rmtree(target)
+            retry_file_operation(shutil.rmtree, target)
         for name, data in files.items():
             path = target / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -215,16 +215,12 @@ def pack_plugin(folder, destination):
         raise ValueError('Write the archive outside its source plugin folder.')
     with inspect_package(folder) as package:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        temporary = destination.with_name('.' + destination.name + '.tmp')
-        try:
+        with atomic_output(destination) as temporary:
             with zipfile.ZipFile(temporary, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
                 for name, path in package_files(package.folder):
                     info = zipfile.ZipInfo(name)
                     info.compress_type = zipfile.ZIP_DEFLATED
                     archive.writestr(info, path.read_bytes())
-            temporary.replace(destination)
-        finally:
-            temporary.unlink(missing_ok=True)
     return destination
 
 
@@ -308,9 +304,7 @@ def approve_hash(digest):
     path = approval_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     data = sorted(approved_hashes() | {digest})
-    temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(data) + '\n')
-    temporary.replace(path)
+    write_text(path, json.dumps(data) + '\n')
 
 
 def load_factory(provider, entry, catalogue, approved=()):

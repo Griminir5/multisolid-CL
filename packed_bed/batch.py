@@ -15,8 +15,7 @@ import signal
 from pathlib import Path
 from queue import Empty
 import re
-from tempfile import TemporaryDirectory
-from time import perf_counter, sleep
+from time import perf_counter
 from typing import Annotated, Any, Callable
 import unicodedata
 
@@ -25,14 +24,13 @@ import yaml
 
 from .config import Case, PackedBedValidationError, resolve_case
 from .config.load import read_yaml_mapping, resolve_path
+from .file_io import atomic_output, is_windows_file_lock
 from .config.models import ConfigModel, ConfigString, _as_tuple
 from .reports import RunResult
 
 
 _PROCESS_TERMINATE_GRACE_S = 5.0
 _PROCESS_POLL_INTERVAL_S = 0.05
-_SUMMARY_REPLACE_DELAYS_S = (0.05, 0.1, 0.2, 0.4)
-_WINDOWS_FILE_LOCK_ERRORS = (5, 32, 33)
 _LOGGER = logging.getLogger(__name__)
 _SLUG_UNSAFE_RE = re.compile(r"[^a-z0-9]+")
 _SINGLE_THREAD_ENVIRONMENT = {
@@ -472,8 +470,7 @@ def _write_records_csv(
         *(f"{key}_balance_{name}" for key in ("heat", "mass") for name in balance_fields),
     ]
     # Replace only a complete, flushed CSV; interrupted writes leave the previous snapshot intact.
-    with TemporaryDirectory(dir=path.parent) as temporary_directory:
-        temporary_path = Path(temporary_directory) / path.name
+    with atomic_output(path) as temporary_path:
         with temporary_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=columns)
             writer.writeheader()
@@ -489,17 +486,6 @@ def _write_records_csv(
                 })
             handle.flush()
             os.fsync(handle.fileno())
-        # Windows readers commonly allow writes but deny replacing an open file.
-        # Keep the complete temporary snapshot while retrying a short-lived lock.
-        for attempt in range(len(_SUMMARY_REPLACE_DELAYS_S) + 1):
-            try:
-                temporary_path.replace(path)
-                break
-            except PermissionError as exc:
-                if (getattr(exc, "winerror", None) not in _WINDOWS_FILE_LOCK_ERRORS
-                        or attempt == len(_SUMMARY_REPLACE_DELAYS_S)):
-                    raise
-                sleep(_SUMMARY_REPLACE_DELAYS_S[attempt])
 
 
 def _run_case_direct(
@@ -816,7 +802,7 @@ def run_batch_file(
         try:
             _write_records_csv(summary_path, records, axis_ids)
         except PermissionError as exc:
-            if getattr(exc, "winerror", None) not in _WINDOWS_FILE_LOCK_ERRORS:
+            if not is_windows_file_lock(exc):
                 raise
             if not checkpoint_blocked:
                 _LOGGER.warning(

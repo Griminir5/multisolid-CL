@@ -1,6 +1,7 @@
 """Report selections and real Excel output, without running a solver."""
 
 from copy import deepcopy
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -215,12 +216,58 @@ def test_atomic_failure_cancellation_and_nonfinite(recorded, tmp_path, monkeypat
         with pytest.raises(PermissionError, match="locked"):
             write_workbook(recorded.run_folder, definition, destination)
     assert destination.read_bytes() == b"previous workbook"
-    assert not list(tmp_path.glob(".report-*.xlsx"))
+    assert not list(tmp_path.glob(".existing.xlsx.*.tmp"))
     assert (recorded.run_folder / "output/results.nc").exists()
     assert workbook.excel_value(float("nan")) == "nan"
     assert workbook.excel_value(float("inf")) == "inf"
     with pytest.raises(ValueError, match="overlong"):
         workbook.excel_value("x" * 32768)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows readers block XML cleanup")
+@pytest.mark.parametrize("cancel", [False, True])
+def test_export_xml_cleanup_waits_for_reader(recorded, tmp_path, monkeypatch, cancel):
+    from openpyxl.worksheet._writer import WorksheetWriter, ALL_TEMP_FILES
+    from packed_bed import file_io
+
+    destination = tmp_path / "export.xlsx"
+    destination.write_bytes(b"previous workbook")
+    definition = report(sheet(columns=[column("outlet_temperature")]))
+    original_cleanup = WorksheetWriter.cleanup
+    held, delays, scratch = [], [], set(ALL_TEMP_FILES)
+
+    def locked_once(writer):
+        if not held and Path(writer.out).exists():
+            held.append(Path(writer.out).open("rb"))
+        original_cleanup(writer)
+
+    def release(delay):
+        delays.append(delay)
+        held[0].close()
+
+    def interrupted(*args, **kwargs):
+        yield [0., 300.]
+        raise ExportCancelled()
+
+    monkeypatch.setattr(WorksheetWriter, "cleanup", locked_once)
+    monkeypatch.setattr(file_io, "sleep", release)
+    try:
+        if cancel:
+            monkeypatch.setattr(workbook, "table_rows", interrupted)
+            with pytest.raises(ExportCancelled):
+                write_workbook(recorded.run_folder, definition, destination)
+            assert destination.read_bytes() == b"previous workbook"
+        else:
+            write_workbook(recorded.run_folder, definition, destination)
+            book = load_workbook(destination)
+            assert book["Data"]["B2"].value == 301
+            book.close()
+    finally:
+        for reader in held:
+            reader.close()
+    assert len(delays) == 1
+    assert set(ALL_TEMP_FILES) == scratch
+    assert not list(tmp_path.glob(".export.xlsx.*.tmp"))
 
 
 def test_editor_report_persistence_readonly_and_duplicate(qt_app, recorded, monkeypatch):

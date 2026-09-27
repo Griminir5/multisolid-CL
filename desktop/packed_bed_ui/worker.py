@@ -14,6 +14,7 @@ import traceback
 
 from packed_bed.batch import BatchCaseRecord, run_cases_in_processes
 from packed_bed.config import load_case
+from packed_bed.file_io import retry_file_operation
 
 from .project import SNAPSHOT_VERSION, REFERENCES, input_hashes, read_json, require_desktop_solver, write_json
 
@@ -46,15 +47,15 @@ def activate_snapshot(pending: Path) -> Path:
     if previous.exists():
         raise ValueError("An interrupted replacement needs recovery. Reopen the project first.")
     if folder.exists():
-        folder.rename(previous)
+        retry_file_operation(folder.rename, previous)
     try:
-        pending.rename(folder)
+        retry_file_operation(pending.rename, folder)
     except Exception:
         if previous.exists():
-            previous.rename(folder)
+            retry_file_operation(previous.rename, folder)
         raise
     if previous.exists():
-        shutil.rmtree(previous)
+        retry_file_operation(shutil.rmtree, previous)
     return folder
 
 
@@ -247,10 +248,10 @@ def _execute_project_job(path, case_worker):
             folder = record.case_directory / "run"
             if previous.exists():
                 if folder.exists():
-                    shutil.rmtree(previous)
+                    retry_file_operation(shutil.rmtree, previous)
                 else:
-                    previous.rename(folder)
+                    retry_file_operation(previous.rename, folder)
             pending = record.run_yaml_path.parent.parent
             if pending.exists():
-                shutil.rmtree(pending)
+                retry_file_operation(shutil.rmtree, pending)
         (path.parent / f".cancel-{attempt_id}").unlink(missing_ok=True)

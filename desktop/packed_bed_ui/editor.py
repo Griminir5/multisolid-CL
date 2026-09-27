@@ -3,7 +3,7 @@
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from packed_bed.file_io import TemporaryDirectory
 
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtSvgWidgets import QSvgWidget
