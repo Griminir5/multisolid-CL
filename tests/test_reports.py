@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 import hashlib
 import json
+import os
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -24,6 +25,40 @@ from packed_bed.reports import (
     write_run_manifest,
 )
 from test_config import _case_documents, _write_case
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows readers block replacement")
+def test_dataset_publication_waits_for_reader(tmp_path, monkeypatch):
+    from packed_bed import file_io
+
+    path = write_dataset(xr.Dataset({"value": ("time", [1.])}), tmp_path / "results.nc")
+    delays = []
+    with path.open("rb") as reader:
+        def release(delay):
+            delays.append(delay)
+            assert load_dataset(path)["value"].item() == 1.
+            reader.close()
+
+        monkeypatch.setattr(file_io, "sleep", release)
+        write_dataset(xr.Dataset({"value": ("time", [2.])}), path)
+    assert len(delays) == 1
+    assert load_dataset(path)["value"].item() == 2.
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_failed_dataset_write_cleans_partial_and_keeps_results(tmp_path):
+    path = tmp_path / "results.nc"
+    path.write_bytes(b"previous results")
+
+    class BrokenDataset:
+        def to_netcdf(self, temporary, **kwargs):
+            temporary.write_bytes(b"partial results")
+            raise OSError("disk full")
+
+    with pytest.raises(OSError, match="disk full"):
+        write_dataset(BrokenDataset(), path)
+    assert path.read_bytes() == b"previous results"
+    assert list(tmp_path.iterdir()) == [path]
 
 
 class FakeDomain:
