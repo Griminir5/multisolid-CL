@@ -1,8 +1,8 @@
 """Species lists, reaction families and a fitted Graphviz reaction graph."""
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import (
-    QGroupBox, QHBoxLayout, QHeaderView, QLabel, QTreeWidget, QTreeWidgetItem,
+    QSplitter, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget, QDialog, QFormLayout, QComboBox,
 )
 
@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from packed_bed.definitions import bound_reactions, resolve_bindings, binding_candidates
 from packed_bed.plugins.catalogue import builtin_manifest, split_ref
 
-from .editor_widgets import SelectionList, action_button, choose_items, dialog_buttons
+from .editor_widgets import CollapsibleSection, SelectionList, action_button, choose_items, dialog_buttons
 from .catalogue_widgets import species_choices, component_key, definition_details
 from .reaction_graph import NetworkView
 
@@ -30,18 +30,22 @@ class ChemistryPage(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         left = QWidget()
-        lists = QVBoxLayout(left)
+        self.section_layout = lists = QVBoxLayout(left)
+        self.sections = {}
         lists.setContentsMargins(0, 0, 0, 0)
         for phase, title in (("gas", "Gas species"), ("solid", "Solid species")):
-            group = QGroupBox(title)
-            group_layout = QVBoxLayout(group)
+            group = CollapsibleSection(title)
+            self.sections[phase] = group
+            group_layout = group.content_layout
             selection = SelectionList({}, f"{phase} species")
+            selection.table.setMinimumHeight(68)
             setattr(self, phase + "_list", selection)
             group_layout.addWidget(selection)
             lists.addWidget(group, 1)
             selection.changed.connect(lambda values, phase=phase: editor.set_species(phase, values))
-        group = QGroupBox("Reaction families")
-        group_layout = QVBoxLayout(group)
+        group = CollapsibleSection("Reaction families")
+        self.sections["reactions"] = group
+        group_layout = group.content_layout
         self.families = QTreeWidget()
         self.families.setColumnCount(4)
         self.families.setHeaderHidden(True)
@@ -51,17 +55,22 @@ class ChemistryPage(QWidget):
         self.families.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in range(1, 4):
             self.families.header().setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
-        self.families.setColumnWidth(1, 88)
-        self.families.setColumnWidth(2, 85)
+        self.families.setColumnWidth(1, 98)
+        self.families.setColumnWidth(2, 100)
         self.families.setColumnWidth(3, 36)
         self.families.itemChanged.connect(self.toggle_reaction)
         group_layout.addWidget(self.families)
         group_layout.addWidget(action_button("+ Add reaction families…", self.add_families))
         lists.addWidget(group, 2)
+        lists.addStretch(0)
+        for section in self.sections.values():
+            section.expandedChanged.connect(self.update_section_layout)
         self.cautions = QLabel()
         self.cautions.setWordWrap(True)
         lists.addWidget(self.cautions)
-        layout.addWidget(left, 1)
+        self.splitter = QSplitter()
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.addWidget(left)
         graph = QGroupBox("Species and reactions")
         graph_layout = QVBoxLayout(graph)
         self.graph = NetworkView()
@@ -83,10 +92,20 @@ class ChemistryPage(QWidget):
         self.graph.statusChanged.connect(lambda text: self.graph_retry.setVisible(bool(text) and not text.startswith("Updating")))
         self.graph_status.hide()
         self.graph_retry.hide()
-        key = QLabel("Gas · green     Solid · sand     Reaction · violet\nDashed links: catalysts / rate dependencies. Red nodes: missing species.\nClick a node to highlight its links; click again or empty space to clear. Scroll to zoom; drag to pan.")
+        key = QLabel("Gas · green     Solid · copper     Reaction · neutral\nDashed links: catalysts / rate dependencies. Red nodes: missing species.\nClick a node to highlight its links; click again or empty space to clear. Scroll to zoom; drag to pan.")
         key.setWordWrap(True)
         graph_layout.addWidget(key)
-        layout.addWidget(graph, 1)
+        self.splitter.addWidget(graph)
+        self.splitter.setSizes([560, 620])
+        layout.addWidget(self.splitter)
+
+    def update_section_layout(self):
+        expanded = False
+        for index, (key, section) in enumerate(self.sections.items()):
+            stretch = (2 if key == "reactions" else 1) if section.toggle.isChecked() else 0
+            self.section_layout.setStretch(index, stretch)
+            expanded = expanded or bool(stretch)
+        self.section_layout.setStretch(len(self.sections), 0 if expanded else 1)
 
     def load(self):
         self.loading = True
@@ -108,6 +127,7 @@ class ChemistryPage(QWidget):
             family = self.family(name)
             root = QTreeWidgetItem(self.families, [family.label if family else name + ' — Missing definition'])
             root.setData(0, Qt.ItemDataRole.UserRole, name)
+            root.setSizeHint(0, QSize(0, 34))
             self.families.setItemWidget(root, 3, action_button("×", lambda _, name=name: self.remove_family(name),
                                                              tooltip=f"Remove {name}"))
             if family:
@@ -272,13 +292,14 @@ class ChemistryPage(QWidget):
         reactions = [r for family in families if family for r in family.reactions if r.id in selected]
         gases = self.editor.get(('chemistry', 'gas_species'), [])
         solids = self.editor.get(('solids', 'solid_species'), [])
-        labels = {key: self.editor.species_label(key) for key in gases + solids}
+        labels = {key: key for key in gases + solids}
+        tooltips = {key: self.editor.species_label(key) for key in gases + solids}
         for family in families:
             if family:
-                labels.update({r.id: r.name + ' — ' + self.editor.catalogue().manifest(split_ref(family.reference)[0]).name for r in family.reactions})
+                labels.update({r.id: r.name for r in family.reactions})
         equations = [tuple(sorted(r.stoichiometry.items())) for r in reactions]
         self.cautions.setText('Overlapping selected reactions contribute additive rates. Review the mechanism selections and bindings.'
                               if len(equations) != len(set(equations)) else '')
         records = {key: SimpleNamespace(phase=phase) for phase, keys in (('gas', gases), ('solid', solids)) for key in keys}
         self.graph.draw(self.editor.get(("chemistry", "gas_species"), []),
-                        self.editor.get(("solids", "solid_species"), []), reactions, SimpleNamespace(records=records), labels=labels)
+                        self.editor.get(("solids", "solid_species"), []), reactions, SimpleNamespace(records=records), labels=labels, tooltips=tooltips)

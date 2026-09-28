@@ -19,6 +19,9 @@ from .editor_widgets import action_button, number, display, table, cell, choices
 from .project import write_text
 
 
+from .theme import numeric
+
+
 class PluginCheck(QWidget):
     """One inline, cancellable check and approval flow for every plugin action."""
     busyChanged = pyqtSignal(bool)
@@ -141,7 +144,7 @@ class ParameterForm(QWidget):
         for row, key in enumerate(self.keys):
             spec = definition['parameters'][key]
             cell(self.parameters, row, 0, key, editable=False, tooltip=spec['description'])
-            cell(self.parameters, row, 1, definition.get('values', {}).get(key, spec['default']))
+            cell(self.parameters, row, 1, definition.get('values', {}).get(key, spec['default']), numeric_value=True)
             cell(self.parameters, row, 2, spec['unit'], editable=False)
         self.parameters.resizeRowsToContents()
         layout.addWidget(self.parameters)
@@ -159,11 +162,13 @@ class ParameterForm(QWidget):
                            for row, key in enumerate(self.keys)}}}
 
 
-def text_fields(form, rows, values):
+def text_fields(form, rows, values, *, numeric_keys=None):
     fields = {}
     for key, label, default in rows:
         value = values.get(key, default)
         field = QLineEdit(', '.join(map(display, value)) if isinstance(value, (tuple, list)) else display(value))
+        if numeric_keys is None or key in numeric_keys:
+            numeric(field)
         field.setObjectName(key)
         form.addRow(label, field)
         fields[key] = field
@@ -183,8 +188,8 @@ class SpeciesForm(QWidget):
         form = QFormLayout()
         self.fields = text_fields(form, (
             ('name', 'Name', ''), ('chemical_key', 'Chemical key', ''), ('mw', 'Molecular weight (kg/mol)', ''),
-            ('source', 'Scientific source', ''), ('notes', 'Notes', '')), definition)
-        self.phase = choices(['gas', 'solid'])
+            ('source', 'Scientific source', ''), ('notes', 'Notes', '')), definition, numeric_keys={'mw'})
+        self.phase = choices(['gas', 'solid'], binary=True)
         self.phase.setCurrentText(definition.get('phase', 'gas'))
         form.addRow('Phase', self.phase)
         limits = dict(zip(('low', 'high'), definition.get('temperature_range', [298.15, 1200])))

@@ -1,5 +1,6 @@
 """Run, solver and output selections in three equal columns."""
 
+from PyQt6.QtCore import QSignalBlocker
 from PyQt6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QSpinBox, QVBoxLayout, QWidget,
@@ -12,11 +13,13 @@ from packed_bed.reports import REPORT_REGISTRY
 from packed_bed.solver_support import DESKTOP_SOLVERS, SOLVER_LABELS, require_desktop_solver
 from types import SimpleNamespace
 
+from .theme import numeric
+
 from .editor_widgets import SelectionList, action_button, display, number
 
 
-def form_panel(title):
-    panel = QGroupBox(title)
+def form_panel(title, *, panel_type=QGroupBox):
+    panel = panel_type(title)
     form = QFormLayout(panel)
     form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
     form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
@@ -41,12 +44,12 @@ class GeneralPage(QWidget):
         solver, form = form_panel("Solver")
         self.backend = editor.field(form, ("run", "solver", "backend"), "Backend", options=[
             ("Standard", "daetools"), ("Compiled", "compiled"),
-        ], default="daetools")
-        self.solver = editor.field(form, ("run", "solver", "name"), "Linear solver", options=[
-            ("SuperLU", "superlu"),
-            *[(SOLVER_LABELS.get(key, key.replace("_", " ").title()), key) for key in SolverConfig.model_fields["name"].annotation.__args__
-              if key != "superlu"],
-        ])
+        ], default="daetools", binary=True)
+        self.solver = editor.field(form, ("run", "solver", "name"), "Linear solver", options=[])
+        self.solver_status = QLabel()
+        self.solver_status.setWordWrap(True)
+        self.solver_status.setProperty("state", "warning")
+        form.addRow(self.solver_status)
         for widget, key in ((self.backend, "backend"), (self.solver, "name")):
             widget.currentIndexChanged.disconnect()
             widget.currentIndexChanged.connect(lambda _, widget=widget, key=key: self.select_solver(key, widget.currentData()))
@@ -54,8 +57,6 @@ class GeneralPage(QWidget):
                      kind="spin", bounds=(0, 1024), default=0)
         threads.setToolTip("KLU factorization is serial. This setting still controls other applicable numerical work.")
         editor.field(form, ("run", "solver", "relative_tolerance"), "Relative tolerance")
-        editor.field(form, ("run", "solver", "suppress_algebraic_errors"), "Suppress algebraic errors",
-                     kind="check", default=False)
         form.addRow(action_button("Advanced solver settings…", self.advanced))
         self.cache_status = QLabel("Cache checked when the run starts")
         self.cache_status.setWordWrap(True)
@@ -87,17 +88,37 @@ class GeneralPage(QWidget):
 
     def update_solver_choices(self):
         backend = self.editor.get(("run", "solver", "backend"), "daetools")
+        current = self.editor.get(("run", "solver", "name"))
         self.cache_status.setVisible(backend == "compiled")
-        for index in range(self.solver.count()):
-            name = self.solver.itemData(index)
-            enabled, reason = True, ""
-            try:
-                require_desktop_solver(SimpleNamespace(run=SimpleNamespace(solver=SimpleNamespace(backend=backend, name=name))))
-            except ValueError as exc:
-                enabled, reason = False, str(exc)
-            item = self.solver.model().item(index)
-            item.setEnabled(enabled)
-            item.setToolTip(reason)
+        supported = DESKTOP_SOLVERS.get(backend, ())
+        with QSignalBlocker(self.solver):
+            self.solver.clear()
+            for name in supported:
+                title = SOLVER_LABELS[name]
+                reason = ""
+                try:
+                    require_desktop_solver(SimpleNamespace(run=SimpleNamespace(solver=SimpleNamespace(backend=backend, name=name))))
+                except ValueError as exc:
+                    reason = str(exc)
+                    title += " — runtime unavailable"
+                self.solver.addItem(title, name)
+                item = self.solver.model().item(self.solver.count() - 1)
+                item.setEnabled(not reason)
+                item.setToolTip(reason)
+            if current not in supported:
+                # Retain invalid imports in the field without offering them in the popup.
+                title = SOLVER_LABELS.get(current, str(current) if current is not None else "Select…")
+                self.solver.addItem(title, current)
+                index = self.solver.count() - 1
+                item = self.solver.model().item(index)
+                item.setEnabled(False)
+                item.setToolTip(f"Imported solver {title} is unavailable for this backend. Select a supported solver.")
+                self.solver.view().setRowHidden(index, True)
+            self.solver.setCurrentIndex(self.solver.findData(current))
+        selected = self.solver.model().item(self.solver.currentIndex())
+        message = selected.toolTip() if selected and not selected.isEnabled() else ""
+        self.solver_status.setText(message)
+        self.solver_status.setVisible(bool(message))
 
     def select_solver(self, key, value):
         editor = self.editor
@@ -146,6 +167,7 @@ class GeneralPage(QWidget):
         form = QFormLayout(dialog)
         controls = {}
         for key, label in (
+            ("suppress_algebraic_errors", "Suppress algebraic errors"),
             ("concentration_absolute_tolerance", "Concentration absolute tolerance (mol/m³)"),
             ("max_nonlinear_iterations", "Maximum nonlinear iterations"),
             ("nonlinear_convergence_coefficient", "Nonlinear convergence coefficient"),
@@ -167,7 +189,7 @@ class GeneralPage(QWidget):
                                  5 if key == "maximum_order" else 1000000)
                 control.setValue(value if isinstance(value, int) else control.minimum())
             else:
-                control = QLineEdit(display(value))
+                control = numeric(QLineEdit(display(value)))
             control.setAccessibleName(label)
             control.setObjectName(key)
             compiled = self.editor.get(("run", "solver", "backend"), "daetools") == "compiled"

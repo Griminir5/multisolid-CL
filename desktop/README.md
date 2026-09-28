@@ -4,6 +4,9 @@ A project contains simulation cases. Each case owns its inputs and **one latest
 run**. Running it again replaces its previous results. Editing inputs leaves
 those results available and marks them **stale** until the case runs again.
 
+The desktop follows system light/dark appearance, uses a shared numeric font, and
+keeps editing controls and previews together. See [desktop design and validation](DESIGN.md).
+
 ## Start developing
 
 Use Python 3.11/3.12 and the DAETools setup in the [repository README](../README.md).
@@ -23,7 +26,7 @@ The Chemistry graph uses a separate Graphviz `neato` runtime. See
 
 ## Use the starter
 
-1. At launch, choose **Create new project**, **Open existing project**, or a recent
+1. At launch, choose **Create new project**, **Open existing project**, **Import archived project**, or a recent
    project. Creation asks for a name and parent location and shows the resulting
    folder. It starts with `MultiSolid` in the OS Documents location (home if that
    location is unavailable), and remembers a custom parent chosen for creation.

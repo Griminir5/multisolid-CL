@@ -7,8 +7,11 @@ from PyQt6.QtSvgWidgets import QGraphicsSvgItem
 from PyQt6.QtWidgets import QApplication, QGraphicsItem, QGraphicsScene, QGraphicsView
 
 from packed_bed.reaction_graph import (
-    GraphvizError, RENDER_TIMEOUT_S, build_reaction_graph, find_graphviz,
+    GraphStyle, GraphvizError, RENDER_TIMEOUT_S, build_reaction_graph, find_graphviz,
 )
+
+
+from .theme import colors, manager
 
 
 class _RenderProcess(QProcess):
@@ -89,7 +92,11 @@ class NetworkView(QGraphicsView):
         self.setScene(QGraphicsScene(self))
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setMinimumSize(0, 0)
-        self.setBackgroundBrush(QColor("#f8fafc"))
+        self.setBackgroundBrush(QColor(colors()["surface"]))
+        self._last_request = None
+        self._restore_view = None
+        if manager():
+            manager().changed.connect(self.restyle)
         self.setAccessibleName("Species and reactions graph")
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -111,7 +118,25 @@ class NetworkView(QGraphicsView):
         self.status = ""
         self._debounce = QTimer(self, interval=150, singleShot=True)
         self._debounce.timeout.connect(self._start_render)
-        self.scene().addText("Add species and reaction families to build the system graph.")
+        self._message("Add species and reaction families to build the system graph.")
+
+    def _message(self, text):
+        item = self.scene().addText(text, QApplication.font())
+        item.setDefaultTextColor(QColor(colors()["ink"]))
+        return item
+
+    def restyle(self):
+        self.setBackgroundBrush(QColor(colors()["surface"]))
+        if self._last_request:
+            restore = (self.transform(), self.mapToScene(self.viewport().rect().center()),
+                       self._zoom, self.selected_node) if self.graph else None
+            gases, solids, reactions, registry, labels, tooltips = self._last_request
+            self.draw(gases, solids, reactions, registry, labels=labels, tooltips=tooltips)
+            self._restore_view = restore
+        else:
+            for item in self.scene().items():
+                if hasattr(item, "setDefaultTextColor"):
+                    item.setDefaultTextColor(QColor(colors()["ink"]))
 
     def _set_status(self, message):
         self.status = message
@@ -185,23 +210,31 @@ class NetworkView(QGraphicsView):
             self._outline = None
         if self.selected_node:
             bounds = self.node_items[self.selected_node].sceneBoundingRect().adjusted(-3, -3, 3, 3)
-            pen = QPen(QColor("#2563eb"), 2)
+            pen = QPen(QColor(colors()["focus"]), 2)
             pen.setCosmetic(True)
             self._outline = self.scene().addRect(bounds, pen)
             self._outline.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
             self._outline.setZValue(2)
 
-    def draw(self, gases, solids, reactions, property_registry=None, *, labels=None):
+    def draw(self, gases, solids, reactions, property_registry=None, *, labels=None, tooltips=None):
+        self._restore_view = None
+        gases, solids, reactions = list(gases), list(solids), list(reactions)
+        self._last_request = (gases, solids, reactions, property_registry, labels, tooltips)
         self._revision += 1
         self._debounce.stop()
         if self._process is not None:
             # The revision changes before killing: its queued signals are stale.
             self._process.cancel()
             self._process = None
-        self._pending = build_reaction_graph(gases, solids, reactions, property_registry, labels=labels)
+        c = colors()
+        style = GraphStyle(text=c["ink"], border=c["boundary"], edge=c["muted"], dependency=c["focus"],
+                           gas=c["gas"], solid=c["solid"], reaction=c["reaction"], missing=c["missing"],
+                           solid_shape="hexagon")
+        self._pending = build_reaction_graph(gases, solids, reactions, property_registry,
+                                             labels=labels, tooltips=tooltips, style=style)
         if not self._pending.nodes:
             self._clear()
-            self.scene().addText("Add species and reaction families to build the system graph.")
+            self._message("Add species and reaction families to build the system graph.")
             self._set_status("")
             self.fit()
             return
@@ -224,7 +257,7 @@ class NetworkView(QGraphicsView):
         self._set_status(f"{detail}{suffix}")
         if self.graph is None:
             self.scene().clear()
-            self.scene().addText("Graph unavailable. See the message below; edit the selection or click Retry.")
+            self._message("Graph unavailable. See the message below; edit the selection or click Retry.")
             self.fit()
 
     def retry(self):
@@ -293,3 +326,9 @@ class NetworkView(QGraphicsView):
                 items[record.id] = item
         self._set_status("")
         self.fit()
+        if self._restore_view:
+            transform, center, self._zoom, selected = self._restore_view
+            self.setTransform(transform)
+            self.centerOn(center)
+            self.select_node(selected)
+            self._restore_view = None

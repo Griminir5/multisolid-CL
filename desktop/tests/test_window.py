@@ -22,7 +22,7 @@ def test_window_opens_on_welcome_then_project_case_list(qt_app, tmp_path, source
     window = MainWindow()
     assert window.pages.currentWidget() is window.welcome
     assert [button.text() for button in window.welcome.findChildren(QPushButton)] == [
-        "Create new project…", "Open existing project…",
+        "Create new project…", "Open existing project…", "Import archived project…", "Pause animation",
     ]
     project = Project.create(tmp_path / "project")
     case = project.add_case_from_files(source_case, "Benchmark")
@@ -59,9 +59,9 @@ def test_new_case_starts_empty_with_feed_repeat_and_tolerance_defaults(qt_app, t
     assert not case.documents["chemistry"]["gas_species"]
     assert not case.documents["solids"]["initial_profile"]["zones"]
     assert case.state()["inputs"] == "Underdefined"
-    top = window.editor.bed.layout().itemAt(0).layout()
-    assert top.itemAt(0).widget().title() == "Bed settings"
-    assert top.itemAt(1).widget().title() == "Material zones"
+    top = window.editor.bed.settings_split
+    assert top.widget(0).title() == "Bed settings"
+    assert top.widget(1).title() == "Material zones"
     window.close()
     reopened = Project.open(project.root).cases[0]
     assert reopened.documents["run"]["simulation"]["program_mode"] == "feed_stream"

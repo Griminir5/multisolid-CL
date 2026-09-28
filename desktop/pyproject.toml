@@ -17,3 +17,6 @@ packed-bed-ui = "packed_bed_ui.__main__:main"
 [tool.setuptools.packages.find]
 include = ["packed_bed_ui*"]
 namespaces = false
+
+[tool.setuptools.package-data]
+packed_bed_ui = ["assets/*.svg"]

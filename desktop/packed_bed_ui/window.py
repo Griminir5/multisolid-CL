@@ -20,11 +20,16 @@ from .navigation import NewProjectDialog, ProjectLocations, display_timestamp
 from .results import ResultsPage, CaseSelectionDialog
 
 
+from .theme import apply_theme, label as themed_label, numeric_font, NumberLabel
+from .identity import Masthead, WelcomeHero, recent_empty
+
+
 class MainWindow(QMainWindow):
     def __init__(self, settings=None):
+        apply_theme(QApplication.instance())
         super().__init__()
         self.setWindowTitle("MultiSolid")
-        self.resize(1150, 850)
+        self.resize(1280, 800)
         self.project = None
         self.project_lock = None
         self.closing = False
@@ -36,37 +41,38 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.pages)
         self.welcome = QWidget()
         welcome_layout = QVBoxLayout(self.welcome)
-        welcome_layout.addStretch()
-        title = QLabel("<h1>MultiSolid</h1><p>A project keeps your simulation cases and their latest results together.</p>")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        welcome_layout.addWidget(title)
-        for label, action in (("Create new project…", self._new_project), ("Open existing project…", self._open)):
-            button = QPushButton(label)
-            button.clicked.connect(action)
-            welcome_layout.addWidget(button, alignment=Qt.AlignmentFlag.AlignHCenter)
-        welcome_layout.addWidget(QLabel("Recent projects"))
+        welcome_layout.setContentsMargins(0, 0, 0, 0)
+        welcome_layout.setSpacing(0)
+        self.masthead = Masthead()
+        welcome_layout.addWidget(self.masthead)
+        content = QWidget()
+        welcome_content = QVBoxLayout(content)
+        welcome_content.setContentsMargins(24, 24, 24, 16)
+        welcome_content.setSpacing(16)
+        self.hero = WelcomeHero(self._new_project, self._open, self._import_archive, self.locations.settings)
+        welcome_content.addWidget(self.hero, 2)
+        welcome_content.addWidget(themed_label("Recent projects", "section"))
         self.recent_list = QTreeWidget()
         self.recent_list.setAccessibleName("Recent projects")
         self.recent_list.setHeaderLabels(["Name", "Last interaction", "Folder path"])
         self.recent_list.setRootIsDecorated(False)
         self.recent_list.setAlternatingRowColors(True)
         self.recent_list.setUniformRowHeights(True)
-        self.recent_list.setStyleSheet("QTreeView::item { padding: 6px 8px; }")
         self.recent_list.setColumnWidth(0, 260)
         self.recent_list.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.recent_list.header().setStretchLastSection(True)
         self.recent_list.headerItem().setToolTip(1, "Date and time in your local time zone.")
         self.recent_list.itemClicked.connect(lambda item, _: self.open_project(item.data(0, Qt.ItemDataRole.UserRole)))
         self.recent_list.itemActivated.connect(lambda item, _: self.open_project(item.data(0, Qt.ItemDataRole.UserRole)))
-        welcome_layout.addWidget(self.recent_list)
-        self.recent_empty = QLabel("No recent projects available.")
-        welcome_layout.addWidget(self.recent_empty)
-        welcome_layout.addStretch()
+        welcome_content.addWidget(self.recent_list, 1)
+        self.recent_empty = recent_empty()
+        welcome_content.addWidget(self.recent_empty, 1)
+        welcome_layout.addWidget(content, 1)
         self.pages.addWidget(self.welcome)
 
         self.home = QWidget()
         layout = QVBoxLayout(self.home)
-        self.project_title = QLabel()
+        self.project_title = themed_label("", "pageTitle")
         layout.addWidget(self.project_title)
         self.results_button = QPushButton("Results…")
         self.results_button.clicked.connect(self._show_results)
@@ -95,7 +101,7 @@ class MainWindow(QMainWindow):
         self.plugins_action = self.menuBar().addAction('Plugins', self._plugins)
         self.plugins_action.setEnabled(False)
         self.recent_menu.aboutToShow.connect(self.locations.refresh)
-        self.case_count = QLabel()
+        self.case_count = NumberLabel()
         layout.addWidget(self.case_count)
         self.table = CaseList()
         self.table.action.connect(self._case_action)
@@ -141,7 +147,7 @@ class MainWindow(QMainWindow):
         back = QPushButton("← Back to project")
         back.clicked.connect(self._show_cases)
         editor_actions.addWidget(back)
-        self.case_result = QLabel()
+        self.case_result = NumberLabel()
         editor_actions.addWidget(self.case_result, 1)
         for label, action in (("Open case folder", self._show_case_folder), ("Open latest run log", self._show_log)):
             button = QPushButton(label)
@@ -171,10 +177,26 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(False)
         self.statusBar().addPermanentWidget(self.cancel_button)
         self._update_project_actions()
+        self.pages.currentChanged.connect(self._page_status)
         self.locations.changed.connect(self._refresh_recents)
         self._refresh_recents()
         self.locations.refresh()
         self.statusBar().showMessage("Create or open a project to begin.")
+
+    def _page_status(self):
+        if self.runner.active:
+            self._run_status(self.runner.job)
+            return
+        page = self.pages.currentWidget()
+        message = {
+            self.welcome: "Create or open a project to begin.",
+            self.home: "Select a case to edit or preview it. Changes save automatically.",
+            self.case_page: ("Generated case · read-only. Edit its study to change the inputs." if self.editor.read_only else
+                             "Case edits save automatically. Review input validation before running."),
+            self.study_editor: "Study edits save automatically. Review the preview before creating or replacing cases.",
+            self.results: "Results report changes save automatically. Select sheets and columns for export.",
+        }.get(page, "")
+        self.statusBar().showMessage(message)
 
     def _save_editors(self):
         control = QApplication.focusWidget()
@@ -182,7 +204,7 @@ class MainWindow(QMainWindow):
             control.clearFocus()  # Commit delegates and editingFinished before saving.
         saved = self.editor.save() and self.study_editor.save() and self.results.save()
         if not saved:
-            reason = self.editor.validation.text() if self.editor.dirty else (
+            reason = (self.editor.validation.toolTip() or self.editor.validation.text()).splitlines()[0] if self.editor.dirty else (
                 self.editor.report.save_note.text() if self.editor.report.dirty else
                 self.study_editor.issue.text() if self.study_editor.dirty else self.results.save_note.text())
             self.statusBar().showMessage(f"Navigation cannot complete until the draft is saved. {reason}")
@@ -195,12 +217,14 @@ class MainWindow(QMainWindow):
         for entry in entries:
             values = [entry["name"], display_timestamp(entry["last_interaction"]), entry["path"]]
             item = QTreeWidgetItem(values)
+            item.setFont(1, numeric_font(13))
             item.setData(0, Qt.ItemDataRole.UserRole, entry["path"])
             for column, value in enumerate(values):
                 item.setToolTip(column, value)
             self.recent_list.addTopLevelItem(item)
             action = self.recent_menu.addAction(" · ".join(values).replace("&", "&&"))
             action.triggered.connect(lambda _, path=entry["path"]: self.open_project(path))
+        self.recent_list.setVisible(bool(entries))
         self.recent_empty.setVisible(not entries)
         if not entries:
             self.recent_menu.addAction("No recent projects available").setEnabled(False)
@@ -649,6 +673,7 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"{case.name} — {self.project.metadata['name']} — MultiSolid")
             self._editor_changed()
             self.pages.setCurrentWidget(self.case_page)
+            self._page_status()
 
     def _refresh_cases(self):
         if self.project is None:

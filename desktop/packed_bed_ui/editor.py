@@ -8,8 +8,8 @@ from packed_bed.file_io import TemporaryDirectory
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtSvgWidgets import QSvgWidget
 from PyQt6.QtWidgets import (
-    QAbstractButton, QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QLabel, QLineEdit,
-    QMessageBox, QSizePolicy, QSpinBox, QTabWidget, QTreeWidget, QVBoxLayout, QWidget,
+    QApplication, QAbstractButton, QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QLabel, QLineEdit,
+    QHBoxLayout, QPlainTextEdit, QPushButton, QMessageBox, QSizePolicy, QSpinBox, QTabWidget, QTreeWidget, QVBoxLayout, QWidget,
 )
 
 from packed_bed.plotting import PLOT_REGISTRY
@@ -44,6 +44,10 @@ class InputSession:
             raise ValueError(message)
 
 
+from .choice import BinaryChoice
+from .theme import apply_theme, numeric, label as themed_label, set_state
+
+
 class InputEditor(QWidget):
     changed = pyqtSignal()
 
@@ -62,15 +66,7 @@ class InputEditor(QWidget):
         self.debounce.setInterval(350)
         self.debounce.timeout.connect(self.save)
         self.setObjectName("caseEditor")
-        self.setStyleSheet("""
-            QGroupBox { font-weight: 600; border: 1px solid palette(mid);
-                        border-radius: 5px; margin-top: 12px; padding-top: 9px; }
-            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
-            QLineEdit, QComboBox, QSpinBox { min-height: 25px; }
-            QLineEdit:disabled { background: palette(alternate-base); color: palette(mid); }
-            QTabBar::tab { min-width: 85px; padding: 9px 15px; }
-            QTableWidget, QTreeWidget { border: 0; }
-        """)
+        apply_theme(QApplication.instance())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.tabs = QTabWidget()
@@ -83,14 +79,47 @@ class InputEditor(QWidget):
                             ("Bed", self.bed), ("Program", self.program)):
             self.tabs.addTab(page, title)
         layout.addWidget(self.tabs, 1)
-        self.validation = QLabel()
+        self.validation = themed_label("", "validation")
+        self.validation.setTextFormat(Qt.TextFormat.PlainText)
         self.validation.setWordWrap(True)
         self.validation.setMaximumHeight(52)
         self.validation.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(self.validation)
+        validation_row = QHBoxLayout()
+        validation_row.addWidget(self.validation, 1)
+        self._validation_message = ""
+        self.validation_details = QPushButton("Details…")
+        self.validation_details.setAccessibleName("Show input validation details")
+        self.validation_details.clicked.connect(self.show_validation_details)
+        self.validation_details.hide()
+        validation_row.addWidget(self.validation_details)
+        layout.addLayout(validation_row)
         # These remain useful to callers inspecting the numerical previews.
         self.figures = [self.program.preview.figure, self.bed.preview.figure]
         self.canvases = [self.program.preview.canvas, self.bed.preview.canvas]
+
+    def set_validation(self, state, text, details=""):
+        self._validation_message = details
+        set_state(self.validation, state)
+        self.validation.setText(text)
+        self.validation.setToolTip(details)
+        self.validation_details.setVisible(bool(details) and state in ("error", "warning"))
+
+    def show_validation_details(self):
+        if not self._validation_message:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Input validation details")
+        dialog.resize(720, 420)
+        layout = QVBoxLayout(dialog)
+        text = QPlainTextEdit(self._validation_message)
+        text.setReadOnly(True)
+        text.setAccessibleName("Validation details")
+        layout.addWidget(text)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
+        dialog.deleteLater()
 
     def get(self, path, default=None):
         return get_value(self.case.documents, path, default) if self.case else default
@@ -116,13 +145,13 @@ class InputEditor(QWidget):
         try:
             set_value(self.case.documents, path, value)
         except ValueError as exc:
-            self.validation.setText(f"Cannot edit {'.'.join(path)}: {exc}")
+            self.set_validation("error", "Cannot edit this field", f"Cannot edit {'.'.join(path)}: {exc}")
             return
         self.queue_edit()
 
-    def field(self, form, path, label, *, kind="text", options=None, default=None, bounds=(0, 1000000), checked_values=None):
+    def field(self, form, path, label, *, kind="text", options=None, default=None, bounds=(0, 1000000), checked_values=None, binary=False, vertical=False):
         if options is not None:
-            widget = choices(options)
+            widget = choices(options, binary=binary, vertical=vertical)
             signal = widget.currentIndexChanged
             read = widget.currentData
         elif kind == "spin":
@@ -135,7 +164,7 @@ class InputEditor(QWidget):
             signal = widget.toggled
             read = (lambda: checked_values[int(widget.isChecked())]) if checked_values else widget.isChecked
         else:
-            widget = QLineEdit()
+            widget = numeric(QLineEdit())
             signal = widget.textChanged
             read = lambda: number(widget.text().strip())
         widget.setObjectName(".".join(path))
@@ -146,6 +175,9 @@ class InputEditor(QWidget):
         if path[0] == "run":
             self.fields[(path[1], path[2])] = widget
         if kind == "check":
+            form.addRow(widget)
+        elif binary and vertical:
+            form.addRow(QLabel(label))
             form.addRow(widget)
         else:
             form.addRow(label, widget)
@@ -165,7 +197,7 @@ class InputEditor(QWidget):
         for widget, path, default, checked_values in self.bindings:
             value = self.get(path, default)
             widget.setEnabled(isinstance(self.get(path[:-1], {}), dict))
-            if isinstance(widget, QComboBox):
+            if isinstance(widget, (QComboBox, BinaryChoice)):
                 select_value(widget, value)
             elif isinstance(widget, QSpinBox):
                 widget.setValue(value if type(value) is int else widget.minimum())
@@ -208,13 +240,15 @@ class InputEditor(QWidget):
                 freeze_item(item.child(i))
         for page in (self.general, self.chemistry, self.bed, self.program):
             for widget in page.findChildren(QWidget):
+                if any(choice is not widget and choice.isAncestorOf(widget) for choice in page.findChildren(BinaryChoice)):
+                    continue  # Freeze the selector as a unit, preserving child enabled states.
                 if any(preview.isAncestorOf(widget) for preview in (self.bed.preview, self.program.preview)):
                     continue  # Plot navigation remains interactive during inspection.
-                if widget in (channel.toggle for channel in self.program.channels.values()):
-                    continue  # Collapsing channels only changes the layout.
+                if widget.property("layoutToggle"):
+                    continue  # Collapsing sections only changes the layout.
                 if isinstance(widget, (QLineEdit, QSpinBox)):
                     freeze(widget.setReadOnly, widget.isReadOnly(), True)
-                elif isinstance(widget, (QComboBox, QAbstractButton)):
+                elif isinstance(widget, (QComboBox, BinaryChoice, QAbstractButton)):
                     freeze(widget.setEnabled, widget.isEnabled(), False)
                 if isinstance(widget, QAbstractItemView):
                     freeze(widget.setEditTriggers, widget.editTriggers(), QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -227,7 +261,7 @@ class InputEditor(QWidget):
             return
         self.dirty = True
         self.debounce.start()
-        self.validation.setText("Saving changes…")
+        self.set_validation("active", "Saving changes…")
         for preview in (self.program.preview, self.bed.preview):
             preview.message.setText("Updating preview…")
             preview.message.show()
@@ -242,7 +276,7 @@ class InputEditor(QWidget):
         try:
             self.case.save()
         except (OSError, ValueError) as exc:
-            self.validation.setText(f"Draft could not be saved: {exc}")
+            self.set_validation("error", "Draft could not be saved", str(exc))
             return False
         self.dirty = False
         self.refresh()
@@ -307,14 +341,13 @@ class InputEditor(QWidget):
             self.case.validate_for_run()
         except (ValueError, OSError) as exc:
             message = str(exc)
-            self.validation.setText("Draft — cannot run: " + message.splitlines()[0] + " · hover for details")
-            self.validation.setToolTip(message)
+            self.set_validation("warning", "Draft — cannot run. Review the input details.", message)
             if not self.figures[0].axes:
                 for preview in (self.program.preview, self.bed.preview):
                     preview.clear("Preview unavailable while inputs are incomplete or invalid. See the validation message below.")
         else:
-            self.validation.setText("Inputs ready · read-only" if self.read_only else "Inputs ready · changes save automatically")
-            self.validation.setToolTip("Structural checks passed. Previews use the engine's smoothing, feed mixing and cycle carry-over.")
+            self.set_validation("success", "Inputs ready · read-only" if self.read_only else "Inputs ready · changes save automatically",
+                                "Structural checks passed. Previews use the engine's smoothing, feed mixing and cycle carry-over.")
         self.update_results()
 
     def update_results(self):
@@ -331,7 +364,8 @@ class InputEditor(QWidget):
             axis.plot(preview.time_s, values, color="#317c89")
             axis.set_ylabel(label, fontsize=9)
         axes[2].plot(preview.time_s, preview.mole_fractions, label=[self.species_label(key, formula_only=True) for key in case.chemistry.gas_species])
-        axes[2].legend(loc="upper right", fontsize=8, ncols=3)
+        self.figures[0].legend(*axes[2].get_legend_handles_labels(),
+                               loc="outside lower center", fontsize=8, ncols=4)
         axes[2].set(ylabel="Mole fraction", ylim=(-0.02, 1.02))
         axes[3].set_xlabel("Time (s)")
         for axis in axes:
@@ -340,19 +374,20 @@ class InputEditor(QWidget):
         axes = self.figures[1].subplots(1, 3)
         for name, values in zip(case.solids.solid_species, preview.solid_concentrations_mol_m3_bed):
             axes[0].stairs(values, preview.face_positions_m, label=self.species_label(name, formula_only=True))
-        axes[0].set(ylabel="Concentration (mol/m³ bed)", title="Solid concentrations")
+        axes[0].set(ylabel="Concentration\n(mol/m³ bed)", title="Solid concentrations")
         if case.solids.solid_species:
             axes[0].legend(fontsize=8)
         axes[1].stairs(preview.interparticle_voidage, preview.face_positions_m, label="Interparticle")
-        axes[1].stairs(preview.particle_voidage, preview.face_positions_m, label="Particle")
-        axes[1].set(ylabel="Voidage (fraction)", ylim=(0, 1), title="Voidages")
+        axes[1].stairs(preview.particle_voidage, preview.face_positions_m, label="Intraparticle")
+        axes[1].set(ylabel="Voidage\n(fraction)", ylim=(0, 1), title="Voidages")
         axes[1].legend(fontsize=8)
         axes[2].plot(preview.face_positions_m, preview.particle_diameter_m, marker=".")
-        axes[2].set(ylabel="Particle diameter (m)", title="Particle size")
+        axes[2].set(ylabel="Particle\ndiameter (m)", title="Particle size")
         for axis in axes:
             axis.set_xlabel("Axial position (m)")
             for boundary in preview.zone_edges_m:
-                axis.axvline(boundary, color="grey", linestyle="--", alpha=0.4)
+                guide = axis.axvline(boundary, color="grey", linestyle="--", alpha=0.4)
+                guide._multisolid_guide = True
             axis.grid(alpha=0.2)
             axis.tick_params(labelsize=8)
         for widget in (self.program.preview, self.bed.preview):
@@ -392,7 +427,7 @@ class CaseEditor(InputEditor):
             else:
                 self.case.project.drafts.clear("case", self.case.id)
         except (OSError, ValueError) as exc:
-            self.validation.setText(f"Recovery copy could not be saved: {exc}")
+            self.set_validation("error", "Recovery copy could not be saved", str(exc))
 
     def save(self):
         if not super().save():

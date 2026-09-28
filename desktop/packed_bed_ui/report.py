@@ -10,9 +10,11 @@ import re
 from uuid import uuid4
 
 import xarray as xr
+from .theme import numeric_font, NumberLabel
+
 from PyQt6.QtCore import QAbstractListModel, QModelIndex, QItemSelectionModel, QSortFilterProxyModel, QThread, QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+    QTabBar, QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListView, QListWidget, QMessageBox,
     QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -366,15 +368,19 @@ class ReportPage(QWidget):
             ("↓", lambda: self.move_column(1)),
         ])
         self.columns.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.info_view = QComboBox()
-        self.info_view.addItems([self.information_title, "Column dictionary"])
+        self.info_view = QTabBar()
+        self.info_view.setAccessibleName("Information view")
+        self.info_view.addTab(self.information_title)
+        self.info_view.addTab("Column dictionary")
         rl.addWidget(self.info_view)
         self.table = QTableWidget()
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setMinimumHeight(170)
         self.table.setAccessibleName("Report preview")
+        self.table.horizontalHeader().setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.table.horizontalHeader().setStretchLastSection(True)
         rl.addWidget(self.table, 1)
-        self.counts, self.error = QLabel(), QLabel()
+        self.counts, self.error = NumberLabel(), QLabel()
         self.counts.setWordWrap(True)
         self.error.setWordWrap(True)
         rl.addWidget(self.counts)
@@ -398,7 +404,7 @@ class ReportPage(QWidget):
         self.sheets.currentRowChanged.connect(self.select_sheet)
         self.name.textEdited.connect(self.rename_sheet)
         self.axis.currentIndexChanged.connect(self.change_axis)
-        self.info_view.currentIndexChanged.connect(self.preview)
+        self.info_view.currentChanged.connect(self.preview)
         if editor is not None:
             self.editor.tabs.currentChanged.connect(self.tab_changed)
 
@@ -682,7 +688,7 @@ class ReportPage(QWidget):
     def show_table(self, headers, rows, coordinate_precision=15):
         self.table.clear()
         self.table.setColumnCount(min(12, len(headers)))
-        self.table.setHorizontalHeaderLabels([h.replace(" | ", "\n") for h in headers[:12]])
+        self.table.setHorizontalHeaderLabels(headers[:12])
         for j in range(self.table.columnCount()):
             self.table.horizontalHeaderItem(j).setToolTip(headers[j])
         rows = list(islice(rows, 20))
@@ -690,10 +696,14 @@ class ReportPage(QWidget):
         for i, row in enumerate(rows):
             for j, value in enumerate(row[:12]):
                 item = QTableWidgetItem("" if value is None else text_value(value, coordinate_precision if j == 0 else 12))
+                if isinstance(value, (int, float)):
+                    item.setFont(numeric_font())
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 item.setToolTip("" if value is None else str(value))
                 self.table.setItem(i, j, item)
+        self.table.resizeColumnsToContents()
         for j in range(self.table.columnCount()):
-            self.table.setColumnWidth(j, 170)
+            self.table.setColumnWidth(j, min(520, max(100, self.table.columnWidth(j))))
 
     def save_template(self):
         if not self.editor.save():

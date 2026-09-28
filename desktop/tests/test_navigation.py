@@ -375,3 +375,23 @@ def test_interrupted_multi_document_save_rolls_back_before_offering_draft(qt_app
     assert reopened.cases[0].documents["program"]["inlet_temperature"]["initial"] == "unfinished"
     assert (reopened.cases[0].run_folder / "result.txt").read_text() == "retained result"
     editor.close()
+
+
+def test_page_navigation_replaces_stale_study_guidance(qt_app, tmp_path, source_case):
+    from packed_bed_ui.project import Project
+    from packed_bed_ui.window import MainWindow
+    window = MainWindow()
+    project = Project.create(tmp_path / 'project')
+    case = project.add_case_from_files(source_case)
+    window._set_project(project)
+    window.pages.setCurrentWidget(window.study_editor)
+    assert 'Study edits' in window.statusBar().currentMessage()
+    window._show_case(case)
+    assert 'Case edits' in window.statusBar().currentMessage()
+    window._show_cases()
+    assert 'Select a case' in window.statusBar().currentMessage()
+    window.pages.setCurrentWidget(window.results)
+    assert 'Results report' in window.statusBar().currentMessage()
+    window._close_project()
+    assert 'Create or open' in window.statusBar().currentMessage()
+    window.close()

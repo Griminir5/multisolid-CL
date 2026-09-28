@@ -7,6 +7,7 @@ from PyQt6.QtGui import QKeySequence
 from PyQt6.QtWidgets import QApplication, QComboBox, QLineEdit, QStyledItemDelegate, QTableView
 
 from .editor_widgets import display
+from .theme import numeric, numeric_font
 
 
 class CandidateTable(QAbstractTableModel):
@@ -46,6 +47,10 @@ class CandidateTable(QAbstractTableModel):
         if not index.isValid():
             return None
         candidate = self.candidates[index.row()]
+        if role == Qt.ItemDataRole.FontRole and 0 < index.column() < len(self.columns) + 1:
+            target = self.columns[index.column() - 1][0]
+            if not target.startswith("definition:"):
+                return numeric_font()
         if role == Qt.ItemDataRole.ToolTipRole:
             return candidate.message or candidate.name
         if role == Qt.ItemDataRole.DisplayRole:
@@ -80,6 +85,8 @@ class ExplicitRows(QAbstractTableModel):
             return None
         factor = self.workspace.study.factors[index.column()]
         value = self.workspace.study.rows[index.row()].get(factor.id, "")
+        if role == Qt.ItemDataRole.FontRole and not factor.target.startswith("definition:"):
+            return numeric_font()
         if role == Qt.ItemDataRole.EditRole:
             return value
         if role == Qt.ItemDataRole.DisplayRole:
@@ -126,7 +133,7 @@ class DefinitionDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
         factor = self.workspace.study.factors[index.column()]
         if not factor.target.startswith("definition:"):
-            editor = QLineEdit(parent)  # Keep unfinished text and full precision.
+            editor = numeric(QLineEdit(parent))  # Keep unfinished text and full precision.
             editor.textEdited.connect(lambda: self.commitData.emit(editor))
             return editor
         combo = QComboBox(parent)

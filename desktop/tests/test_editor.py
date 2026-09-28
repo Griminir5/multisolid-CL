@@ -54,7 +54,6 @@ def test_general_fields_persist_and_preserve_advanced_settings(editing):
     editor.fields[("model", "axial_cells")].setValue(9)
     editor.fields[("solver", "threads")].setValue(4)
     editor.fields[("solver", "relative_tolerance")].setText("1e-6")
-    editor.fields[("solver", "suppress_algebraic_errors")].setChecked(True)
     combo = editor.fields[("simulation", "mass_scheme")]
     combo.setCurrentIndex(combo.findData("upwind1"))
     assert editor.save()
@@ -64,7 +63,6 @@ def test_general_fields_persist_and_preserve_advanced_settings(editing):
     assert resolved.run.model.axial_cells == 9
     assert resolved.run.solver.threads == 4
     assert resolved.run.solver.relative_tolerance == 1e-6
-    assert resolved.run.solver.suppress_algebraic_errors
     assert resolved.run.solver.maximum_order == 3
     assert resolved.run.solver.concentration_absolute_tolerance == 2e-8
     assert editor.general.backend.model().item(editor.general.backend.findData("compiled")).isEnabled()
@@ -72,7 +70,7 @@ def test_general_fields_persist_and_preserve_advanced_settings(editing):
 
 def test_advanced_solver_dialog_applies_only_edits(editing, qt_app):
     from PyQt6.QtCore import QTimer
-    from PyQt6.QtWidgets import QDialog, QLineEdit, QSpinBox
+    from PyQt6.QtWidgets import QCheckBox, QDialog, QLineEdit, QSpinBox
 
     editor, case = editing
     original = deepcopy(case.documents["run"]["solver"])
@@ -81,12 +79,13 @@ def test_advanced_solver_dialog_applies_only_edits(editing, qt_app):
         assert isinstance(dialog, QDialog)
         dialog.findChild(QLineEdit, "concentration_absolute_tolerance").setText("2e-7")
         dialog.findChild(QSpinBox, "maximum_order").setValue(3)
+        dialog.findChild(QCheckBox, "suppress_algebraic_errors").setChecked(True)
         dialog.accept()
     QTimer.singleShot(0, accept)
     editor.general.advanced()
     editor.save()
     solver = Project.open(case.project.root).cases[0].documents["run"]["solver"]
-    assert solver == {**original, "concentration_absolute_tolerance": 2e-7, "maximum_order": 3}
+    assert solver == {**original, "concentration_absolute_tolerance": 2e-7, "maximum_order": 3, "suppress_algebraic_errors": True}
 
 
 def test_horizon_tracks_timing_and_repeat_mode(editing):
@@ -508,3 +507,27 @@ def test_plot_opens_from_retained_data_even_with_invalid_current_inputs(editing,
     assert case.state()["stale"]
     editor.plot_windows[0].close()
     qt_app.processEvents()
+
+
+def test_suppress_algebraic_errors_advanced_cancel_and_save(editing, qt_app):
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QCheckBox
+    editor, case = editing
+    original = deepcopy(case.documents)
+    assert ('solver', 'suppress_algebraic_errors') not in editor.fields
+    def cancel():
+        dialog = qt_app.activeModalWidget()
+        dialog.findChild(QCheckBox, 'suppress_algebraic_errors').setChecked(True)
+        dialog.reject()
+    QTimer.singleShot(0, cancel)
+    editor.general.advanced()
+    assert case.documents == original and not editor.dirty
+    def save():
+        dialog = qt_app.activeModalWidget()
+        dialog.findChild(QCheckBox, 'suppress_algebraic_errors').setChecked(True)
+        dialog.accept()
+    QTimer.singleShot(0, save)
+    editor.general.advanced()
+    assert editor.save()
+    restored = Project.open(case.project.root).cases[0]
+    assert restored.documents['run']['solver']['suppress_algebraic_errors'] is True

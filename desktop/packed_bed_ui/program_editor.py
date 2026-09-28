@@ -6,13 +6,16 @@ import math
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout, QGroupBox,
+    QSplitter, QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout, QGroupBox,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from packed_bed.programs import NORMAL_MOLAR_DENSITY_MOL_PER_M3
 
-from .editor_widgets import Preview, action_button, cell, choices, display, number, select_value, table
+from .editor_widgets import Preview, action_button, cell, choices, display, number, select_value, table, table_action
+
+
+from .theme import numeric, numeric_font
 
 
 CHANNELS = ("inlet_flow", "inlet_temperature", "inlet_composition", "outlet_pressure")
@@ -26,10 +29,10 @@ class ChannelTable(QGroupBox):
         super().__init__()
         self.page, self.editor, self.key = page, page.editor, key
         self.loading = False
-        self.setStyleSheet("QGroupBox { margin-top: 0; padding-top: 0; }")
+        self.setProperty("role", "channel")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(8, 6, 8, 6)
         self.toggle = QToolButton()
         self.toggle.setText(title)
         self.toggle.setCheckable(True)
@@ -37,14 +40,22 @@ class ChannelTable(QGroupBox):
         self.toggle.setArrowType(Qt.ArrowType.DownArrow)
         self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.toggle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.toggle.setStyleSheet("QToolButton { font-weight: 600; border: none; text-align: left; }")
+        self.toggle.setProperty("role", "channelTitle")
+        self.toggle.setProperty("layoutToggle", True)
         self.toggle.setToolTip("Collapse channel")
-        layout.addWidget(self.toggle)
-        self.table = table(["Step", "Duration (s)", "Target", ""])
-        self.table.setMinimumHeight(72)
-        self.table.verticalHeader().setDefaultSectionSize(29)
+        heading = QHBoxLayout()
+        heading.addWidget(self.toggle, 1)
+        self.duration = numeric(QLabel(), 12)
+        heading.addWidget(self.duration)
+        layout.addLayout(heading)
+        self.table = table(["Step type", "Duration (s)", "Target", ""])
+        self.table.verticalHeader().show()
+        self.table.verticalHeader().setMinimumWidth(30)
+        numeric(self.table.verticalHeader(), 12)
+        self.table.setMinimumHeight(52)
+        self.table.verticalHeader().setDefaultSectionSize(32)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(0, 82)
+        self.table.setColumnWidth(0, 116)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(1, 96)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
@@ -71,21 +82,26 @@ class ChannelTable(QGroupBox):
         self.table.clearSpans()
         self.table.clearContents()
         self.table.setRowCount(len(steps) + 2)
+        self.table.setVerticalHeaderLabels(["", *map(str, range(len(steps))), ""])
+        for row in range(len(steps) + 1):
+            self.table.setRowHeight(row, 32)
+        for index in range(len(steps)):
+            self.table.verticalHeaderItem(index + 1).setToolTip(f"Step {index} (zero-based index)")
         cell(self.table, 0, 0, "Initial", editable=False)
         cell(self.table, 0, 1, "—", editable=False)
         self.target_cell(0, channel.get("initial", ""))
         for index, step in enumerate(steps):
             row = index + 1
-            kind = choices([("Hold", "hold"), ("Ramp", "ramp")])
+            kind = choices([("Hold", "hold"), ("Ramp", "ramp")], binary=True)
             select_value(kind, step.get("kind"))
             kind.currentIndexChanged.connect(lambda _, index=index, kind=kind: self.change_kind(index, kind.currentData()))
             self.table.setCellWidget(row, 0, kind)
-            cell(self.table, row, 1, step.get("duration_s", ""))
+            cell(self.table, row, 1, step.get("duration_s", ""), numeric_value=True)
             self.target_cell(row, step.get("target", ""), hold=step.get("kind") == "hold")
             self.table.setCellWidget(row, 3, action_button("×", lambda _, index=index: self.remove_step(index),
-                                                         tooltip=f"Remove step {row} from {self.toggle.text()}"))
-        self.table.setSpan(len(steps) + 1, 0, 1, 4)
-        self.table.setCellWidget(len(steps) + 1, 0, action_button("+ Add step", self.add_step))
+                                                         tooltip=f"Remove step {index} from {self.toggle.text()}"))
+        self.add_button = table_action(self.table, len(steps) + 1, "+ Add step", self.add_step)
+        self.add_button.setEnabled(not self.editor.read_only)
         self.loading = False
         self.update_title()
 
@@ -95,7 +111,9 @@ class ChannelTable(QGroupBox):
                        "inlet_composition": ("Inlet composition", "mole fractions"), "outlet_pressure": ("Outlet pressure", "Pa"),
                        "feed_stream": ("Feed", f"{flow_unit}, K, mole fractions")}[self.key]
         duration = program_duration({self.key: self.channel()})
-        self.toggle.setText(title + (f" · {duration:g} s" if duration is not None else " · unfinished timing"))
+        self.toggle.setText(title)
+        self.duration.setText(f"{duration:g} s" if duration is not None else "—")
+        self.duration.setToolTip("Channel duration" if duration is not None else "Unfinished timing")
         self.table.horizontalHeaderItem(2).setText(f"Target ({unit})")
 
     def target_cell(self, row, value, hold=False):
@@ -113,9 +131,10 @@ class ChannelTable(QGroupBox):
                 summary = f"{display(value.get('flow', 'retain'))} · {display(value.get('temperature', 'retain'))} · {summary}"
             button = action_button(summary + "  …", lambda _, row=row: self.edit_state(row),
                                    tooltip="Edit feed values" if self.key == "feed_stream" else "Edit species mole fractions")
+            numeric(button, 13)
             self.table.setCellWidget(row, 2, button)
         else:
-            cell(self.table, row, 2, value)
+            cell(self.table, row, 2, value, numeric_value=True)
 
     def write(self, channel, *, rebuild=True):
         self.editor.put(("program", self.key), channel)
@@ -130,6 +149,8 @@ class ChannelTable(QGroupBox):
             return
         channel = deepcopy(self.channel())
         row, col = item.row(), item.column()
+        if row > len(channel.get("steps", [])):
+            return  # The trailing action is not an input row.
         if row == 0:
             if col != 2:
                 return
@@ -176,7 +197,7 @@ class ChannelTable(QGroupBox):
         original = original if isinstance(original, dict) else {}
         feed, optional = self.key == "feed_stream", self.key == "feed_stream" and row > 0
         dialog = QDialog(self)
-        dialog.setWindowTitle(("Initial " if row == 0 else f"Step {row} target · ") + ("feed" if feed else "composition"))
+        dialog.setWindowTitle(("Initial " if row == 0 else f"Step {row - 1} target · ") + ("feed" if feed else "composition"))
         dialog.resize(440, 480)
         outer = QVBoxLayout(dialog)
         scroll = QScrollArea()
@@ -191,7 +212,7 @@ class ChannelTable(QGroupBox):
         if feed:
             for key, label in (("flow", "Flow (h⁻¹)" if self.page.flow_basis.currentData() == "ghsv_per_h" else "Flow (mol/s)"),
                                ("temperature", "Temperature (K)")):
-                field = QLineEdit(display(original.get(key)))
+                field = numeric(QLineEdit(display(original.get(key))))
                 field.setObjectName(key)
                 fields[key] = field
                 if optional:
@@ -211,7 +232,7 @@ class ChannelTable(QGroupBox):
             form.addRow(composition_enabled)
         species = self.editor.get(("chemistry", "gas_species"), [])
         composition_fields = {}
-        total = QLabel()
+        total = numeric(QLabel())
 
         def normalize_composition():
             values = [float(field.text()) for field in composition_fields.values()]
@@ -237,7 +258,7 @@ class ChannelTable(QGroupBox):
 
         composition_enabled.toggled.connect(update_total)
         for key in species:
-            field = QLineEdit(display(composition.get(key)))
+            field = numeric(QLineEdit(display(composition.get(key))))
             field.setObjectName(key)
             field.setEnabled(composition_enabled.isChecked())
             composition_enabled.toggled.connect(field.setEnabled)
@@ -247,10 +268,10 @@ class ChannelTable(QGroupBox):
         summary = QHBoxLayout()
         summary.addWidget(total, 1)
         summary.addWidget(normalize)
-        form.addRow(summary)
         update_total()
         scroll.setWidget(content)
         outer.addWidget(scroll)
+        outer.addLayout(summary)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
@@ -286,14 +307,16 @@ class ProgramPage(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.preview = Preview()
-        layout.addWidget(self.preview, 1)
+        self.splitter = QSplitter()
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.addWidget(self.preview)
         right = QWidget()
         controls = QVBoxLayout(right)
         controls.setContentsMargins(0, 0, 0, 0)
         options = QGroupBox("Program options")
         form = QGridLayout(options)
-        self.flow_basis = choices([("mol/s", "mol_per_s"), ("GHSV (h⁻¹)", "ghsv_per_h")])
-        self.mode = choices([("Independent channels", "separate_channels"), ("Feed", "feed_stream")])
+        self.flow_basis = choices([("mol/s", "mol_per_s"), ("GHSV (h⁻¹)", "ghsv_per_h")], binary=True)
+        self.mode = choices([("Independent channels", "separate_channels"), ("Feed", "feed_stream")], binary=True)
         self.repeat = QCheckBox("Repeat program")
         form.addWidget(QLabel("Flow basis"), 0, 0)
         form.addWidget(QLabel("Mode"), 0, 1)
@@ -314,10 +337,13 @@ class ProgramPage(QWidget):
         self.timing = QLabel()
         self.timing.setWordWrap(True)
         controls.addWidget(self.timing)
-        layout.addWidget(right, 1)
+        self.splitter.addWidget(right)
+        self.splitter.setSizes([540, 640])
+        layout.addWidget(self.splitter)
         self.mode.currentIndexChanged.connect(self.change_mode)
         self.flow_basis.currentIndexChanged.connect(self.change_basis)
         self.repeat.toggled.connect(self.change_repeat)
+        self.update_channel_layout()
 
     def update_channel_layout(self):
         active = ("feed_stream", "outlet_pressure") if self.mode.currentData() == "feed_stream" else CHANNELS

@@ -3,11 +3,15 @@
 from collections import Counter
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtGui import QColor, QIcon, QPixmap, QPalette, QTextCharFormat, QTextLayout
 from PyQt6.QtWidgets import (
     QAbstractItemView, QHBoxLayout, QHeaderView, QStyle, QStyledItemDelegate, QToolButton,
-    QTreeWidget, QTreeWidgetItem, QWidget,
+    QTreeWidget, QTreeWidgetItem, QWidget, QStyleOptionViewItem,
 )
+
+
+from .theme import colors, manager, numeric_font
+import re
 
 
 STATE_LABELS = {
@@ -42,6 +46,17 @@ def action_icon(widget, label, theme, fallback):
     return QIcon.fromTheme(theme, icon)
 
 
+class ThemedIconButton(QToolButton):
+    def configure_icon(self, label, theme, fallback):
+        self.icon_spec = (label, theme, fallback)
+        self.refresh_icon()
+        if manager():
+            manager().changed.connect(self.refresh_icon)
+
+    def refresh_icon(self):
+        self.setIcon(action_icon(self, *self.icon_spec))
+
+
 def icon_button(widget, label, callback, description):
     theme, fallback = {
         "Run": ("media-playback-start", QStyle.StandardPixmap.SP_MediaPlay),
@@ -49,8 +64,8 @@ def icon_button(widget, label, callback, description):
         "Edit": ("document-edit", QStyle.StandardPixmap.SP_FileDialogDetailedView),
         "Delete": ("edit-delete", QStyle.StandardPixmap.SP_TrashIcon),
     }[label]
-    button = QToolButton(widget)
-    button.setIcon(action_icon(widget, label, theme, fallback))
+    button = ThemedIconButton(widget)
+    button.configure_icon(label, theme, fallback)
     button.setToolTip(description)
     button.setAccessibleName(description)
     button.setAutoRaise(True)
@@ -59,6 +74,42 @@ def icon_button(widget, label, callback, description):
 
 
 class CaseItemDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        if index.column() not in (2, 3):
+            return super().paint(painter, option, index)
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        text = opt.text
+        c = colors()
+        token = ("error" if text.startswith(("Failed", "Interrupted")) else
+                 "warning" if "stale" in text or text.startswith(("Underdefined", "Needs")) else
+                 "success" if text.startswith(("Ready", "Succeeded")) else
+                 "active" if text.startswith(("Running", "Queued", "Preparing", "Compiling", "Initialising")) else "ink")
+        opt.palette.setColor(QPalette.ColorRole.Text, QColor(c[token]))
+        rect = opt.widget.style().subElementRect(QStyle.SubElement.SE_ItemViewItemText, opt, opt.widget)
+        text = opt.fontMetrics.elidedText(text, opt.textElideMode, rect.width())
+        opt.text = ""
+        opt.widget.style().drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
+        layout = QTextLayout(text, opt.font)
+        formats = []
+        for match in re.finditer(r"(?<![\w])\d+(?:[.,]\d+)*(?![\w])", text):
+            span = QTextLayout.FormatRange()
+            span.start, span.length = match.start(), len(match.group())
+            span.format = QTextCharFormat()
+            span.format.setFont(numeric_font())
+            formats.append(span)
+        layout.setFormats(formats)
+        layout.beginLayout()
+        line = layout.createLine()
+        line.setLineWidth(rect.width())
+        layout.endLayout()
+        painter.save()
+        painter.setClipRect(rect)
+        painter.setPen(opt.palette.highlightedText().color() if opt.state & QStyle.StateFlag.State_Selected else QColor(c[token]))
+        from PyQt6.QtCore import QPointF
+        layout.draw(painter, QPointF(rect.left(), rect.top() + (rect.height() - line.height()) / 2))
+        painter.restore()
+
     def createEditor(self, parent, option, index):
         # Restrict text editors without intercepting Qt's checkbox events.
         if index.column() == 1:

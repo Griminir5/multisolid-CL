@@ -4,8 +4,8 @@ from copy import deepcopy
 from uuid import uuid4
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout,
-                             QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
+from PyQt6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
+                             QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QScrollArea, QSizePolicy,
                              QVBoxLayout, QWidget)
 
 from .catalogue_widgets import species_choices
@@ -37,21 +37,39 @@ class DefinitionDialog(QDialog):
         self.setWindowTitle("Operating program" if kind == "program" else "Bed configuration")
         self.resize(1100, 800)
         layout = QVBoxLayout(self)
-        form = QFormLayout()
+        identity = QHBoxLayout()
         self.name = QLineEdit(definition.name if definition else "New program" if kind == "program" else "New bed configuration")
         self.name.setAccessibleName("Definition name")
-        form.addRow("Name", self.name)
-        if definition:
-            users = store.definition_users(definition.id)
-            form.addRow(QLabel("Used by: " + (", ".join(study.name for study in users) or "No studies")))
+        identity.addWidget(QLabel("Name"))
+        identity.addWidget(self.name, 1)
         self.start = choices(["Copy baseline inputs", "Empty definition"])
         if not definition:
-            form.addRow("Start from", self.start)
-        layout.addLayout(form)
+            identity.addWidget(QLabel("Start from"))
+            identity.addWidget(self.start, 1)
+        layout.addLayout(identity)
+        if definition:
+            users = store.definition_users(definition.id)
+            layout.addWidget(message("Used by: " + (", ".join(study.name for study in users) or "No studies")))
         self.editor = InputEditor()
         # Definitions expose species and their owned page. Other documents supply preview context.
         for index in range(self.editor.tabs.count()):
-            self.editor.tabs.setTabVisible(index, index == (3 if kind == "program" else 2))
+            visible = index == (3 if kind == "program" else 2)
+            self.editor.tabs.setTabVisible(index, visible)
+            if not visible:
+                self.editor.tabs.widget(index).setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.editor.tabs.tabBar().hide()  # The dialog exposes one owned page.
+        # Keep the preview and Save/Cancel available while tall controls scroll.
+        page = self.editor.program if kind == "program" else self.editor.bed
+        split, index = (page.splitter, 1) if kind == "program" else (page.vertical_split, 0)
+        self.controls_scroll = QScrollArea()
+        self.controls_scroll.setWidgetResizable(True)
+        self.controls_scroll.setMinimumHeight(100)
+        controls = split.replaceWidget(index, self.controls_scroll)
+        self.controls_scroll.setWidget(controls)
+        page.preview.canvas.setMinimumHeight(300 if kind == "program" else 180)
+        if kind == "bed":
+            page.vertical_split.setSizes([240, 240])
+        self._fitted = False
         phase = "gas" if kind == "program" else "solid"
         catalog, _ = species_choices(store.project.plugins.catalogue(), phase)
         self.species = SelectionList(catalog, f"{phase} species")
@@ -65,6 +83,17 @@ class DefinitionDialog(QDialog):
         layout.addWidget(dialog_buttons(self, accept=self.save_definition))
         self.start.currentIndexChanged.connect(self.load_inputs)
         self.load_inputs()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._fitted:
+            self._fitted = True
+            available = self.screen().availableGeometry()
+            self.resize(min(self.width(), available.width() - 40),
+                        min(self.height(), available.height() - 60))
+            frame = self.frameGeometry()
+            frame.moveCenter(available.center())
+            self.move(frame.topLeft())
 
     def load_inputs(self):
         self.editor.debounce.stop()

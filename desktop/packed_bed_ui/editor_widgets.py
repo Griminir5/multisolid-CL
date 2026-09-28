@@ -5,9 +5,12 @@ from math import isfinite
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from PyQt6.QtCore import Qt, pyqtSignal
+from .choice import BinaryChoice
+from .theme import NUMERIC_ROLE, LOCKED_ROLE, numeric, numeric_font, style_figure, manager
+
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
+    QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QGroupBox, QToolButton,
     QSizePolicy, QStyledItemDelegate, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -36,7 +39,9 @@ def select_value(combo, value):
     combo.setCurrentIndex(index)
 
 
-def choices(items):
+def choices(items, *, binary=False, vertical=False):
+    if binary:
+        return BinaryChoice(items, vertical=vertical)
     combo = QComboBox()
     combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
     combo.setMinimumContentsLength(8)
@@ -53,6 +58,50 @@ def action_button(text, callback, *, tooltip=None):
     button.setToolTip(tooltip or text)
     button.clicked.connect(callback)
     return button
+
+
+def table_action(widget, row, text, callback):
+    """A full-width trailing action, visually part of the editable table."""
+    widget.setSpan(row, 0, 1, widget.columnCount())
+    button = action_button(text, callback)
+    button.setProperty("role", "tableAction")
+    widget.setCellWidget(row, 0, button)
+    widget.setRowHeight(row, 36)
+    return button
+
+
+class CollapsibleSection(QGroupBox):
+    """An accessible section whose hidden content releases its layout space."""
+    expandedChanged = pyqtSignal(bool)
+
+    def __init__(self, title):
+        super().__init__()
+        self.setProperty("role", "channel")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        self.toggle = QToolButton()
+        self.toggle.setText(title)
+        self.toggle.setCheckable(True)
+        self.toggle.setChecked(True)
+        self.toggle.setProperty("role", "channelTitle")
+        self.toggle.setProperty("layoutToggle", True)
+        self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.toggle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout.addWidget(self.toggle)
+        self.content = QWidget()
+        self.content_layout = QVBoxLayout(self.content)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.content, 1)
+        self.toggle.toggled.connect(self.set_expanded)
+        self.set_expanded(True)
+
+    def set_expanded(self, expanded):
+        self.content.setVisible(expanded)
+        self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        self.toggle.setToolTip(("Collapse " if expanded else "Expand ") + self.toggle.text().lower())
+        self.setSizePolicy(QSizePolicy.Policy.Expanding,
+                           QSizePolicy.Policy.Expanding if expanded else QSizePolicy.Policy.Fixed)
+        self.expandedChanged.emit(expanded)
 
 
 def row(*widgets):
@@ -81,9 +130,18 @@ def message(text=""):
 class DraftDelegate(QStyledItemDelegate):
     """Keep text cells in the draft while typing, including unfinished numbers."""
 
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        if index.data(NUMERIC_ROLE):
+            option.font = numeric_font()
+        if index.data(LOCKED_ROLE):
+            option.backgroundBrush = option.palette.alternateBase()
+
     def createEditor(self, parent, option, index):
         editor = super().createEditor(parent, option, index)
         if isinstance(editor, QLineEdit):
+            if index.data(NUMERIC_ROLE):
+                numeric(editor)
             editor.textEdited.connect(lambda: self.commitData.emit(editor))
         return editor
 
@@ -102,11 +160,15 @@ def table(headers):
     return widget
 
 
-def cell(widget, row, column, value, *, editable=True, tooltip=""):
+def cell(widget, row, column, value, *, editable=True, tooltip="", numeric_value=False):
     item = QTableWidgetItem(display(value))
+    item.setData(NUMERIC_ROLE, numeric_value or isinstance(value, (int, float)))
+    if item.data(NUMERIC_ROLE):
+        item.setFont(numeric_font())
+        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     if not editable:
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        item.setBackground(widget.palette().alternateBase())
+        item.setData(LOCKED_ROLE, True)
     item.setToolTip(tooltip)
     widget.setItem(row, column, item)
     return item
@@ -171,12 +233,14 @@ class SelectionList(QWidget):
             self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
             self.table.setColumnWidth(column, 58 if show and column == 1 else 38)
         layout.addWidget(self.table)
+        self.add_button = action_button(f"+ Add {self.noun}…", self.add)
+        layout.addWidget(self.add_button)
 
     def set_values(self, values):
         self.values = list(values) if isinstance(values, (list, tuple)) else []
         self.table.clearSpans()
         self.table.clearContents()
-        self.table.setRowCount(len(self.values) + 1)
+        self.table.setRowCount(len(self.values))
         self.show_buttons = []
         for row, key in enumerate(self.values):
             label, description = self.catalog.get(key, (str(key), "Unavailable definition"))
@@ -189,9 +253,6 @@ class SelectionList(QWidget):
             self.table.setCellWidget(row, self.table.columnCount() - 1, action_button(
                 "×", lambda _, key=key: self.remove(key), tooltip=f"Remove {label}",
             ))
-        self.table.setSpan(len(self.values), 0, 1, self.table.columnCount())
-        self.add_button = action_button(f"+ Add {self.noun}…", self.add)
-        self.table.setCellWidget(len(self.values), 0, self.add_button)
 
     def add(self):
         added = choose_items(self, f"Add {self.noun}", self.catalog, self.values)
@@ -217,6 +278,8 @@ class Preview(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.figure = Figure(layout="constrained")
+        if manager():
+            manager().changed.connect(self.restyle)
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.canvas.setMinimumSize(0, 0)
         self.canvas.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
@@ -228,8 +291,22 @@ class Preview(QWidget):
         layout.addWidget(self.message)
         layout.addWidget(self.canvas, 1)
 
+    def restyle(self):
+        style_figure(self.figure)
+        # Matplotlib chooses icon colours only at construction; refresh existing actions.
+        for _, _, image, callback in self.toolbar.toolitems:
+            if image and callback in self.toolbar._actions:
+                self.toolbar._actions[callback].setIcon(self.toolbar._icon(image + ".png"))
+        if self.isVisible():
+            self.canvas.draw_idle()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.canvas.draw_idle()
+
     def clear(self, message=""):
         self.figure.clear()
+        style_figure(self.figure)
         self.message.setText(message)
         self.message.setVisible(bool(message))
         self.toolbar.update()
@@ -237,6 +314,7 @@ class Preview(QWidget):
             self.canvas.draw_idle()
 
     def draw(self):
+        style_figure(self.figure)
         self.message.hide()
         self.toolbar.update()
         if self.isVisible():

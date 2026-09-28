@@ -74,7 +74,7 @@ def test_bundled_standard_solver_can_be_selected_and_reopened(compiled_editor, m
     assert case.documents == before
     assert not editor.dirty
     for excluded in ("band", "intel_pardiso"):
-        assert not combo.model().item(combo.findData(excluded)).isEnabled()
+        assert combo.findData(excluded) == -1
 
 
 def test_missing_trilinos_disables_choices_without_rewriting_import(compiled_editor, monkeypatch):
@@ -109,8 +109,7 @@ def test_standard_only_solver_switch_to_compiled_requires_confirmation(compiled_
     monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Ok)
     backend.setCurrentIndex(backend.findData("compiled"))
     assert case.documents["run"]["solver"]["name"] == "superlu"
-    item = editor.general.solver.model().item(editor.general.solver.findData("trilinos_umfpack"))
-    assert not item.isEnabled()
+    assert editor.general.solver.findData("trilinos_umfpack") == -1
 
 
 def test_desktop_project_cache_overrides_environment(qt_app, tmp_path, source_case, monkeypatch):
@@ -170,3 +169,23 @@ def test_unwritable_cache_blocks_before_replacing_results(tmp_path, source_case,
         project.prepare_execution([case])
     assert marker.read_text() == "previous result"
     assert not list(case.root.glob(".pending-*"))
+
+
+@pytest.mark.parametrize('backend,name', [('daetools', 'band'), ('compiled', 'trilinos_umfpack'), ('daetools', 'future_solver')])
+def test_imported_incompatible_solver_is_retained_but_not_offered(compiled_editor, backend, name):
+    from packed_bed.solver_support import DESKTOP_SOLVERS
+    editor, case = compiled_editor
+    case.documents['run']['solver'].update(backend=backend, name=name)
+    original = deepcopy(case.documents)
+    editor.set_case(case)
+    combo = editor.general.solver
+    assert combo.currentData() == name
+    assert combo.view().isRowHidden(combo.currentIndex())
+    visible = [combo.itemData(i) for i in range(combo.count()) if not combo.view().isRowHidden(i)]
+    assert visible == list(DESKTOP_SOLVERS[backend])
+    assert case.documents == original and not editor.dirty
+    assert editor.general.solver_status.text()
+    combo.setCurrentIndex(combo.findData('superlu'))
+    assert case.documents['run']['solver']['name'] == 'superlu'
+    assert combo.findData(name) == -1
+    assert all(not combo.view().isRowHidden(i) for i in range(combo.count()))

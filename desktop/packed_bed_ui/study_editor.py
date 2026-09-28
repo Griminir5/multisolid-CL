@@ -97,6 +97,9 @@ def choose_parameter(parent, study):
     return None
 
 
+from .theme import numeric, numeric_font, NumberLabel
+
+
 class FactorDialog(QDialog):
     def __init__(self, workspace, factor):
         super().__init__(workspace)
@@ -113,22 +116,25 @@ class FactorDialog(QDialog):
         else:
             layout.addWidget(QLabel("Baseline: " + display(get_value(workspace.study.baseline, self.parameter.path))
                                     + (" " + self.parameter.unit if self.parameter.unit else "")))
-            self.mode = choices(["Values", "Range"])
+            self.mode = choices(["Values", "Range"], binary=True)
             self.mode.setCurrentIndex(1 if factor.range is not None else 0)
             layout.addWidget(self.mode)
             self.values = QPlainTextEdit(", ".join(map(display, factor.values)), accessibleName="Variation values",
                                          placeholderText="Enter values separated by commas, spaces, or new lines")
+            numeric(self.values)
             layout.addWidget(self.values)
             self.range_widget = QWidget()
             form = QFormLayout(self.range_widget)
             self.range_fields = {}
             for key, title in (("start", "Start"), ("end", "End"), ("count", "Number of values")):
                 control = QLineEdit(display((factor.range or {}).get(key, "")), accessibleName=title)
+                numeric(control)
                 self.range_fields[key] = control
                 form.addRow(title, control)
                 control.textChanged.connect(self.refresh_values)
             layout.addWidget(self.range_widget)
             self.expanded = QPlainTextEdit(readOnly=True, accessibleName="Expanded values", maximumHeight=110)
+            numeric(self.expanded)
             layout.addWidget(self.expanded)
             self.values.textChanged.connect(self.refresh_values)
             self.mode.currentIndexChanged.connect(self.refresh_values)
@@ -197,7 +203,7 @@ class StudyEditor(QWidget):
         splitter = QSplitter()
         left, right = QWidget(), QWidget()
         self.left_layout, right_layout = QVBoxLayout(left), QVBoxLayout(right)
-        self.mode = choices(["All combinations", "Explicit case rows"])
+        self.mode = choices(["All combinations", "Explicit case rows"], binary=True)
         self.mode.currentIndexChanged.connect(self.change_mode)
         self.left_layout.addLayout(row(self.mode, action_button("Reusable definitions…", self.definitions)))
         self.factors = table(["Parameter", "Values", ""])
@@ -219,7 +225,7 @@ class StudyEditor(QWidget):
         for label, action in (("+ Row", "add"), ("Duplicate", "duplicate"), ("Remove", "remove"), ("↑", "up"), ("↓", "down")):
             row_actions.addWidget(action_button(label, lambda _, action=action: self.edit_rows(action)))
         self.left_layout.addWidget(self.row_actions)
-        self.count = message()
+        self.count = NumberLabel()
         right_layout.addWidget(self.count)
         self.candidate_table = QTableView(alternatingRowColors=True, selectionBehavior=QAbstractItemView.SelectionBehavior.SelectRows)
         self.candidate_model = CandidateTable(self)
@@ -231,7 +237,8 @@ class StudyEditor(QWidget):
         right_layout.addWidget(self.issue)
         self.cancel_preview = action_button("Cancel preview", self.stop_preview)
         self.refresh_button = action_button("Refresh preview", self.begin_preview)
-        right_layout.addLayout(row(action_button("Inspect selected case", self.inspect_candidate), self.cancel_preview, self.refresh_button))
+        right_layout.addWidget(action_button("Inspect selected case", self.inspect_candidate))
+        right_layout.addLayout(row(self.cancel_preview, self.refresh_button))
         splitter.addWidget(left)
         splitter.addWidget(right)
         splitter.setSizes([450, 620])
@@ -311,7 +318,8 @@ class StudyEditor(QWidget):
             else:
                 values = ", ".join(self.store.definitions[v].name if isinstance(v, str) and v in self.store.definitions else display(v)
                                    for v in factor.values)
-            cell(self.factors, index, 1, values, editable=False, tooltip=values)
+            cell(self.factors, index, 1, values, editable=False, tooltip=values,
+                 numeric_value=not factor.target.startswith("definition:"))
             if self.study.mode == "rows":
                 cell(self.factors, index, 1, "Edit values in the case rows below", editable=False)
             self.factors.setCellWidget(index, 2, action_button("Remove", lambda _, index=index: self.remove_factor(index)))
