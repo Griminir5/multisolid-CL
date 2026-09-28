@@ -55,3 +55,31 @@ preview_case(load_case(sys.argv[1]))
 '''
     environment = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1]))
     subprocess.run([sys.executable, "-c", code, str(source_case)], env=environment, check=True, capture_output=True)
+
+
+@pytest.mark.parametrize('values', [{'Ni': 10, 'oxide': 2}, {'Ni': 2, 'oxide': 8}])
+def test_zone_weight_percentages_use_each_composition_and_molecular_weights(values):
+    from packed_bed_ui.inputs import zone_weight_percentages
+    from copy import deepcopy
+    before = deepcopy(values)
+    weights = {'Ni': .058693, 'oxide': .0746928}
+    ni, oxide = values['Ni'] * .058693, values['oxide'] * .0746928
+    expected = {'Ni': 100 * ni / (ni + oxide), 'oxide': 100 * oxide / (ni + oxide)}
+    actual = zone_weight_percentages(values, weights)
+    assert actual == pytest.approx(expected)
+    assert sum(actual.values()) == pytest.approx(100)
+    assert values == before
+    # Any common concentration-basis conversion within this zone cancels.
+    assert zone_weight_percentages({key: value * .3 for key, value in values.items()}, weights) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize('values,weights', [
+    ({'Ni': 0, 'NiO': 0}, {'Ni': .058693, 'NiO': .0746928}),
+    ({'Ni': '1e-', 'NiO': 2}, {'Ni': .058693, 'NiO': .0746928}),
+    ({'Ni': -1, 'NiO': 2}, {'Ni': .058693, 'NiO': .0746928}),
+    ({'Ni': 1, 'NiO': 2}, {'Ni': .058693}),
+    ({'Ni': float('inf'), 'NiO': 2}, {'Ni': .058693, 'NiO': .0746928}),
+])
+def test_zone_weight_percentages_never_show_a_partial_or_zero_mass_denominator(values, weights):
+    from packed_bed_ui.inputs import zone_weight_percentages
+    assert zone_weight_percentages(values, weights) == dict.fromkeys(values)

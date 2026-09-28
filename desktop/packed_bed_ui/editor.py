@@ -333,6 +333,7 @@ class InputEditor(QWidget):
     def refresh(self):
         if self.case is None:
             return
+        self.bed.update_weight_percentages(reload_species=True)
         for preview in (self.program.preview, self.bed.preview):
             preview.clear()
         try:

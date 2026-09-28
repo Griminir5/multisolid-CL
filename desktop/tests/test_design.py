@@ -604,3 +604,77 @@ def test_species_prose_uses_text_font_and_numeric_drafts_keep_monospace(qt_app, 
     form.fields['mw'].setText('1e-')
     assert form.fields['mw'].font().family() == NUMERIC_FAMILY
     assert form.value()['mw'] == '1e-'
+
+
+def test_zone_weight_percentages_are_inline_live_and_preserve_drafts_and_saved_inputs(qt_app, design, tmp_path, source_case):
+    from packed_bed_ui.bed import WEIGHT_PERCENT_ROLE
+    from packed_bed.preview import preview_case
+    project = Project.create(tmp_path / 'project')
+    case = project.add_case_from_files(source_case)
+    case.documents['solids']['solid_species'].append('oxide')
+    case.documents['chemistry']['species_definitions'] = {'oxide': 'builtin:NiO'}
+    profile = case.documents['solids']['initial_profile']
+    first = profile['zones'][0]
+    first.update(x_end_m=.25, values={'Ni': 10, 'oxide': 2})
+    second = deepcopy(first)
+    second.update(x_start_m=.25, x_end_m=1, e_b=.2, e_p=.25, values={'Ni': 2, 'oxide': 8})
+    profile['zones'].append(second)
+    case.save()
+    editor = InputEditor()
+    editor.resize(1280, 800)
+    editor.set_case(case)
+    editor.tabs.setCurrentWidget(editor.bed)
+    editor.show()
+    qt_app.processEvents()
+    zones = editor.bed.zones
+
+    def percentages(row):
+        return [zones.item(row, col).data(WEIGHT_PERCENT_ROLE) for col in (5, 6)]
+
+    assert percentages(0) == ['79.7 wt%', '20.3 wt%']
+    assert percentages(1) == ['16.4 wt%', '83.6 wt%']
+    assert zones.rowCount() == 3 and zones.columnCount() == 8
+    assert zones.rowHeight(0) == zones.verticalHeader().defaultSectionSize() == 34
+    assert zones.item(0, 5).text() == '10'
+    assert '79.7 wt%' in zones.item(0, 5).data(Qt.ItemDataRole.AccessibleTextRole)
+    original = deepcopy(case.documents)
+    expected_arrays = preview_case(case.resolve()).solid_concentrations_mol_m3_bed
+    for dark in (True, False):
+        design.apply(dark)
+        qt_app.processEvents()
+        assert percentages(0) == ['79.7 wt%', '20.3 wt%']
+        for patch, values in zip(editor.bed.preview.figure.axes[0].patches, expected_arrays):
+            np.testing.assert_array_equal(patch.get_data().values, values)
+        assert [t.get_text() for t in editor.bed.preview.figure.axes[0].get_legend().get_texts()] == ['Ni', 'NiO']
+    assert case.documents == original
+
+    zones.setCurrentCell(0, 5)
+    zones.editItem(zones.item(0, 5))
+    qt_app.processEvents()
+    control = zones.findChild(QLineEdit)
+    assert control.font().family() == NUMERIC_FAMILY
+    assert control.geometry().bottom() < zones.visualItemRect(zones.item(0, 5)).bottom() - 10
+    QTest.keyClick(control, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClicks(control, '1e-')
+    assert control.text() == '1e-'
+    assert zones.item(0, 5).text() == '1e-'
+    assert percentages(0) == ['— wt%', '— wt%']
+    assert percentages(1) == ['16.4 wt%', '83.6 wt%']
+    QTest.keyClick(control, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClicks(control, '0')
+    assert percentages(0) == ['0.0 wt%', '100.0 wt%']
+    QTest.keyClick(control, Qt.Key.Key_Return)
+    QTest.qWait(editor.debounce.interval() + 100)
+    expected = deepcopy(original)
+    expected['solids']['initial_profile']['zones'][0]['values']['Ni'] = 0
+    assert Project.open(project.root).cases[0].documents == expected
+
+    # Other unfinished case fields do not hide a complete zone's composition.
+    editor.fields['model', 'bed_radius_m'].setText('1e-')
+    QTest.qWait(editor.debounce.interval() + 100)
+    assert not editor.bed.preview.figure.axes
+    assert percentages(0) == ['0.0 wt%', '100.0 wt%']
+    assert percentages(1) == ['16.4 wt%', '83.6 wt%']
+    editor.set_case(case, read_only=True)
+    assert percentages(0) == ['0.0 wt%', '100.0 wt%']
+    assert not zones.item(0, 5).flags() & Qt.ItemFlag.ItemIsEditable or not zones.editTriggers()

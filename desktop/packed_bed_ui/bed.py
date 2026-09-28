@@ -2,11 +2,67 @@
 
 from copy import deepcopy
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QSplitter, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QVBoxLayout, QWidget
+from PyQt6.QtCore import Qt, QSignalBlocker, QRect
+from PyQt6.QtGui import QColor, QFontMetrics, QPalette
+from PyQt6.QtWidgets import QApplication, QStyle, QStyleOptionViewItem, QSplitter, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QVBoxLayout, QWidget
 
-from .editor_widgets import Preview, action_button, cell, display, number, table, table_action
+from .editor_widgets import DraftDelegate, Preview, action_button, cell, display, number, table, table_action
 from .general import form_panel
+from .inputs import zone_weight_percentages
+from .theme import colors, numeric_font
+
+
+WEIGHT_PERCENT_ROLE = Qt.ItemDataRole.UserRole + 73
+
+
+class ZoneDelegate(DraftDelegate):
+    """Keep the editable concentration and derived wt% in the existing cell height."""
+    @staticmethod
+    def text_rects(option):
+        bounds = option.rect.adjusted(4, 1, -4, -1)
+        secondary_height = QFontMetrics(numeric_font(12)).height()
+        primary = QRect(bounds)
+        primary.setHeight(max(1, bounds.height() - secondary_height))
+        secondary = QRect(bounds)
+        secondary.setTop(primary.bottom() + 1)
+        return primary, secondary
+
+    def paint(self, painter, option, index):
+        percentage = index.data(WEIGHT_PERCENT_ROLE)
+        if percentage is None:
+            return super().paint(painter, option, index)
+        styled = QStyleOptionViewItem(option)
+        self.initStyleOption(styled, index)
+        text, styled.text = styled.text, ""
+        style = styled.widget.style() if styled.widget else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, styled, painter, styled.widget)
+        primary, secondary = self.text_rects(styled)
+        selected = styled.state & QStyle.StateFlag.State_Selected
+        foreground = styled.palette.color(QPalette.ColorRole.HighlightedText if selected else QPalette.ColorRole.Text)
+        painter.save()
+        painter.setClipRect(styled.rect)
+        painter.setFont(numeric_font())
+        painter.setPen(foreground)
+        painter.drawText(primary, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                         QFontMetrics(numeric_font()).elidedText(text, Qt.TextElideMode.ElideRight, primary.width()))
+        painter.setFont(numeric_font(12))
+        painter.setPen(foreground if selected else QColor(colors()['muted']))
+        painter.drawText(secondary, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                         QFontMetrics(numeric_font(12)).elidedText(percentage, Qt.TextElideMode.ElideRight, secondary.width()))
+        painter.restore()
+
+    def createEditor(self, parent, option, index):
+        editor = super().createEditor(parent, option, index)
+        if index.data(WEIGHT_PERCENT_ROLE) is not None:
+            editor.setStyleSheet("QLineEdit { padding: 0; border: 0; }")
+            editor.setAlignment(Qt.AlignmentFlag.AlignRight)
+        return editor
+
+    def updateEditorGeometry(self, editor, option, index):
+        if index.data(WEIGHT_PERCENT_ROLE) is not None:
+            editor.setGeometry(self.text_rects(option)[0])
+        else:
+            super().updateEditorGeometry(editor, option, index)
 
 
 class BedSettings(QGroupBox):
@@ -25,6 +81,7 @@ class BedPage(QWidget):
         self.editor = editor
         self.loading = False
         self.previous_length = None
+        self.molecular_weights = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.vertical_split = QSplitter(Qt.Orientation.Vertical)
@@ -37,6 +94,7 @@ class BedPage(QWidget):
         self.units.setWordWrap(True)
         zones_layout.addWidget(self.units)
         self.zones = table([])
+        self.zones.setItemDelegate(ZoneDelegate(self.zones))
         self.zones.itemChanged.connect(self.edit_zone)
         zones_layout.addWidget(self.zones, 1)
         options, form = form_panel("Bed settings", panel_type=BedSettings)
@@ -74,7 +132,7 @@ class BedPage(QWidget):
 
     def update_units(self):
         basis = self.editor.get(("solids", "initial_profile", "basis"), "bed")
-        self.units.setText(f"Positions and particle diameter in m · voidages as fractions · concentrations in mol/m³ {basis}")
+        self.units.setText(f"Voidages as fractions · solids: mol/m³ {basis} above, zone wt% below")
 
     def load_zones(self):
         self.loading = True
@@ -105,6 +163,40 @@ class BedPage(QWidget):
         self.add_button = table_action(self.zones, len(zones), "+ Add zone", self.add_zone)
         self.add_button.setEnabled(not self.editor.read_only)
         self.loading = False
+        self.update_weight_percentages(reload_species=True)
+
+    def update_weight_percentages(self, *, reload_species=False):
+        species = self.editor.get(("solids", "solid_species"), [])
+        if reload_species:
+            self.molecular_weights = {}
+            catalogue = self.editor.catalogue()
+            references = self.editor.get(("chemistry", "species_definitions"), {})
+            for name in species:
+                try:
+                    definition = catalogue.get("species", references.get(name, "builtin:" + name))
+                    if definition.phase == "solid":
+                        self.molecular_weights[name] = definition.mw
+                except ValueError:
+                    pass  # Missing definitions display an undefined percentage.
+        basis = self.editor.get(("solids", "initial_profile", "basis"), "bed")
+        zones = self.editor.get(("solids", "initial_profile", "zones"), [])
+        with QSignalBlocker(self.zones), QSignalBlocker(self.zones.model()):
+            for row, zone in enumerate(zones):
+                values = {name: zone.get("values", {}).get(name) for name in species}
+                percentages = zone_weight_percentages(values, self.molecular_weights)
+                for column, name in enumerate(species, start=5):
+                    item = self.zones.item(row, column)
+                    if item is None:
+                        continue
+                    percent = percentages[name]
+                    value = "—" if percent is None else "<0.1" if 0 < percent < .05 else f"{percent:.1f}"
+                    annotation = value + " wt%"
+                    item.setData(WEIGHT_PERCENT_ROLE, annotation)
+                    description = f"{name}: {item.text()} mol/m³ {basis}; {annotation} of initial solids in this zone."
+                    item.setData(Qt.ItemDataRole.AccessibleTextRole, description)
+                    item.setToolTip(description + ("\nComplete this zone's concentrations and material definitions."
+                                                   if percent is None else "\nCalculated from concentrations and molecular weights."))
+        self.zones.viewport().update()
 
     def anchor_zones(self):
         if self.editor.read_only:
@@ -131,6 +223,7 @@ class BedPage(QWidget):
         target = zones[item.row()] if item.column() < 5 else zones[item.row()].setdefault("values", {})
         target[key] = number(item.text())
         self.editor.put(("solids", "initial_profile", "zones"), zones)
+        self.update_weight_percentages()
 
     def add_zone(self):
         if self.editor.read_only:

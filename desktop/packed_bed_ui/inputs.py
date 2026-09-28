@@ -82,6 +82,28 @@ def resolve_documents(documents, catalogue=None):
                         **{f"{name}_data": value for name, value in documents.items()})
 
 
+def zone_weight_percentages(values, molecular_weights):
+    """Mass fractions for one zone, without requiring the rest of a valid case.
+
+    Zone volume and any common bed/solid volume conversion cancel in the ratio.
+    An incomplete concentration or missing material invalidates the whole denominator.
+    """
+    unavailable = dict.fromkeys(values)
+    try:
+        masses = {}
+        for name, value in values.items():
+            concentration, mw = float(value), float(molecular_weights[name])
+            if not math.isfinite(concentration) or concentration < 0 or not math.isfinite(mw) or mw <= 0:
+                return unavailable
+            masses[name] = concentration * mw
+        total = math.fsum(masses.values())
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return unavailable
+    if total <= 0 or not math.isfinite(total):
+        return unavailable
+    return {name: mass / total * 100 for name, mass in masses.items()}
+
+
 def input_readiness(documents, extensions=(), *, catalogue=None):
     try:
         case = resolve_documents(documents, catalogue)
