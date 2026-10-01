@@ -1,6 +1,8 @@
 """Cross-process cache publication, recovery, and cancellation contracts."""
 
 import ctypes
+import csv
+import io
 import json
 import multiprocessing as mp
 from pathlib import Path
@@ -14,6 +16,32 @@ from packed_bed.compiled.cache import build_events, cache_lock, valid_library
 from packed_bed.compiled.compiler import compile_kernel
 
 SOURCE = 'PB_EXPORT double square(double x) { return x*x; }'
+
+
+def test_large_compiler_failure_preserves_log_and_fits_csv(tmp_path, monkeypatch):
+    from packed_bed import processes
+    from packed_bed.compiled import compiler
+
+    monkeypatch.setattr(compiler, "compiler_identity", lambda: (Path("compiler"), "test"))
+    diagnostics = "first diagnostic\n" + "warning\n" * 30_000 + "last diagnostic\n"
+
+    def fail(command, *, cwd, env):
+        (cwd / "compiler.log").write_text(diagnostics, encoding="utf-8")
+        raise RuntimeError("Model kernel compilation failed:\n" + diagnostics)
+
+    monkeypatch.setattr(processes, "run_compiler", fail)
+    with pytest.raises(RuntimeError) as error:
+        compile_kernel(SOURCE, tmp_path)
+    message = str(error.value)
+    saved_log, = tmp_path.glob("*.compiler.log")
+    assert saved_log.read_text(encoding="utf-8") == diagnostics
+    assert str(saved_log) in message
+    assert "first diagnostic" in message and "last diagnostic" in message
+    stream = io.StringIO(newline="")
+    csv.writer(stream).writerow(["failed", message])
+    stream.seek(0)
+    assert next(csv.reader(stream)) == ["failed", message]
+    assert not list(tmp_path.glob("*-tmp-*"))
 
 
 def build_shared(cache, queue):

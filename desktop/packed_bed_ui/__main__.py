@@ -48,15 +48,19 @@ def main(argv=None) -> int:
 
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QIcon
-    from .window import MainWindow
 
     app = QApplication(["MultiSolid"])
     app.setApplicationName("MultiSolid")
     app.setWindowIcon(QIcon(str(Path(__file__).parent / "assets/multisolid.svg")))
+    from .splash import show_splash
+    splash = show_splash(app)
+    from .window import MainWindow
+
     window = MainWindow()
     if args.project is not None:
         window.open_project(args.project)
     window.show()
+    splash.finish(window)
     return app.exec()
 
 

@@ -258,11 +258,16 @@ The solver identifiers `superlu_mt`, `trilinos_umfpack`, `intel_pardiso`, and
 explicit solver selection; use `klu` for KLU. Compiled `superlu` still uses the
 SUNDIALS SuperLU_MT library internally and supports the `threads` setting.
 
-The first run compiles a model-specific kernel; later CLI runs reuse `.packed_bed_cache` beside the case.
+The first run compiles a model-specific kernel; later single-case CLI runs reuse `.packed_bed_cache` beside the case.
+Console batches share `.packed_bed_cache` in the batch output directory across all cases,
+including Zig's support libraries and native solver helpers.
 Desktop workers always share `.packed_bed_cache` at the project root, outside
 replaceable run folders. It is excluded from archives and scientific fingerprints.
 Kernels use `.dll`, `.so` or `.dylib` as appropriate; cache keys include the platform, CPU architecture,
-compiler and build flags. Set `PACKED_BED_COMPILED_CACHE` to share a cache directory.
+compiler and build flags. Set `PACKED_BED_COMPILED_CACHE` to override the CLI cache directory.
+Managed Zig kernels omit debug information to reduce compilation memory.
+Failed compilations keep their full diagnostics in a `*.compiler.log` file in the cache;
+batch errors include a bounded excerpt and the log path.
 AVX2 acceleration is detected at runtime; other CPUs use scalar kernels. The optional
 `vector_exponentials: true` also requires FMA and falls back to scalar math when unavailable.
 The backend supports the usual datasets and plots;

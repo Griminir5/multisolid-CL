@@ -92,6 +92,8 @@ class Theme(QObject):
         app.setStyle('Fusion')
         self.body = font_family('Segoe UI', 'Helvetica Neue', 'DejaVu Sans')
         self.display = font_family('Impact', 'Arial Narrow', 'DejaVu Sans')
+        from .branding import brand_family
+        self.display = brand_family(self.display)
         self.follow_system()
         app.styleHints().colorSchemeChanged.connect(self.follow_system)
         app.paletteChanged.connect(self.native_palette_changed)
@@ -193,6 +195,7 @@ QLabel { background: transparent; }
 QLabel[role="muted"], QLabel[role="note"] { color: @muted; font-size: 13px; }
 QLabel[role="section"] { font-weight: 600; }
 QLabel[role="pageTitle"] { font-size: 26px; font-weight: 700; }
+QLabel[role="projectTitle"] { font-family: "@display"; font-size: 32px; }
 QLabel[role="display"] { font-family: "@display"; font-size: 64px; font-weight: 900; }
 QLabel[role="emptyTitle"] { font-size: 28px; font-weight: 700; }
 *[numeric="true"], QSpinBox, QDoubleSpinBox { font-family: "@mono"; }
@@ -206,7 +209,11 @@ QLabel[state="warning"] { color: @warning; }
 QLabel[state="success"] { color: @success; }
 QLabel[state="active"] { color: @active; }
 QWidget#masthead { background: #242720; }
-QLabel#brandIndex { background: #d9f36d; color: #242720; padding: 8px; font-family: "@mono"; font-size: 12px; }
+QLabel#brandIndex { background: #d9f36d; color: #242720; padding: 5px 10px; font-family: "@display"; font-size: 24px; }
+QMenuBar#ribbonMenus { background: #242720; color: #f1f0e8; }
+QMenuBar#ribbonMenus::item { background: transparent; padding: 9px 14px; font-weight: 600; }
+QMenuBar#ribbonMenus::item:selected { background: #d9f36d; color: #242720; }
+QMenuBar#ribbonMenus::item:disabled { color: #858978; }
 QLabel#wordmark { font-family: "@display"; color: #f1f0e8; font-size: 24px; font-weight: 900; }
 QLabel#brandDescriptor, QLabel#brandEdition { color: #b8bbad; font-size: 11px; }
 QFrame#welcomeHero, QFrame#recentEmpty { background: @surface; border: 2px solid @boundary; }
@@ -218,7 +225,7 @@ QPushButton:pressed { background: @contrastSurface; color: @contrastText; border
 QToolButton:checked { background: @selected; }
 QPushButton[segment="true"] { spacing: 0; padding: 5px 8px; font-weight: 600; }
 QPushButton[segment="true"]:checked { background: #d9f36d; color: #242720; border-color: @contrastBorder; }
-QPushButton[role="welcomeAction"] { font-size: 13px; padding: 6px 8px; }
+QPushButton[role="welcomeAction"] { font-size: 13px; padding: 6px 7px; }
 QLabel#artCaption { color: #b7c0a2; font-size: 11px; }
 QWidget#animationPane { background: #242720; }
 QPushButton[role="artControl"] { background: #242720; color: #f1f0e8; border-color: #858978; font-size: 13px; }

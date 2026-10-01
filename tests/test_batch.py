@@ -69,6 +69,14 @@ def _successful_fake_run(case, **_kwargs):
     return RunResult(case=case, output_directory=case.output_directory)
 
 
+def _record_compiled_cache(case, **_kwargs):
+    cache = Path(os.environ["PACKED_BED_COMPILED_CACHE"])
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / case.run_path.parent.name).touch()
+    (case.run_path.parent / "cache-location.txt").write_text(str(cache))
+    return RunResult(case=case, output_directory=case.output_directory)
+
+
 def _large_payload_run(case, **_kwargs):
     if case.run.model.axial_cells == 4:
         raise RuntimeError("x" * 1_000_000)
@@ -114,6 +122,40 @@ def _write_conditions(tmp_path: Path, conditions: dict, **values) -> Path:
         "id": "condition",
         "values": [_patch_value(name, patch) for name, patch in conditions.items()],
     }], **values)
+
+
+@pytest.mark.parametrize("workers,timeout", [(1, None), (1, 10), (2, None)])
+@pytest.mark.parametrize("override", [False, True])
+def test_batch_cases_share_cache_and_restore_environment(tmp_path, monkeypatch, workers, timeout, override):
+    name = "PACKED_BED_COMPILED_CACHE"
+    monkeypatch.chdir(tmp_path)
+    if override:
+        monkeypatch.setenv(name, "custom-cache")
+    else:
+        monkeypatch.delenv(name, raising=False)
+    before = os.environ.get(name)
+    result = run_batch_file(
+        _write_two_case_batch(tmp_path, workers=workers, case_timeout_s=timeout),
+        run_case_fn=_record_compiled_cache,
+    )
+    expected = tmp_path / "custom-cache" if override else result.output_directory / ".packed_bed_cache"
+    assert all(record.status == "success" for record in result.records)
+    for record in result.records:
+        assert (record.case_directory / "cache-location.txt").read_text() == str(expected)
+        assert (expected / record.case_directory.name).is_file()
+        assert not (record.case_directory / ".packed_bed_cache").exists()
+    assert os.environ.get(name) == before
+
+
+def test_separate_batches_have_separate_default_caches(tmp_path, monkeypatch):
+    monkeypatch.delenv("PACKED_BED_COMPILED_CACHE", raising=False)
+    caches = []
+    for name in ("first", "second"):
+        directory = tmp_path / name
+        directory.mkdir()
+        result = run_batch_file(_write_two_case_batch(directory), run_case_fn=_record_compiled_cache)
+        caches.append((result.records[0].case_directory / "cache-location.txt").read_text())
+    assert caches[0] != caches[1]
 
 
 def test_structured_patches_merge_recursively_in_axis_order(tmp_path: Path) -> None:
@@ -458,6 +500,7 @@ def test_crashed_workers_are_reaped_and_reported(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("workers", [1, 2])
 def test_interruption_preserves_completed_cases_and_reaps_workers(tmp_path, monkeypatch, workers):
+    monkeypatch.delenv("PACKED_BED_COMPILED_CACHE", raising=False)
     children_before = active_children()
     write_records = batch._write_records_csv
     interrupted = False
@@ -480,6 +523,7 @@ def test_interruption_preserves_completed_cases_and_reaps_workers(tmp_path, monk
     assert [record["status"] for record in records] == ["success", "interrupted_failed"]
     assert "KeyboardInterrupt" in records[1]["error"]
     assert active_children() == children_before
+    assert "PACKED_BED_COMPILED_CACHE" not in os.environ
 
 
 def test_interrupted_csv_write_preserves_previous_snapshot(tmp_path, monkeypatch):

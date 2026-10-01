@@ -38,13 +38,18 @@ class MainWindow(QMainWindow):
         self.runner.changed.connect(self._run_status)
         self.runner.finished.connect(self._run_finished)
         self.pages = QStackedWidget()
-        self.setCentralWidget(self.pages)
+        shell = QWidget()
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+        self.masthead = Masthead()
+        shell_layout.addWidget(self.masthead)
+        shell_layout.addWidget(self.pages, 1)
+        self.setCentralWidget(shell)
         self.welcome = QWidget()
         welcome_layout = QVBoxLayout(self.welcome)
         welcome_layout.setContentsMargins(0, 0, 0, 0)
         welcome_layout.setSpacing(0)
-        self.masthead = Masthead()
-        welcome_layout.addWidget(self.masthead)
         content = QWidget()
         welcome_content = QVBoxLayout(content)
         welcome_content.setContentsMargins(24, 24, 24, 16)
@@ -72,12 +77,13 @@ class MainWindow(QMainWindow):
 
         self.home = QWidget()
         layout = QVBoxLayout(self.home)
-        self.project_title = themed_label("", "pageTitle")
+        self.project_title = themed_label("", "projectTitle", wrap=True)
+        self.project_title.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.project_title)
         self.results_button = QPushButton("Results…")
         self.results_button.clicked.connect(self._show_results)
         self.mutation_buttons = []
-        menu = self.menuBar().addMenu("Project")
+        menu = self.masthead.menus.addMenu("Project")
         self.project_actions = []
         for label, callback, shortcut in (
             ("Create New Project…", self._new_project, QKeySequence.StandardKey.New),
@@ -92,15 +98,16 @@ class MainWindow(QMainWindow):
             if shortcut is not None:
                 action.setShortcut(shortcut)
             self.project_actions.append(action)
+            self.addAction(action)  # Keep standard shortcuts active throughout the window.
         for label, callback, required in (("Export project…", self._export_archive, True),
                                           ("Import project archive…", self._import_archive, False)):
             action = menu.addAction(label, callback)
             action.setProperty("requires_project", required)
             self.project_actions.append(action)
         self.recent_menu = menu.addMenu("Recent projects")
-        self.plugins_action = self.menuBar().addAction('Plugins', self._plugins)
+        self.plugins_action = self.masthead.menus.addAction('Plugins', self._plugins)
         self.plugins_action.setEnabled(False)
-        help_menu = self.menuBar().addMenu("Help")
+        help_menu = self.masthead.menus.addMenu("Help")
         help_menu.addAction("Licences and notices", self._show_licenses)
         self.recent_menu.aboutToShow.connect(self.locations.refresh)
         self.case_count = NumberLabel()
@@ -195,6 +202,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Licences and notices", f"Open the notices at:\n{path}")
 
     def _page_status(self):
+        self.masthead.set_workspace(self.pages.currentWidget() is not self.welcome)
         if self.runner.active:
             self._run_status(self.runner.job)
             return

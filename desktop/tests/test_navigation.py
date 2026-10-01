@@ -38,16 +38,21 @@ def test_creation_form_defaults_cancel_custom_location_and_existing_folder(qt_ap
     from PyQt6.QtWidgets import QDialog
     from packed_bed_ui.navigation import NewProjectDialog, ProjectLocations, default_parent
 
-    documents = tmp_path / "Documents from OS"
+    documents = tmp_path / "OneDrive" / "Documents"
+    profile = tmp_path / 'local-user'
+    monkeypatch.setattr(Path, 'home', lambda: profile)
     monkeypatch.setattr(QStandardPaths, "writableLocation", lambda _: str(documents))
-    assert default_parent() == documents / "MultiSolid"
+    expected = (profile / 'Documents' if sys.platform == 'win32' else documents) / 'MultiSolid'
+    assert default_parent() == expected
     locations = ProjectLocations()
+    locations.settings.setValue('creation_parent', str(documents / 'MultiSolid'))
+    assert locations.creation_parent == expected
     dialog = NewProjectDialog(locations)
-    assert dialog.path == documents / "MultiSolid" / "New project"
+    assert dialog.path == expected / "New project"
     dialog.reject()
     assert not documents.exists()
     monkeypatch.setattr(QStandardPaths, "writableLocation", lambda _: "")
-    assert default_parent() == Path.home()
+    assert default_parent() == profile / 'Documents' / 'MultiSolid'
     dialog = NewProjectDialog(locations)
     dialog.name.setText("A project")
     dialog.location.setText(str(tmp_path / "custom"))
@@ -85,16 +90,16 @@ def test_recents_persist_deduplicate_aliases_and_handle_moved_folders(qt_app, tm
     except OSError:  # Windows can require privileges to create directory symlinks.
         alias = first.root
     locations.remember(Project.open(alias))
-    assert [entry["path"] for entry in locations.visible()] == [str(first.root), str(second.root)]
+    assert [Path(entry["path"]) for entry in locations.visible()] == [first.root, second.root]
     assert len({entry["name"] for entry in locations.visible()}) == 1
     moved = tmp_path / "moved"
     first.root.rename(moved)
     restarted = ProjectLocations()
     restarted.refresh()
     wait_for(qt_app, lambda: not restarted.checking)
-    assert [entry["path"] for entry in restarted.visible()] == [str(second.root)]
+    assert [Path(entry["path"]) for entry in restarted.visible()] == [second.root]
     restarted.remember(Project.open(moved))
-    assert [entry["path"] for entry in restarted.visible()] == [str(moved), str(second.root)]
+    assert [Path(entry["path"]) for entry in restarted.visible()] == [moved, second.root]
 
 
 def test_recent_probes_do_not_block_ui_or_read_project_contents(qt_app, tmp_path, monkeypatch):
@@ -121,8 +126,8 @@ def test_recent_probes_do_not_block_ui_or_read_project_contents(qt_app, tmp_path
     try:
         locations.refresh()
         wait_for(qt_app, lambda: started.is_set() and len(locations.visible()) == 1)
-        assert locations.visible()[0]["path"] == str(fast.root)
-        assert str(slow.root) in locations.checking
+        assert Path(locations.visible()[0]["path"]) == fast.root
+        assert slow.root in {Path(path) for path in locations.checking}
     finally:
         release.set()
         wait_for(qt_app, lambda: not locations.checking)

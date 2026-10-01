@@ -42,10 +42,12 @@ def compiler_flags() -> tuple[str, ...]:
     # expressions changes the scalar/reference arithmetic and Newton trajectory.
     root = bundle_root()
     target = ("-target", manifest(root)["compiler"]["target"], "-mcpu=baseline", "-Wno-nullability-completeness") if root else ()
+    # Zig emits debug information by default, even for optimized kernels.
+    debug = ("-g0",) if root else ()
     link = "-dynamiclib" if platform.system() == "Darwin" else "-shared"
     # Keep libm's argument order for equal signed zeros in scalar and SIMD lanes.
     return (
-        *target, "-std=c++17", "-O2", "-fno-fast-math", "-ffp-contract=off",
+        *target, *debug, "-std=c++17", "-O2", "-fno-fast-math", "-ffp-contract=off",
         "-fno-builtin-fmin", "-fno-builtin-fmax", "-fPIC", link,
     )
 
@@ -166,7 +168,22 @@ def compile_kernel(
             else:
                 command = [str(toolchain), *flags, "kernel.cpp", "-o", output]
             from ..processes import run_compiler
-            diagnostics = run_compiler(command, cwd=directory, env=environment)
+            try:
+                diagnostics = run_compiler(command, cwd=directory, env=environment)
+            except RuntimeError as exc:
+                # Zig's support-library diagnostics can span megabytes. Preserve
+                # the full log outside the temporary build, but keep errors safe
+                # for batch CSV readers and worker messages.
+                log = directory / "compiler.log"
+                saved_log = cache_directory / f"{digest}.compiler.log"
+                if log.is_file():
+                    retry_file_operation(log.replace, saved_log)
+                message = str(exc)
+                if len(message) > 16_000:
+                    message = message[:8_000] + "\n... compiler diagnostics truncated ...\n" + message[-8_000:]
+                if saved_log.is_file():
+                    message += f"\nFull compiler log: {saved_log}"
+                raise RuntimeError(message) from None
             if diagnostics:
                 print(diagnostics, file=sys.stderr)
             check_cancelled()

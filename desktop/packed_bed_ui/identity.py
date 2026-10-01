@@ -1,15 +1,15 @@
-"""Welcome-only identity and actions, separate from the scientific workspace."""
+"""Shared application identity and welcome actions."""
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from .theme import manager, colors
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QMenuBar, QPushButton, QVBoxLayout, QWidget
 from .theme import label, numeric
 from .welcome_animation import CycleEmblem
 
 
 class Wordmark(QWidget):
-    """Condensed fallback keeps the identity recognizable without proprietary fonts."""
-    def __init__(self, size=72, *, ribbon=False):
+    """Maratype identity, with a condensed fallback if the asset is unavailable."""
+    def __init__(self, size=64, *, ribbon=False):
         super().__init__()
         self.pixel_size, self.ribbon = size, ribbon
         self.setAccessibleName("MULTISOLID")
@@ -18,7 +18,7 @@ class Wordmark(QWidget):
     def wordmark_font(self):
         font = QFont(manager().display)
         font.setPixelSize(self.pixel_size)
-        font.setWeight(QFont.Weight.Black)
+        font.setWeight(QFont.Weight.Normal if font.family() == 'Maratype' else QFont.Weight.Black)
         if font.family() == "DejaVu Sans":
             font.setStretch(80)
         return font
@@ -42,17 +42,28 @@ class Masthead(QWidget):
         self.setObjectName('masthead')
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(24, 8, 24, 8)
+        layout.setContentsMargins(24, 4, 24, 4)
         layout.setSpacing(16)
         for text, name in (('M/S', 'brandIndex'),
                            ('REACTIVE PACKED BEDS\nTRANSIENT PROCESS SIMULATION', 'brandDescriptor')):
             widget = label(text)
             widget.setObjectName(name)
             layout.addWidget(widget)
+            if name == 'brandDescriptor':
+                self.descriptor = widget
+        self.menus = QMenuBar()
+        self.menus.setNativeMenuBar(False)
+        self.menus.setObjectName('ribbonMenus')
+        layout.addWidget(self.menus)
         layout.addStretch()
         edition = label('HEAT & MASS TRANSFER / HETEROGENEOUS REACTIONS')
         edition.setObjectName('brandEdition')
         layout.addWidget(edition)
+        self.edition = edition
+
+    def set_workspace(self, active):
+        self.descriptor.setVisible(not active)
+        self.edition.setVisible(not active)
 
 
 class WelcomeHero(QFrame):

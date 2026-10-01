@@ -523,6 +523,21 @@ def _run_case_worker(
 
 
 @contextmanager
+def _batch_compiled_cache(directory: Path):
+    """Share native artifacts across this batch, preserving explicit CLI overrides."""
+    name = "PACKED_BED_COMPILED_CACHE"
+    previous = os.environ.get(name)
+    os.environ[name] = str(Path(previous).resolve() if previous else directory.resolve())
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = previous
+
+
+@contextmanager
 def _worker_environment(threads: int):
     if threads == 0:
         yield
@@ -823,18 +838,19 @@ def run_batch_file(
 
             generate_artifacts_fn = generate_artifacts
         cases = tuple(case for case in resolved_cases if case is not None)
-        if effective_workers > 1 or timeout_s is not None:
-            run_cases_in_processes(
-                cases, records, workers=effective_workers, timeout_s=timeout_s,
-                generate_artifacts_fn=generate_artifacts_fn, run_case_fn=run_case_fn,
-                checkpoint=checkpoint,
-            )
-        else:
-            run_case_sequence(
-                records,
-                execute=lambda record: _run_case_direct(record.run_yaml_path, generate_artifacts_fn, run_case_fn),
-                checkpoint=checkpoint,
-            )
+        with _batch_compiled_cache(document.output_directory / ".packed_bed_cache"):
+            if effective_workers > 1 or timeout_s is not None:
+                run_cases_in_processes(
+                    cases, records, workers=effective_workers, timeout_s=timeout_s,
+                    generate_artifacts_fn=generate_artifacts_fn, run_case_fn=run_case_fn,
+                    checkpoint=checkpoint,
+                )
+            else:
+                run_case_sequence(
+                    records,
+                    execute=lambda record: _run_case_direct(record.run_yaml_path, generate_artifacts_fn, run_case_fn),
+                    checkpoint=checkpoint,
+                )
     except BaseException as exc:
         for record in records:
             if record.status in ("running", "validation_passed"):

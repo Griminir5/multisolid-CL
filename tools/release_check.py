@@ -22,7 +22,7 @@ def _documents():
                       "ambient_temperature_k": 300., "heat_transfer_coefficient_w_per_m2_k": 0.},
             "solver": {"backend": "daetools", "name": "superlu", "threads": 1, "relative_tolerance": 1e-5},
             "outputs": {"directory": "output", "artifacts_directory": "output/artifacts",
-                        "requested_reports": ["temperature", "pressure", "gas_mole_fraction"], "requested_plots": []}},
+                        "requested_reports": ["temperature", "pressure", "gas_mole_fraction", "gas_flux"], "requested_plots": []}},
         "chemistry": {"gas_species": ["N2"], "reaction_families": [], "reaction_ids": []},
         "program": {"inlet_flow": {"initial": 1e-8, "steps": []},
                     "inlet_temperature": {"initial": 300., "steps": []},
@@ -53,14 +53,21 @@ def check(destination):
             passed("all standard solver adapters")
             from PyQt6.QtCore import QSettings
             from PyQt6.QtWidgets import QApplication
-            from packed_bed_ui.window import MainWindow
             app = QApplication.instance() or QApplication(["MultiSolid release check"])
+            from packed_bed_ui.splash import show_splash
+            splash = show_splash(app)
+            splash.grab().save(str(destination / 'splash.png'))
+            from packed_bed_ui.branding import brand_family
+            assert brand_family() == 'Maratype'
+            from packed_bed_ui.window import MainWindow
             window = MainWindow(QSettings(str(destination / "settings.ini"), QSettings.Format.IniFormat))
             window.show()
+            splash.finish(window)
             app.processEvents()
             window.grab().save(str(destination / "window.png"))
             window.close()
             passed("Qt window and application assets")
+            passed('launch splash and bundled Maratype font')
             from packed_bed.reaction_graph import build_reaction_graph, render_svg, find_graphviz
             command = find_graphviz()
             if getattr(sys, "frozen", False):
@@ -110,6 +117,15 @@ def check(destination):
             assert book["Temperature"].max_row >= 3
             book.close()
             passed("NetCDF read and Excel workbook export")
+            from packed_bed.plotting import PLOT_REGISTRY
+            from PyQt6.QtSvg import QSvgRenderer
+            data = load_dataset(project.cases[0].run_folder / 'output/results.nc')
+            for spec in PLOT_REGISTRY.values():
+                target = destination / spec.filename
+                spec.render(data, target)
+                assert b'<svg' in target.read_bytes()
+                assert QSvgRenderer(str(target)).isValid()
+            passed('pre-made SVG plots from retained results')
             from packed_bed_ui.project_archive import export_project, import_project
             archive = destination / "project.msproject"
             export_project(project, archive)

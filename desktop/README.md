@@ -4,6 +4,15 @@ A project contains simulation cases. Each case owns its inputs and **one latest
 run**. Running it again replaces its previous results. Editing inputs leaves
 those results available and marks them **stale** until the case runs again.
 
+On Windows, new projects default to `%USERPROFILE%\Documents\MultiSolid`,
+independent of the Documents location redirected by OneDrive. Browse lets you
+choose another folder; existing projects stay where they are. Work locally and
+use project archives to transfer or back up projects to synced storage.
+
+Maratype is bundled for the wordmark, project title and M/S ribbon. Its supplied
+notice is in `packed_bed_ui/assets/fonts/Maratype-LICENSE.txt`. The launch splash
+appears before the scientific workspace loads; solver workers run without it.
+
 The desktop follows system light/dark appearance, uses a shared numeric font, and
 keeps editing controls and previews together. See [desktop design and validation](DESIGN.md).
 

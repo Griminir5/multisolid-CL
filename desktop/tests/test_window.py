@@ -370,7 +370,7 @@ def test_study_groups_keep_selection_and_collapse_during_live_updates(qt_app, tm
         child.metadata["study_id"] = "study"
     window = MainWindow()
     window._set_project(project)
-    assert window.menuBar().actions()[0].text() == "Project"
+    assert window.masthead.menus.actions()[0].text() == "Project"
     assert window.table.topLevelItemCount() == 2
     assert [window.table.headerItem().text(i) for i in range(5)] == ["Include", "Case", "Inputs", "Latest result", "Actions"]
     group = window.table.groups["study"]

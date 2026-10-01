@@ -19,6 +19,8 @@ those projects.
   xarray dependency and is used by the optional ML matrix conversion tool.
 - SciPy: BSD-3-Clause and bundled permissive third-party notices.
 - matplotlib: matplotlib license and bundled third-party notices.
+- Maratype by Artyom Galinov: bundled desktop display font, freely
+  redistributable with no commercial restrictions.
 - pydantic: MIT.
 - PyYAML: MIT.
 

@@ -125,10 +125,14 @@ def test_welcome_corners_archive_action_and_navigation(qt_app, design, tmp_path,
     assert called == [True]
     project = Project.create(tmp_path / 'project')
     window._set_project(project)
-    assert not window.masthead.isVisible()
+    assert window.masthead.isVisible()
+    assert not window.masthead.descriptor.isVisible()
+    assert not window.masthead.edition.isVisible()
+    assert [action.text() for action in window.masthead.menus.actions()] == ['Project', 'Plugins', 'Help']
     assert not window.hero.animation.timer.isActive()
     window._close_project()
     assert window.masthead.isVisible()
+    assert window.masthead.descriptor.isVisible()
     window.close()
 
 

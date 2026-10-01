@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 import json
 import os
+import sys
 from pathlib import Path
 from threading import Thread
 
@@ -14,8 +15,12 @@ from PyQt6.QtWidgets import (
 
 
 def default_parent():
+    # Windows' Documents known folder may be redirected into OneDrive or a
+    # network share. Use the local profile's Documents directory explicitly.
+    if sys.platform == 'win32':
+        return Path.home() / 'Documents' / 'MultiSolid'
     documents = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
-    return Path(documents) / "MultiSolid" if documents else Path.home()
+    return (Path(documents) if documents else Path.home() / 'Documents') / 'MultiSolid'
 
 
 def display_timestamp(value):
@@ -47,7 +52,12 @@ class ProjectLocations(QObject):
 
     @property
     def creation_parent(self):
-        return Path(self.settings.value("creation_parent", str(default_parent())))
+        saved = self.settings.value("creation_parent", "")
+        documents = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
+        # Migrate a remembered former default; retain explicitly chosen folders.
+        if not saved or (documents and Path(saved) == Path(documents) / 'MultiSolid'):
+            return default_parent()
+        return Path(saved)
 
     def remember_parent(self, path):
         self.settings.setValue("creation_parent", str(Path(path).expanduser().resolve()))
@@ -117,6 +127,10 @@ class NewProjectDialog(QDialog):
         row.addWidget(browse)
         form.addRow("Project name", self.name)
         form.addRow("Location", row)
+        hint = QLabel('Use a local folder for working projects. Cloud-synced and network folders can interfere with file access.')
+        hint.setWordWrap(True)
+        hint.setProperty('role', 'muted')
+        form.addRow(hint)
         self.destination = QLabel()
         self.destination.setTextFormat(Qt.TextFormat.PlainText)
         self.destination.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
