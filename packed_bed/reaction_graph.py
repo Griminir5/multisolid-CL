@@ -160,7 +160,7 @@ class GraphvizCommand:
                 env[name] = os.pathsep.join([*(str(p) for p in paths), env.get(name, "")])
             plugins = self.bundle / "lib" / "graphviz"
             # Windows distributions keep plugins and config beside the executables.
-            env["GVBINDIR"] = str(plugins if plugins.is_dir() else self.bundle / "bin")
+            env["GVBINDIR"] = str(plugins if (plugins / "config6").is_file() else self.bundle / "bin")
             fonts = self.bundle / "etc" / "fonts" / "fonts.conf"
             if fonts.is_file():
                 env["FONTCONFIG_FILE"] = str(fonts)
@@ -206,10 +206,17 @@ def find_graphviz() -> GraphvizCommand:
 
 def render_svg(graph: ReactionGraph, command: GraphvizCommand | None = None) -> bytes:
     command = command or find_graphviz()
+    environment = command.environment()
+    directory = None
+    if sys.platform == "win32" and command.bundle is not None:
+        # Graphviz reads GVBINDIR through a narrow Windows API. A relative plugin
+        # path with a Unicode-aware subprocess cwd also works in Unicode installs.
+        directory = environment["GVBINDIR"]
+        environment["GVBINDIR"] = "."
     try:
         result = subprocess.run(
             [str(command.executable), "-Tsvg"], input=graph.dot.encode("utf-8"),
-            capture_output=True, timeout=RENDER_TIMEOUT_S, env=command.environment(),
+            capture_output=True, timeout=RENDER_TIMEOUT_S, env=environment, cwd=directory,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
     except subprocess.TimeoutExpired as exc:

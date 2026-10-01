@@ -76,14 +76,13 @@ def test_cancelled_build_does_not_publish(native_tools, tmp_path):
     assert not list(tmp_path.glob("*-tmp-*"))
 
 
-def test_legacy_klu_and_new_name_are_accepted():
+def test_klu_is_accepted_by_both_backends():
     from packed_bed.config import load_case
     from packed_bed.config.models import RunConfig
     config = load_case(Path(__file__).resolve().parents[2] / "packed_bed/examples/default_case/run.yaml").run.model_dump()
     for backend in ("daetools", "compiled"):
-        for name in ("klu", "trilinos_klu"):
-            config["solver"].update(backend=backend, name=name)
-            assert RunConfig.model_validate(config).solver.name == name
+        config["solver"].update(backend=backend, name="klu")
+        assert RunConfig.model_validate(config).solver.name == "klu"
 
 
 def test_bundle_asset_integrity_and_containment(tmp_path, monkeypatch):

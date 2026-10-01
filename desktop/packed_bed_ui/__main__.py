@@ -16,7 +16,14 @@ def main(argv=None) -> int:
     parser.add_argument("--project-worker", type=Path, metavar="EXECUTION_FILE", help=argparse.SUPPRESS)
     parser.add_argument('--check-plugin', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--check-compiled', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--diagnostics-script', type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.self_test is not None:
+        if args.diagnostics_script is None:
+            parser.error('--self-test requires an explicit external --diagnostics-script')
+        import runpy
+        return runpy.run_path(str(args.diagnostics_script))["check"](args.self_test)
     if args.check_compiled:
         from packed_bed.simulation import create_linear_solver
         from packed_bed.solver_support import DESKTOP_SOLVERS
@@ -40,10 +47,12 @@ def main(argv=None) -> int:
         return run_snapshot(args.worker)
 
     from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtGui import QIcon
     from .window import MainWindow
 
     app = QApplication(["MultiSolid"])
     app.setApplicationName("MultiSolid")
+    app.setWindowIcon(QIcon(str(Path(__file__).parent / "assets/multisolid.svg")))
     window = MainWindow()
     if args.project is not None:
         window.open_project(args.project)

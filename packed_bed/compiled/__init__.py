@@ -6,6 +6,7 @@ import ctypes as C
 import hashlib
 import json
 import os
+from contextlib import chdir
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -32,6 +33,21 @@ from .structure import (
 from .vector_math import select_vector_exponentials
 
 
+def _export_stack_files(simulation, directory):
+    """DAE Tools' Windows exporter cannot open UTF-8 absolute filenames."""
+    directory = Path(directory).resolve()
+    stacks, indexes = directory / "equations.bin", directory / "jacobian.bin"
+    if os.name == "nt":
+        # Simulation workers are separate processes. Change directory only for
+        # this synchronous native call; Python sets the Unicode working directory
+        # correctly, and the native exporter receives plain ASCII filenames.
+        with chdir(directory):
+            simulation.ExportComputeStackStructs(stacks.name, indexes.name)
+    else:
+        simulation.ExportComputeStackStructs(str(stacks), str(indexes))
+    return stacks, indexes
+
+
 @dataclass
 class CompiledModel:
     library: object
@@ -46,6 +62,9 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
     """Generate an exact sparse Jacobian and kernels for the initialized model."""
     from .compiler import compiler_identity
 
+    linear_solver = simulation.case.run.solver.name
+    if linear_solver not in {"superlu", "klu", "band"}:
+        raise ValueError("The compiled backend requires solver.name: superlu, klu or band.")
     progress("checking_cache", message="Checking the exact initialized model cache.")
     check_runtime()
     started = perf_counter()
@@ -75,8 +94,6 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
     cpu_wait_s = cpu_metadata.get("cpu_wait_s", 0.0)
     cpu_cache_hit = cpu_metadata.get("vector_math_cpu_cache_hit", True) and cpu_metadata.get("cpu_cache_hit", True)
     digest.update(b"SLEEF exp" if vector_exponentials else b"scalar exp")
-    linear_solver = ({"band": "band", "klu": "klu", "trilinos_klu": "klu"}
-                     .get(simulation.case.run.solver.name, "superlu"))
     digest.update(linear_solver.encode())
     digest.update(simulation.case.run.solver.name.encode())
     # Fixed-state elimination embeds constants from differential initial data.
@@ -88,9 +105,7 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
     with TemporaryDirectory(
         prefix="fingerprint-", dir=cache_directory
     ) as temporary:
-        stacks = Path(temporary) / "equations.bin"
-        indexes = Path(temporary) / "jacobian.bin"
-        simulation.ExportComputeStackStructs(str(stacks), str(indexes))
+        stacks, indexes = _export_stack_files(simulation, temporary)
         digest.update(stacks.read_bytes())
         digest.update(indexes.read_bytes())
     descriptions = [

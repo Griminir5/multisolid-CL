@@ -70,7 +70,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", nargs="+", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--solvers", nargs="+", default=["superlu", "klu", "band"], choices=["superlu", "superlu_mt", "klu", "band"])
+    parser.add_argument("--solvers", nargs="+", default=["superlu", "klu", "band"], choices=["superlu", "klu", "band"])
     parser.add_argument("--workers", nargs="+", type=int, default=[1, 2])
     parser.add_argument("--repeats", type=int, default=3)
     args = parser.parse_args()

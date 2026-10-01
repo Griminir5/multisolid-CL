@@ -9,6 +9,10 @@ keeps editing controls and previews together. See [desktop design and validation
 
 ## Start developing
 
+For the standalone Windows installer and portable ZIP build, see
+[Building the Windows distribution](BUILD_WINDOWS.md). End users of those
+bundles do not need a separate Python, Graphviz or compiler installation.
+
 Use Python 3.11/3.12 and the DAETools setup in the [repository README](../README.md).
 From the repository root:
 
@@ -99,12 +103,16 @@ repetition, GHSV conversion, and sampled solid profiles. Plot toolbars support
 zoom, pan, and image saving. Advanced scientific settings survive import/save;
 an unsupported solver blocks execution rather than being silently replaced.
 Choose **Standard** or **Compiled** in General. Standard offers SuperLU,
-SuperLU_MT, KLU, UMFPACK, LAPACK, AztecOO with ILUT/Ifpack/ML, and SUNDIALS
-GMRES with Ifpack. These reuse the bundled DAE Tools adapters; Pardiso remains
-unavailable in the desktop. Compiled offers SuperLU, SuperLU_MT, KLU, and Band
+KLU, LAPACK, AztecOO with ILUT/Ifpack/ML, and SUNDIALS
+GMRES with Ifpack. These reuse the bundled DAE Tools adapters.
+Compiled offers SuperLU, KLU, and Band
 when the managed runtime is installed. The dropdown explains unavailable choices. Switching to an incompatible
 backend or solver asks once before updating the affected settings; Cancel keeps
 the original inputs. Advanced solver settings open in a separate dialog.
+
+SuperLU_MT, UMFPACK, Pardiso and the legacy `trilinos_klu` identifier are no longer
+solver choices. Existing cases retain those values for inspection but cannot run
+until a supported solver is selected. KLU uses the single identifier `klu`.
 
 Compiled runs build automatically and reuse `project/.packed_bed_cache/`, shared
 by the project's cases and studies. The first build can take several minutes;

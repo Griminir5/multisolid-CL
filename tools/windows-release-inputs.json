@@ -1,0 +1,51 @@
+{
+  "msys2.tar.xz": {
+    "url": "https://github.com/msys2/msys2-installer/releases/download/2026-09-27/msys2-base-x86_64-20260927.tar.xz",
+    "sha256": "ea2f31a0b6ade63914ce441ffb022f0f6aa96982bfefa2326460a26d5fb01322"
+  },
+  "innosetup-6.7.3.exe": {
+    "url": "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe",
+    "sha256": "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732"
+  },
+  "graphviz-12.2.1.zip": {
+    "url": "https://gitlab.com/api/v4/projects/4207231/packages/generic/graphviz-releases/12.2.1/windows_10_cmake_Release_Graphviz-12.2.1-win64.zip",
+    "sha256": "82c34e6a73b8158bee357d1c51aac08925edc8f4a9f517f591fb8df989405ad4"
+  },
+  "sundials.tar": {
+    "version": "7.5.0",
+    "url": "https://github.com/LLNL/sundials/releases/download/v7.5.0/sundials-7.5.0.tar.gz",
+    "sha256": "089ac659507def738b7a65b574ffe3a900d38569e3323d9709ebed3e445adecc"
+  },
+  "suitesparse.tar": {
+    "version": "7.7.0",
+    "url": "https://codeload.github.com/DrTimothyAldenDavis/SuiteSparse/tar.gz/refs/tags/v7.7.0",
+    "sha256": "529b067f5d80981f45ddf6766627b8fc5af619822f068f342aab776e683df4f3"
+  },
+  "superlu_mt.tar": {
+    "version": "4.0.1",
+    "url": "https://codeload.github.com/xiaoyeli/superlu_mt/tar.gz/refs/tags/v4.0.1",
+    "sha256": "b6de5c8ebf8fa6c7c0d607f0607f522454315632ae55b70babf908b94e9602cb"
+  },
+  "openblas.tar": {
+    "version": "0.3.30",
+    "url": "https://codeload.github.com/OpenMathLib/OpenBLAS/tar.gz/refs/tags/v0.3.30",
+    "sha256": "27342cff518646afb4c2b976d809102e368957974c250a25ccc965e53063c95d"
+  },
+  "zig_windows.zip": {
+    "version": "0.16.0",
+    "url": "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip",
+    "sha256": "68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e"
+  },
+  "graphviz-source.tar.gz": {
+    "url": "https://gitlab.com/graphviz/graphviz/-/archive/12.2.1/graphviz-12.2.1.tar.gz",
+    "sha256": "91d444b4dabdaf5bfa7c6fcc3a1ee5d41e588af6079ebc030f0acb79e48a56ea"
+  },
+  "daetools-cxx-sdk-2.6.0.zip": {
+    "url": "https://downloads.sourceforge.net/project/daetools/daetools/2.6.0/daetools-cxx-sdk-2.6.0.zip",
+    "sha256": "e54c6156a75c47af44af17c697c067ea31c201f230b9c50b6f040c4bf5b1cd50"
+  },
+  "graphviz-dependencies.tar.gz": {
+    "url": "https://gitlab.com/graphviz/graphviz-windows-dependencies/-/archive/ff985525b23a1a72ddb1a89482ea12233c3cbe85/graphviz-windows-dependencies-ff985525b23a1a72ddb1a89482ea12233c3cbe85.tar.gz",
+    "sha256": "1d41fe8354d543b45746487da030827e86364b0d8c23bb40063cd3427c0d7dbe"
+  }
+}

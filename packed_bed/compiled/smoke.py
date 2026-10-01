@@ -1,6 +1,7 @@
 """Mandatory installed-runtime check: compile and solve a DAE with every solver."""
 
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
@@ -15,8 +16,12 @@ from .runtime import NativeIDA, callback_source
 from .vector_math import select_vector_exponentials
 
 
-def check():
-    with tempfile.TemporaryDirectory(prefix="multisolid compiled check ") as temporary:
+def check(cache_directory=None):
+    # Windows keeps ctypes DLLs mapped until process exit. Release builders
+    # supply a parent-owned directory and remove it after this process ends.
+    scratch = (nullcontext(str(cache_directory)) if cache_directory is not None else
+               tempfile.TemporaryDirectory(prefix="multisolid compiled check ", ignore_cleanup_errors=True))
+    with scratch as temporary:
         cache = Path(temporary)
         graph = Graph()
         x, z = graph.make("var", 0), graph.make("var", 1)
@@ -30,7 +35,7 @@ def check():
         nonlinear, _ = prepare_nonlinear_library(cache)
         band, _ = prepare_band_library(cache)
         select_vector_exponentials(cache, True, True)
-        for label, solver, threads in (("superlu", "superlu", 1), ("superlu_mt", "superlu", 2),
+        for label, solver, threads in (("superlu", "superlu", 1), ("superlu (2 threads)", "superlu", 2),
                                        ("klu", "klu", 1), ("band", "band", 1)):
             code = source + callback_source(sparsity, linear_solver=solver)
             path, _ = compile_kernel(code, cache)
@@ -43,10 +48,13 @@ def check():
                            nonlinear_library=nonlinear, nonlinear_refresh_interval=2) as native:
                 times = np.linspace(0, 2, 21)
                 values, _ = native.solve(times)
-                np.testing.assert_allclose(values[:, 0], np.exp(-times), rtol=0, atol=2e-6)
-                np.testing.assert_allclose(values[:, 1], np.exp(-2 * times), rtol=0, atol=2e-6)
+                assert np.allclose(values[:, 0], np.exp(-times), rtol=0, atol=2e-6)
+                assert np.allclose(values[:, 1], np.exp(-2 * times), rtol=0, atol=2e-6)
             print(f"Compiled {label}: passed", flush=True)
 
 
 if __name__ == "__main__":
-    check()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cache", type=Path)
+    check(parser.parse_args().cache)

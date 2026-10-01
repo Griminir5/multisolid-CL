@@ -200,19 +200,15 @@ class ModelConfig(ConfigModel):
 class SolverConfig(ConfigModel):
     backend: Literal["daetools", "compiled"] = "daetools"
     name: Literal[
-        "trilinos_klu",
         "klu",
-        "trilinos_umfpack",
         "trilinos_lapack",
         "trilinos_aztecoo",
         "trilinos_aztecoo_ifpack",
         "trilinos_aztecoo_ml",
         "sundials_gmres_ifpack",
         "superlu",
-        "superlu_mt",
         "band",
-        "intel_pardiso",
-    ] = "trilinos_klu"
+    ] = "klu"
     threads: int = Field(default=0, ge=0)
     relative_tolerance: PositiveFloat
     concentration_absolute_tolerance: PositiveFloat = 1.0e-5
@@ -278,9 +274,9 @@ class RunConfig(ConfigModel):
                 "step_growth_threshold currently requires solver.backend: compiled."
             )
         if self.solver.backend == "compiled":
-            if self.solver.name not in {"superlu", "superlu_mt", "klu", "trilinos_klu", "band"}:
+            if self.solver.name not in {"superlu", "klu", "band"}:
                 raise ValueError(
-                    "The compiled backend requires solver.name: superlu, superlu_mt, klu or band."
+                    "The compiled backend requires solver.name: superlu, klu or band."
                 )
             if self.simulation.report_time_derivatives:
                 raise ValueError(

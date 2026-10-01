@@ -62,6 +62,19 @@ EXPECTED_INERT_EQUATIONS = (
 )
 
 
+@pytest.mark.skipif(find_spec("daetools") is None, reason="DAETools is not installed")
+@pytest.mark.parametrize("name", ("superlu_mt", "trilinos_umfpack", "intel_pardiso", "trilinos_klu"))
+def test_removed_solvers_cannot_load_native_adapters(monkeypatch, name):
+    import packed_bed.simulation as simulation_module
+
+    def unexpected_import(module):
+        pytest.fail(f"Removed solver attempted to import {module}")
+
+    monkeypatch.setattr(simulation_module, "import_module", unexpected_import)
+    with pytest.raises(ValueError, match="Unsupported linear solver"):
+        simulation_module.create_linear_solver(name)
+
+
 def _with_reports(case, reports):
     outputs = case.run.outputs.model_copy(update={"requested_reports": tuple(reports)})
     return replace(case, run=case.run.model_copy(update={"outputs": outputs}))

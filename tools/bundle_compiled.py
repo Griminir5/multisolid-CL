@@ -40,7 +40,20 @@ def stage(compiler, runtime, destination):
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="compiled-stage-", dir=destination.parent) as temporary:
         root = Path(temporary) / "compiled"
-        shutil.copytree(compiler, root / "compiler")
+        def compiler_files(directory, names):
+            relative = Path(directory).relative_to(compiler).as_posix()
+            if relative == ".":
+                return set(names) & {"doc", "README.md"}
+            if relative == "lib":
+                return set(names) & {"docs", "build-web", "init"}
+            if system == "Windows" and relative == "lib/libc":
+                return set(names) - {"include", "mingw"}
+            if system == "Windows" and relative == "lib/libc/include":
+                return {name for name in names if "windows" not in name}
+            # Zig 0.16 imports its three pcurve test sources even during normal
+            # C++ compiler-runtime builds. They are required compiler inputs.
+            return set()
+        shutil.copytree(compiler, root / "compiler", ignore=compiler_files)
         shutil.copytree(runtime / "licenses", root / "licenses")
         shutil.copy2(runtime / "sources.json", root / "sources.json")
         lib = root / "lib"
@@ -119,7 +132,8 @@ def stage(compiler, runtime, destination):
                 "bundle_sha256": hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()}
         (root / "manifest.json").write_text(json.dumps(data, indent=2) + "\n")
         environment = {**os.environ, "MULTISOLID_COMPILED_BUNDLE": str(root), "PATH": str(root / "compiler")}
-        subprocess.run([sys.executable, "-m", "packed_bed.compiled.smoke"], env=environment, check=True)
+        subprocess.run([sys.executable, "-m", "packed_bed.compiled.smoke", "--cache", str(Path(temporary) / "smoke")],
+                       env=environment, check=True)
         root.rename(destination)
     return destination
 

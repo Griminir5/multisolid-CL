@@ -163,6 +163,15 @@ def test_unknown_gas_voidage_mode_is_rejected(tmp_path):
         load_case(_write_case(tmp_path, documents))
 
 
+@pytest.mark.parametrize("backend", ("daetools", "compiled"))
+@pytest.mark.parametrize("name", ("superlu_mt", "trilinos_umfpack", "intel_pardiso", "trilinos_klu"))
+def test_removed_solvers_are_rejected_without_substitution(tmp_path, backend, name):
+    documents = _case_documents()
+    documents["run.yaml"]["solver"].update(backend=backend, name=name)
+    with pytest.raises(PackedBedValidationError, match="solver.name"):
+        load_case(_write_case(tmp_path, documents))
+
+
 def test_solver_controls_default_to_daetools_values_and_accept_tuning(
     tmp_path: Path,
 ) -> None:
@@ -172,7 +181,7 @@ def test_solver_controls_default_to_daetools_values_and_accept_tuning(
 
     assert default_case.run.solver.model_dump() == {
         "backend": "daetools",
-        "name": "trilinos_klu",
+        "name": "klu",
         "threads": 0,
         "relative_tolerance": 1.0e-5,
         "concentration_absolute_tolerance": 1.0e-5,
@@ -240,7 +249,7 @@ def test_compiled_backend_rejects_unsupported_configuration(tmp_path, invalid):
     run = documents["run.yaml"]
     run["solver"].update(backend="compiled", name="superlu")
     if invalid == "solver":
-        run["solver"]["name"] = "trilinos_umfpack"
+        run["solver"]["name"] = "trilinos_lapack"
     elif invalid == "derivatives":
         run["simulation"]["report_time_derivatives"] = True
     elif invalid == "incidence":

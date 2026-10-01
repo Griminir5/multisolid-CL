@@ -87,6 +87,7 @@ def test_bundle_discovery_and_child_environment(monkeypatch, tmp_path):
     exe.parent.mkdir(parents=True)
     exe.touch()
     (root / "lib" / "graphviz").mkdir(parents=True)
+    (root / "lib" / "graphviz" / "config6").touch()
     monkeypatch.setattr(rg, "_bundle_roots", lambda: [root])
     monkeypatch.setenv("MULTISOLID_GRAPHVIZ", "/does/not/exist")
     monkeypatch.setenv("GVBINDIR", "host-plugin-path")

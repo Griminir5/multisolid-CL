@@ -44,11 +44,11 @@ def test_backend_switch_repairs_are_one_explicit_transaction(compiled_editor, mo
     assert not settings["band_reciprocals"] and not settings["vector_exponentials"]
 
 
-def test_klu_choice_and_imported_alias_preserve_documents(compiled_editor):
+def test_klu_choice_preserves_documents(compiled_editor):
     editor, case = compiled_editor
     combo = editor.general.solver
     assert combo.itemText(combo.findData("klu")) == "KLU"
-    case.documents["run"]["solver"]["name"] = "trilinos_klu"
+    case.documents["run"]["solver"]["name"] = "klu"
     before = deepcopy(case.documents)
     editor.set_case(case)
     assert case.documents == before
@@ -56,7 +56,7 @@ def test_klu_choice_and_imported_alias_preserve_documents(compiled_editor):
 
 
 @pytest.mark.parametrize("name", (
-    "superlu_mt", "trilinos_umfpack", "trilinos_lapack", "trilinos_aztecoo",
+    "trilinos_lapack", "trilinos_aztecoo",
     "trilinos_aztecoo_ifpack", "trilinos_aztecoo_ml", "sundials_gmres_ifpack",
 ))
 def test_bundled_standard_solver_can_be_selected_and_reopened(compiled_editor, monkeypatch, name):
@@ -73,7 +73,7 @@ def test_bundled_standard_solver_can_be_selected_and_reopened(compiled_editor, m
     editor.set_case(case)
     assert case.documents == before
     assert not editor.dirty
-    for excluded in ("band", "intel_pardiso"):
+    for excluded in ("band", "superlu_mt", "trilinos_umfpack", "intel_pardiso", "trilinos_klu"):
         assert combo.findData(excluded) == -1
 
 
@@ -81,13 +81,13 @@ def test_missing_trilinos_disables_choices_without_rewriting_import(compiled_edi
     import packed_bed.solver_support as support
     monkeypatch.setattr(support, "find_spec", lambda module: None if module.endswith(".trilinos") else object())
     editor, case = compiled_editor
-    case.documents["run"]["solver"]["name"] = "trilinos_umfpack"
+    case.documents["run"]["solver"]["name"] = "trilinos_lapack"
     before = deepcopy(case.documents)
     editor.set_case(case)
     combo = editor.general.solver
     assert case.documents == before
-    assert combo.currentData() == "trilinos_umfpack"
-    for name in ("klu", "trilinos_umfpack", "trilinos_lapack", "trilinos_aztecoo",
+    assert combo.currentData() == "trilinos_lapack"
+    for name in ("klu", "trilinos_lapack", "trilinos_aztecoo",
                  "trilinos_aztecoo_ifpack", "trilinos_aztecoo_ml", "sundials_gmres_ifpack"):
         item = combo.model().item(combo.findData(name))
         assert not item.isEnabled()
@@ -98,7 +98,7 @@ def test_missing_trilinos_disables_choices_without_rewriting_import(compiled_edi
 def test_standard_only_solver_switch_to_compiled_requires_confirmation(compiled_editor, monkeypatch):
     from PyQt6.QtWidgets import QMessageBox
     editor, case = compiled_editor
-    case.documents["run"]["solver"]["name"] = "trilinos_umfpack"
+    case.documents["run"]["solver"]["name"] = "trilinos_lapack"
     editor.set_case(case)
     before = deepcopy(case.documents)
     backend = editor.general.backend
@@ -109,7 +109,7 @@ def test_standard_only_solver_switch_to_compiled_requires_confirmation(compiled_
     monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Ok)
     backend.setCurrentIndex(backend.findData("compiled"))
     assert case.documents["run"]["solver"]["name"] == "superlu"
-    assert editor.general.solver.findData("trilinos_umfpack") == -1
+    assert editor.general.solver.findData("trilinos_lapack") == -1
 
 
 def test_desktop_project_cache_overrides_environment(qt_app, tmp_path, source_case, monkeypatch):
@@ -171,7 +171,11 @@ def test_unwritable_cache_blocks_before_replacing_results(tmp_path, source_case,
     assert not list(case.root.glob(".pending-*"))
 
 
-@pytest.mark.parametrize('backend,name', [('daetools', 'band'), ('compiled', 'trilinos_umfpack'), ('daetools', 'future_solver')])
+@pytest.mark.parametrize('backend,name', [
+    ('daetools', 'band'), ('compiled', 'trilinos_lapack'), ('daetools', 'future_solver'),
+    *[(backend, name) for backend in ('daetools', 'compiled')
+      for name in ('superlu_mt', 'trilinos_umfpack', 'intel_pardiso', 'trilinos_klu')],
+])
 def test_imported_incompatible_solver_is_retained_but_not_offered(compiled_editor, backend, name):
     from packed_bed.solver_support import DESKTOP_SOLVERS
     editor, case = compiled_editor
@@ -185,6 +189,13 @@ def test_imported_incompatible_solver_is_retained_but_not_offered(compiled_edito
     assert visible == list(DESKTOP_SOLVERS[backend])
     assert case.documents == original and not editor.dirty
     assert editor.general.solver_status.text()
+    # Block execution before touching any retained result, including for removed solvers.
+    case.run_folder.mkdir()
+    retained = case.run_folder / 'retained-result'
+    retained.write_text('previous result')
+    with pytest.raises(ValueError):
+        case.project.prepare_execution([case])
+    assert retained.read_text() == 'previous result'
     combo.setCurrentIndex(combo.findData('superlu'))
     assert case.documents['run']['solver']['name'] == 'superlu'
     assert combo.findData(name) == -1

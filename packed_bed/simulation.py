@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from contextlib import chdir
 from importlib import import_module
 import os
+import sys
 from pathlib import Path
 from time import perf_counter
 from typing import Callable
@@ -19,6 +21,16 @@ from daetools.pyDAE import (
     daeSimulation,
     eSundialsGMRES,
 )
+
+# DAE Tools' config reader also uses narrow Windows filenames. Its Python
+# initializer passes an absolute UTF-8 path, which fails in Unicode installs.
+# Initialize the process-local config synchronously using an ASCII relative path.
+if os.name == "nt" and getattr(sys, "frozen", False):
+    import daetools
+    from daetools.pyDAE import daeSetConfigFile
+    with chdir(Path(daetools.__file__).parent):
+        daeSetConfigFile("daetools.cfg")
+        daeGetConfig().GetString("daetools.core.equations.evaluationMode")
 
 from .config import Case
 from .initialization import apply_initial_state, calculate_initial_state, configure_model
@@ -35,16 +47,12 @@ from .reports import (
 
 _SOLVER_REGISTRY = {
     "klu": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("Amesos_Klu", "")),
-    "trilinos_klu": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("Amesos_Klu", "")),
-    "trilinos_umfpack": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("Amesos_Umfpack", "")),
     "trilinos_lapack": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("Amesos_Lapack", "")),
     "trilinos_aztecoo": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("AztecOO", "ILUT")),
     "trilinos_aztecoo_ifpack": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("AztecOO_Ifpack", "ILU")),
     "trilinos_aztecoo_ml": ("trilinos", "pyTrilinos", "daeCreateTrilinosSolver", ("AztecOO_ML", "DD-ML")),
     "sundials_gmres_ifpack": ("trilinos", "pyTrilinos", "daePreconditioner_Ifpack", ("ILU",)),
     "superlu": ("superlu", "pySuperLU", "daeCreateSuperLUSolver", ()),
-    "superlu_mt": ("superlu_mt", "pySuperLU_MT", "daeCreateSuperLUSolver", ()),
-    "intel_pardiso": ("intel_pardiso", "pyIntelPardiso", "daeCreateIntelPardisoSolver", ()),
 }
 
 
@@ -196,8 +204,8 @@ def execute_simulation(
     case = simulation.case
     compiled = case.run.solver.backend == "compiled"
     if compiled:
-        if case.run.solver.name not in {"superlu", "superlu_mt", "klu", "trilinos_klu", "band"}:
-            raise ValueError("The compiled backend requires solver.name: superlu, superlu_mt, klu or band.")
+        if case.run.solver.name not in {"superlu", "klu", "band"}:
+            raise ValueError("The compiled backend requires solver.name: superlu, klu or band.")
         if case.run.simulation.report_time_derivatives:
             raise ValueError("The compiled backend does not yet support report_time_derivatives: true.")
         if case.run.outputs.solver_incidence_matrix:
@@ -248,7 +256,7 @@ def execute_simulation(
             after_initialize(simulation, solver)
         simulation.SolveInitial()
         initialization_s = perf_counter() - initialization_started
-        initialization_implementation = ("Amesos_Klu" if initial_solver_name in {"klu", "trilinos_klu"}
+        initialization_implementation = ("Amesos_Klu" if initial_solver_name == "klu"
                                          else initial_solver_name)
         simulation.solver_stats = dict(initialization_s=initialization_s,
             requested_solver=case.run.solver.name, initialization_solver=initialization_implementation,

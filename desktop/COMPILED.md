@@ -3,11 +3,11 @@
 Select **Compiled** and a linear solver in General, then Run normally. Standard
 and Compiled both expose KLU. Standard/SuperLU remains the new-case default.
 
-Standard also offers SuperLU_MT, UMFPACK, dense LAPACK, AztecOO with ILUT,
+Standard also offers dense LAPACK, AztecOO with ILUT,
 Ifpack ILU or ML, and SUNDIALS GMRES with Ifpack ILU. These use the existing
-DAE Tools SuperLU, SuperLU_MT and Trilinos adapters on both platforms. Missing
+DAE Tools SuperLU and Trilinos adapters on both platforms. Missing
 adapter modules disable their choices; native loading is checked in the worker
-before replacing retained results. Pardiso is not enabled. The packaged
+before replacing retained results. The packaged
 `--check-compiled` check loads every Standard adapter as well as the compiled runtime.
 
 AztecOO retains its bundled linear convergence/preconditioner defaults and keeps
@@ -27,7 +27,7 @@ entries; a different platform, compiler, runtime, engine, CPU capability, or mod
 rebuilds them. Deleting the cache while idle is safe. An unwritable cache blocks
 Compiled instead of redirecting artifacts outside the project.
 
-`solver.name: klu` works for both backends; `trilinos_klu` remains an alias.
+`solver.name: klu` is the sole KLU identifier for both backends.
 DAE Tools' Amesos KLU initializes the model, and Compiled KLU integrates through
 SUNDIALS `SUNLinSol_KLU`. KLU factorization is serial. The manifest records the
 requested, initialization, and integration implementations, build identities,
@@ -39,8 +39,8 @@ full worker elapsed time after writing the results and manifest.
 End users do not run these commands. Build independently on Linux x86_64 and
 Windows x64. Linux release builds use Ubuntu 22.04 for the glibc 2.35 baseline.
 Windows builds use MSYS2 UCRT64 GCC, CMake, and Ninja with Python 3.12. DAE Tools
-must already be installed for that Python/platform, including its SuperLU,
-SuperLU_MT, and Trilinos/Amesos adapters. Install the root and desktop packages
+must already be installed for that Python/platform, including its SuperLU
+and Trilinos/Amesos adapters. Install the root and desktop packages
 into the release environment, plus PyInstaller, pytest, and pefile.
 
 1. Run `python tools/build_compiled_runtime.py --work build/native --prefix build/native-prefix`.
@@ -63,6 +63,8 @@ Pinned components are Zig 0.16.0, SUNDIALS 7.5.0 (double/32-bit indices),
 SuiteSparse 7.7.0, SuperLU_MT 4.0.1, and OpenBLAS 0.3.30. Their URLs and SHA-256
 hashes are in [compiled_sources.json](../tools/compiled_sources.json). SUNDIALS and
 its dependencies load as one bundle, separate from DAE Tools' native libraries.
+SuperLU_MT remains an internal dependency of Compiled SuperLU; it is not a
+separate solver choice and does not require the DAE Tools `pySuperLU_MT` adapter.
 Windows DLL dependencies are copied from the release toolchain; Linux copies
 non-glibc dependencies. The frozen application requires its bundled compiler and
 never searches for a system compiler.
@@ -109,7 +111,7 @@ On Ubuntu 24.04 with Python 3.12 and DAE Tools 2.6:
 - Thirty scheduler/process tests passed; five Windows-only locking tests were
   skipped. Worker termination and coordinator failure stopped compiler children.
 - The pinned native build recipe completed, and its staged runtime passed
-  SuperLU, SuperLU_MT, KLU, Band, CPU-probe, and nonlinear-helper checks.
+  SuperLU at one and two threads, KLU, Band, CPU-probe, and nonlinear-helper checks.
 - A frozen application, with external tools absent from PATH and its installation
   read-only, completed a mixed Standard/Compiled batch. Identical KLU cases shared
   a compiled model. After relocating the installation to a path containing spaces

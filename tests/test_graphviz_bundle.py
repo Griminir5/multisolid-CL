@@ -10,6 +10,14 @@ from packed_bed.reaction_graph import GraphvizCommand, build_reaction_graph, ren
 from tools.bundle_graphviz import stage
 
 
+def test_windows_plugin_location_ignores_tcl_support_directory(tmp_path):
+    (tmp_path / "lib/graphviz/tcl").mkdir(parents=True)
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin/config6").write_text("gvplugin_core.dll core {}")
+    command = GraphvizCommand(tmp_path / "bin/neato.exe", tmp_path)
+    assert command.environment()["GVBINDIR"] == str(tmp_path / "bin")
+
+
 def test_staging_refuses_to_replace_existing_files(tmp_path):
     destination = tmp_path / "graphviz"
     destination.mkdir()
@@ -41,7 +49,7 @@ def test_staged_bundle_relocates_without_host_executables(monkeypatch, tmp_path)
     for name, digest in manifest["files"].items():
         assert hashlib.sha256((destination / name).read_bytes()).hexdigest() == digest
     # Exercise a second relocation and override host plugin/font settings.
-    relocated = tmp_path / "relocated"
+    relocated = tmp_path / "relocated \u03b1"
     destination.rename(relocated)
     monkeypatch.setenv("PATH", "")
     monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)

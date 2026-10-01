@@ -100,6 +100,8 @@ class MainWindow(QMainWindow):
         self.recent_menu = menu.addMenu("Recent projects")
         self.plugins_action = self.menuBar().addAction('Plugins', self._plugins)
         self.plugins_action.setEnabled(False)
+        help_menu = self.menuBar().addMenu("Help")
+        help_menu.addAction("Licences and notices", self._show_licenses)
         self.recent_menu.aboutToShow.connect(self.locations.refresh)
         self.case_count = NumberLabel()
         layout.addWidget(self.case_count)
@@ -182,6 +184,15 @@ class MainWindow(QMainWindow):
         self._refresh_recents()
         self.locations.refresh()
         self.statusBar().showMessage("Create or open a project to begin.")
+
+    def _show_licenses(self):
+        import sys
+        if getattr(sys, "frozen", False):
+            path = Path(sys.executable).parent / "licenses" / "README.txt"
+        else:
+            path = Path(__file__).resolve().parents[2] / "THIRD_PARTY_NOTICES.md"
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+            QMessageBox.information(self, "Licences and notices", f"Open the notices at:\n{path}")
 
     def _page_status(self):
         if self.runner.active:

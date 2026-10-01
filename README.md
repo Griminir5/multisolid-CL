@@ -5,6 +5,8 @@ The model uses DAETools. YAML files specify the species, solids, operating progr
 Each run writes an xarray dataset in NetCDF format and a JSON manifest.
 
 A small PyQt6 desktop client now lives in [desktop/](desktop/README.md).
+The [Windows release build](desktop/BUILD_WINDOWS.md) produces an installer and
+portable ZIP with the required runtimes included; end users do not install Python.
 It supports projects with multiple cases, draft run settings, shared previews,
 Run case / Run all execution, and project Excel reports with Case as a selectable
 axis. Each case keeps one latest run; rerunning
@@ -75,7 +77,7 @@ The default case includes three solver configurations with the same physical inp
 | Run file in `packed_bed/examples/default_case` | Backend / solver | Output directory |
 | --- | --- | --- |
 | `run.yaml` | DAETools / SuperLU baseline | `output` |
-| `run_compiled.yaml` | Compiled / SuperLU_MT | `output_compiled` |
+| `run_compiled.yaml` | Compiled / SuperLU | `output_compiled` |
 | `run_band.yaml` | Compiled / band LU | `output_band` |
 
 For example, run `python -m packed_bed packed_bed/examples/default_case/run_band.yaml`.
@@ -201,7 +203,7 @@ The default interior flow mode is `forward_only`.
 The `reversible` mode permits flow reversal at interior faces. It does not change the inlet and outlet boundary conditions.
 
 `solver.name` selects a backend from the registry in [simulation.py](packed_bed/simulation.py).
-The default is `trilinos_klu`. The default example selects `superlu`.
+The default is `klu`. The default example selects `superlu`.
 Use a backend included in your DAETools installation.
 `threads: 0` retains environment limits and uses the DAETools default thread count.
 A positive value sets the thread count.
@@ -237,7 +239,7 @@ Set these entries under `solver` in the case's `run.yaml` (retain any other solv
 ```yaml
 solver:
   backend: compiled
-  name: superlu  # Also superlu_mt, band, and klu with the managed runtime.
+  name: superlu  # Also band, and klu with the managed runtime.
 ```
 
 Then run the case normally:
@@ -246,10 +248,15 @@ Then run the case normally:
 python -m packed_bed packed_bed/examples/default_case/run.yaml
 ```
 
-KLU is available under both backends as `klu`; `trilinos_klu` remains a compatible
-alias. Compiled KLU requires the managed runtime because the wheel omits KLU.
+KLU is available under both backends as `klu`.
+Compiled KLU requires the managed runtime because the wheel omits KLU.
 Standard KLU uses DAE Tools' Amesos adapter; Compiled uses it for initialization
 and SUNDIALS KLU for integration. Neither substitutes another solver.
+
+The solver identifiers `superlu_mt`, `trilinos_umfpack`, `intel_pardiso`, and
+`trilinos_klu` are no longer supported. Existing inputs using them require an
+explicit solver selection; use `klu` for KLU. Compiled `superlu` still uses the
+SUNDIALS SuperLU_MT library internally and supports the `threads` setting.
 
 The first run compiles a model-specific kernel; later CLI runs reuse `.packed_bed_cache` beside the case.
 Desktop workers always share `.packed_bed_cache` at the project root, outside
