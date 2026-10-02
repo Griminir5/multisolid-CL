@@ -111,8 +111,8 @@ class BedPage(QWidget):
         editor.field(form, ("run", "model", "gas_voidage_mode"), "Gas voidage", options=[
             ("Interparticle only", "bed_only"), ("Interparticle + intraparticle", "bed_and_particle"),
         ], default="bed_and_particle", binary=True, vertical=True)
-        editor.field(form, ("run", "model", "ambient_temperature_k"), "Ambient temperature (K)", default=873.15)
-        editor.field(form, ("run", "model", "heat_transfer_coefficient_w_per_m2_k"), "Heat transfer (W/m²/K)", default=100.0)
+        editor.field(form, ("run", "model", "ambient_temperature_k"), "Ambient temperature (K)", default=273.15)
+        editor.field(form, ("run", "model", "heat_transfer_coefficient_w_per_m2_k"), "Heat transfer (W/m²/K)", default=0.0)
         editor.field(form, ("run", "simulation", "interior_flow_mode"), "Reversible flow", kind="check",
                      default="forward_only", checked_values=("forward_only", "reversible"))
         self.settings_split.addWidget(options)

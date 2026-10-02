@@ -292,7 +292,7 @@ class RunConfig(ConfigModel):
 class SolidZoneConfig(ConfigModel):
     x_start_m: NonNegativeFloat
     x_end_m: PositiveFloat
-    e_b: UnitFraction
+    e_b: UnitFraction 
     e_p: UnitFraction
     d_p: PositiveFloat
     values: dict[ConfigString, NonNegativeFloat]
