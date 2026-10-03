@@ -125,7 +125,8 @@ until a supported solver is selected. KLU uses the single identifier `klu`.
 
 Compiled runs build automatically and reuse `project/.packed_bed_cache/`, shared
 by the project's cases and studies. The first build can take several minutes;
-later compatible runs reuse it. Progress includes cache checking, waiting,
+later compatible runs reuse it. Cases with different operating schedules can share
+a kernel; each run owns its program data. Progress includes cache checking, waiting,
 generation, and compilation. Cancel stops workers and compiler children. The cache
 survives reruns, is excluded from project archives, and can be deleted while idle.
 A writable project is required. KLU factorization is serial on both backends.

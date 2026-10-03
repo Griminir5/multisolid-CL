@@ -6,7 +6,7 @@ from functools import lru_cache
 
 from .graph import Graph
 
-LEAVES = {"const", "var", "dot", "time", "cj"}
+LEAVES = {"const", "var", "dot", "time", "cj", "param"}
 
 
 @dataclass
@@ -46,7 +46,7 @@ def shared_inputs(graph, roots, root_cells, keep, locations):
     @lru_cache(None)
     def time_only(node):
         op, *args = graph.nodes[node]
-        if op in ("var", "dot", "cj"):
+        if op in ("var", "dot", "cj", "param"):
             return False
         return op in ("const", "time") or all(time_only(arg) for arg in args)
 

@@ -118,6 +118,9 @@ def _emit_model(
     plans=None,
     helpers="",
 ):
+    runtime_parameters = any(node[0] == "param" for node in graph.nodes)
+    runtime_arg = "runtime," if runtime_parameters else ""
+    runtime_decl = "const double* runtime," if runtime_parameters else ""
     mapping = {old: new for new, old in enumerate(keep)}
     original_graph, original_mapping, original_locations = graph, mapping, locations
     roots = {"evaluate": residuals, "jacobian": jacobian, "reconstruct": reconstruction}
@@ -141,7 +144,7 @@ def _emit_model(
     @lru_cache(None)
     def time_only(node):
         op, *args = graph.nodes[node]
-        if op in ("var", "dot", "cj"):
+        if op in ("var", "dot", "cj", "param"):
             return False
         if op in ("const", "time"):
             return True
@@ -154,7 +157,7 @@ def _emit_model(
             return
         active.add(node)
         op, *args = graph.nodes[node]
-        if op not in ("const", "var", "dot", "time", "cj"):
+        if op not in ("const", "var", "dot", "time", "cj", "param"):
             for arg in args:
                 visit(arg)
 
@@ -169,7 +172,7 @@ def _emit_model(
     frontier = set()
     for node in active:
         op, *args = graph.nodes[node]
-        if not time_only(node) and op not in ("var", "dot", "cj"):
+        if not time_only(node) and op not in ("var", "dot", "cj", "param"):
             frontier.update(arg for arg in args if arg in time_nodes)
     frontier.update(
         node for selected in roots.values() for node in selected if node in time_nodes
@@ -204,9 +207,9 @@ def _emit_model(
         "PB_EXPORT", "static"
     )
     source += (
-        "static void ensure_time(double t) {\n"
+        f"static void ensure_time(double t{',const double* runtime' if runtime_parameters else ''}) {{\n"
         "if(!cached_valid || t!=cached_t) {\n"
-        "update_time(t,nullptr,nullptr,0,time_values);cached_t=t;cached_valid=true;\n"
+        f"update_time(t,nullptr,nullptr,0,{runtime_arg}time_values);cached_t=t;cached_valid=true;\n"
         "}}\n"
     )
     source += helpers
@@ -229,7 +232,7 @@ def _emit_model(
             if args[0] not in bindings:
                 bindings[args[0]] = len(bindings)
             key = ("parameter", bindings[args[0]])
-        elif op in ("const", "time", "cj"):
+        elif op in ("const", "time", "cj", "param"):
             key = graph.nodes[node]
         else:
             key = (op, *(normalized(arg, cell) for arg in args))
@@ -250,7 +253,7 @@ def _emit_model(
         locations = plan.locations if plan else original_locations
         if name == "reconstruct":
             code = use_cached_time(graph.emit(name, selected, mapping))
-            source += code.replace("double* out) {", "double* out) {\nensure_time(t);")
+            source += code.replace("double* out) {", f"double* out) {{\nensure_time(t{',runtime' if runtime_parameters else ''});")
             continue
         normalized.cache_clear()
         constants.clear()
@@ -384,7 +387,7 @@ def _emit_model(
             if vectorized:
                 batch = (
                     f"for(;i+4<={count};i+=4) {{\n"
-                    f"{function}_vec(t,y,yp,cj,ix[i],parameters[i],out,offsets[i]);\n"
+                    f"{function}_vec(t,y,yp,cj,{runtime_arg}ix[i],parameters[i],out,offsets[i]);\n"
                     "}\n"
                 )
             calls.append(
@@ -393,7 +396,7 @@ def _emit_model(
                 f"static const int offsets[{count}][{width}]={table(outputs)};\n"
                 f"static const double parameters[{count}][{len(parameters[0])}]={table(parameters)};\n"
                 "int i=0;\n" + batch + f"for(;i<{count};i++) {{\n"
-                f"{function}(t,y,yp,cj,ix[i],parameters[i],out,offsets[i]);\n"
+                f"{function}(t,y,yp,cj,{runtime_arg}ix[i],parameters[i],out,offsets[i]);\n"
                 "}}\n"
             )
         preparation = ""
@@ -403,11 +406,11 @@ def _emit_model(
             preparation = (
                 f"static thread_local double extended[{len(plan.extended_keep)}];\n"
                 f"memcpy(extended,y,{len(keep)}*sizeof(double));\n"
-                f"shared_{name}::evaluate(t,y,yp,cj,extended+{len(keep)});\ny=extended;\n"
+                f"shared_{name}::evaluate(t,y,yp,cj,{runtime_arg}extended+{len(keep)});\ny=extended;\n"
             )
         source += (
             f'PB_EXPORT void {name}(double t,const double* y,'
-            "const double* yp,double cj,double* out) {\nensure_time(t);\n"
+            f"const double* yp,double cj,{runtime_decl}double* out) {{\nensure_time(t{',runtime' if runtime_parameters else ''});\n"
             + preparation
             + "".join(calls)
             + "}\n"

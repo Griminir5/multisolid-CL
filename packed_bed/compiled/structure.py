@@ -13,7 +13,7 @@ def derivative_variables(graph, roots):
         op, *args = graph.nodes[node]
         if op == "dot":
             return frozenset(args)
-        if op in ("const", "var", "time", "cj"):
+        if op in ("const", "var", "time", "cj", "param"):
             return frozenset()
         return frozenset().union(*(visit(arg) for arg in args))
 
@@ -30,7 +30,7 @@ def substitute_constants(graph, roots, replacements):
             return graph.constant(replacements[args[0]])
         if op == "dot" and args[0] in replacements:
             return graph.zero
-        if op in ("const", "var", "dot", "time", "cj"):
+        if op in ("const", "var", "dot", "time", "cj", "param"):
             return node
         return graph.make(op, *(visit(arg) for arg in args))
 

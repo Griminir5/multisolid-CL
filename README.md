@@ -268,11 +268,29 @@ compiler and build flags. Set `PACKED_BED_COMPILED_CACHE` to override the CLI ca
 Managed Zig kernels omit debug information to reduce compilation memory.
 Failed compilations keep their full diagnostics in a `*.compiler.log` file in the cache;
 batch errors include a bounded excerpt and the log path.
+Operating programs are per-run native data: cases with the same reduced equations
+can reuse one kernel across different schedules, schedule lengths, smoothing widths,
+and separate-channel or feed-stream programs. Feed-stream composition and temperature
+are still derived after smoothing molar quantities. Initial conditions remain case-specific.
+The manifest records `program_sha256` separately from the model and kernel hashes.
+Grid, chemistry, reports, solid profiles, and other embedded coefficients remain specialized;
+the initial composition's temperature anchor can also select a different structural variant.
+Gas states needed by a possible runtime feed are retained even when one case never supplies
+that species. Shared kernels can therefore have slightly more states than specialized ones.
 AVX2 acceleration is detected at runtime; other CPUs use scalar kernels. The optional
 `vector_exponentials: true` also requires FMA and falls back to scalar math when unavailable.
 The backend supports the usual datasets and plots;
 derivative reports, custom DAETools reporters and incidence-matrix output require `solver.backend: daetools`.
 Run `python -m pytest tests/compiled` to check native kernels, solver callbacks and reactor integration.
+
+For a whole-run comparison against the specialized program implementation, use
+`python tools/benchmark_shared_programs.py --cases PATH/TO/cases --output build/program-benchmark --workers 1 8 32 64`.
+Each input directory supplies its immediate `*/run.yaml` files. The benchmark preserves
+inputs, writes separate outputs, and records cold/warm time, kernel counts, source size,
+and per-stage solver statistics. On Windows it also measures peak committed memory
+across the coordinator, workers, and compiler descendants, with a guard against exhausting
+the machine. Plots are disabled in both variants; numerical settings and report times
+are preserved. Memory measurements are unavailable on other platforms.
 
 **Run a batch.** A batch expands the combinations of named axis values into separate cases.
 

@@ -105,8 +105,8 @@ def test_reactive_run_reports_cache_and_tight_reference(
         repaired = run_case(case)
         assert repaired.solver_stats["cache_reason"] == "Cached files missing or damaged"
     assert (
-        first.solver_stats["fixed_states_removed"] == 7
-    )  # He, inert solid, heat loss.
+        first.solver_stats["fixed_states_removed"] == 4
+    )  # Inert solid and heat loss; He must remain available to runtime feeds.
     assert first.solver_stats["linear_solver"] == linear_solver
     assert first.solver_stats["step_growth_threshold"] == 1.25
     assert first.solver_stats["nonlinear_refresh_interval"] == 4
@@ -166,7 +166,7 @@ def test_reactive_run_reports_cache_and_tight_reference(
     )
     third = run_case(changed)
     assert third.solver_stats["kernel_sha256"] != first.solver_stats["kernel_sha256"]
-    assert third.solver_stats["fixed_states_removed"] == 6  # Heat loss now evolves.
+    assert third.solver_stats["fixed_states_removed"] == 3  # Heat loss now evolves.
 
 
 def test_compiler_update_invalidates_the_model_cache(native_tools, tmp_path, monkeypatch):
@@ -187,6 +187,62 @@ def test_compiler_update_invalidates_the_model_cache(native_tools, tmp_path, mon
     assert updated.solver_stats["compiler_version"] == version + "-updated"
     for name, variable in first.reporter.Process.dictVariables.items():
         np.testing.assert_array_equal(variable.Values, updated.reporter.Process.dictVariables[name].Values)
+
+
+def test_different_program_modes_lengths_and_initial_states_share_kernel(native_tools, tmp_path, monkeypatch):
+    from packed_bed.config import ProgramConfig, FeedProgramConfig
+    from packed_bed.reports import load_dataset
+    from packed_bed.simulation import run_case
+
+    monkeypatch.setenv("PACKED_BED_COMPILED_CACHE", str(tmp_path / "cache"))
+    base = _small_reactive_case(tmp_path, "compiled")
+    kernels, fingerprints, sizes = [], [], []
+    for index, (mode, helium, steps) in enumerate((("separate_channels", 0., 0), ("separate_channels", .02, 211), ("feed_stream", .01, 20))):
+        original = base.program.model_dump(mode="python")
+        composition = dict(original["inlet_composition"]["initial"])
+        composition.update(He=helium, N2=composition["N2"]-helium)
+        if mode == "separate_channels":
+            original["inlet_composition"] = {"initial": composition, "steps": []}
+            original["inlet_temperature"]["steps"] = [
+                {"kind": "ramp", "duration_s": .3, "target": 673.15 + i % 2 * 20} for i in range(steps)]
+            program = ProgramConfig.model_validate(original)
+        else:
+            program = FeedProgramConfig.model_validate({
+                "feed_stream": {"initial": {"flow": .01, "temperature": 673.15, "composition": composition},
+                                "steps": [{"kind": "ramp", "duration_s": 2.,
+                                           "target": {"flow": .01 + (i % 2)*.002, "temperature": 673.15+i%2*20}}
+                                          for i in range(steps)]},
+                "outlet_pressure": original["outlet_pressure"]})
+        channels = compile_program_channels(program, base.chemistry.gas_species, base.run.model,
+                                            repeat=False, time_horizon=100.)
+        case = replace(base, program=program, inlet_flow_program=channels[0], inlet_composition_program=channels[1],
+                       inlet_temperature_program=channels[2], outlet_pressure_program=channels[3],
+                       run=base.run.model_copy(update={
+                           "simulation": base.run.simulation.model_copy(update={"program_mode": mode, "repeat_program": False}),
+                           "solver": base.run.solver.model_copy(update={"name": "band", "scale_residuals": True}),
+                           "outputs": base.run.outputs.model_copy(update={"directory": str(tmp_path / f"case-{index}")})}))
+        result = run_case(case)
+        actual = load_dataset(result.results_path)
+        kernels.append(result.solver_stats["kernel_sha256"])
+        fingerprints.append(result.solver_stats["program_sha256"])
+        sizes.append(result.solver_stats["source_bytes"])
+        assert result.solver_stats["cache_hit"] == (index > 0)
+        reference = replace(case, run=case.run.model_copy(update={
+            "solver": case.run.solver.model_copy(update={"backend": "daetools", "name": "superlu"}),
+            "outputs": case.run.outputs.model_copy(update={"directory": str(tmp_path / f"reference-{index}")})}))
+        expected = load_dataset(run_case(reference).results_path)
+        np.testing.assert_allclose(actual.temperature, expected.temperature, rtol=0, atol=.02)
+        np.testing.assert_allclose(actual.gas_mole_fraction, expected.gas_mole_fraction, rtol=0, atol=1e-4)
+        for name, channel in zip(("inlet_flow", "inlet_composition", "inlet_temperature", "outlet_pressure"), channels):
+            # Check exact boundaries against the program itself: DAETools' dense
+            # output for algebraic states is approximate between solver steps.
+            exact = [channel.value_at(float(t), smooth_ramp_width_s=1.) for t in actual.time]
+            np.testing.assert_allclose(actual[name], exact, rtol=1e-12, atol=1e-9)
+    assert len(set(kernels)) == len(set(sizes)) == 1
+    assert len(set(fingerprints)) == 3
+    changed = replace(case, run=case.run.model_copy(update={
+        "model": case.run.model.model_copy(update={"axial_cells": 4})}))
+    assert run_case(changed).solver_stats["kernel_sha256"] != kernels[0]
 
 
 def test_scalar_reactor_fallback_matches_detected_cpu(native_tools, tmp_path, monkeypatch):

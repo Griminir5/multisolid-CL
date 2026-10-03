@@ -34,6 +34,7 @@ class CallbackData(C.Structure):
             "index_pointers",
             "row_scale",
             "jac_values",
+            "programs",
         )
     ]
 
@@ -151,6 +152,7 @@ class NativeIDA:
         step_growth_threshold=2.0,
         nonlinear_refresh_interval=0,
         nonlinear_library=None,
+        programs=None,
     ):
         if (
             isinstance(nonlinear_refresh_interval, bool)
@@ -246,6 +248,7 @@ class NativeIDA:
                 fn("sunlinsolsuperlumt", "SUNLinSol_SuperLUMT", P, P, P, I, P)
                 fn("sunlinsolsuperlumt", "SUNLinSol_SuperLUMTSetOrdering", I, P, I)
         self.kernel = kernel
+        self.programs = programs  # Own every input and scratch array until IDA is freed.
         self.jac_values = np.empty(sparsity.nnz)
         if hasattr(kernel, "report_loop"):
             kernel.report_loop.argtypes = [P, P, P, P, P, P, I, I, P, P, P, P, P]
@@ -274,6 +277,7 @@ class NativeIDA:
             ),
             self.row_scale.ctypes.data,
             self.jac_values.ctypes.data,
+            programs.pointer if programs is not None else None,
         )
         self.ctx = P()
         self.mem = P()
@@ -507,7 +511,7 @@ class NativeIDA:
         self.close()
 
 
-def callback_source(sparsity, linear_solver="superlu"):
+def callback_source(sparsity, linear_solver="superlu", *, shared_programs=False):
     if linear_solver not in {"superlu", "klu", "band"}:
         raise ValueError("Unknown callback matrix format.")
     rows = ",".join(map(str, sparsity.indices))
@@ -522,6 +526,7 @@ struct CallbackData {
     int* (*index_pointers)(Ptr);
     const double* row_scale;
     double* jac_values;
+    void* programs;
 };
 PB_EXPORT int residual_callback(double t, Ptr y, Ptr yp, Ptr r, Ptr user) {
     auto& f=*static_cast<CallbackData*>(user);
@@ -552,6 +557,9 @@ PB_EXPORT int jacobian_callback(double t,double cj,Ptr y,Ptr yp,Ptr r,Ptr mat,Pt
         .replace("NSTATE", str(sparsity.shape[0]))
         .replace("NNZ", str(sparsity.nnz))
     )
+    if shared_programs:
+        source = source.replace("0,residual);", "0,residual,static_cast<ProgramData*>(f.programs));")
+        source = source.replace("cj,values);", "cj,values,static_cast<ProgramData*>(f.programs));")
     if linear_solver == "band":
         _, _, stored_upper, leading = band_layout(sparsity)
         offsets = [

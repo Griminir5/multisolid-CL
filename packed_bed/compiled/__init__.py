@@ -22,6 +22,7 @@ from .compiler import compile_kernel, library_suffix, platform_identity, simd_fl
 from .bundle import bundle_root, engine_fingerprint
 from .cache import cache_lock, check_cancelled, progress, valid_library, write_record
 from .graph import export_model
+from .program_data import RuntimePrograms, boundary_slots, program_source, program_wrappers
 from .runtime import NativeIDA, callback_source, check_runtime, runtime_identity
 from .structure import (
     band_layout,
@@ -56,22 +57,23 @@ class CompiledModel:
     report_variables: list
     report_width: int
     metadata: dict
+    programs: RuntimePrograms | None = None
 
 
-def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
+def prepare_model(simulation, cache_directory: Path, *, shared_programs=True) -> CompiledModel:
     """Generate an exact sparse Jacobian and kernels for the initialized model."""
     from .compiler import compiler_identity
 
     linear_solver = simulation.case.run.solver.name
     if linear_solver not in {"superlu", "klu", "band"}:
         raise ValueError("The compiled backend requires solver.name: superlu, klu or band.")
-    progress("checking_cache", message="Checking the exact initialized model cache.")
+    progress("checking_cache", message="Checking the parameterized model cache.")
     check_runtime()
     started = perf_counter()
     cache_directory = cache_directory.resolve()
     cache_directory.mkdir(parents=True, exist_ok=True)
-    # Hash DAETools' actual instructions, including numeric constants. This also
-    # invalidates the cache for custom kinetics/property hooks and changed inputs.
+    # Hash the actual equations, retaining physical constants and plugin code.
+    # Only designated program inputs become symbolic runtime parameters.
     digest = hashlib.sha256()
     # A model-cache hit skips compile_kernel, so it must check the installed
     # compiler too. Otherwise a compiler update could keep loading an old binary.
@@ -95,19 +97,27 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
     cpu_cache_hit = cpu_metadata.get("vector_math_cpu_cache_hit", True) and cpu_metadata.get("cpu_cache_hit", True)
     digest.update(b"SLEEF exp" if vector_exponentials else b"scalar exp")
     digest.update(linear_solver.encode())
-    digest.update(simulation.case.run.solver.name.encode())
-    # Fixed-state elimination embeds constants from differential initial data.
-    # Algebraic IC roundoff and integration tolerances do not define the kernel.
-    from daetools.pyDAE import cnDifferential
-
-    differential = np.asarray(simulation.VariableTypes) == cnDifferential
-    digest.update(np.asarray(simulation.Values, dtype=float)[differential].tobytes())
-    with TemporaryDirectory(
-        prefix="fingerprint-", dir=cache_directory
-    ) as temporary:
-        stacks, indexes = _export_stack_files(simulation, temporary)
-        digest.update(stacks.read_bytes())
-        digest.update(indexes.read_bytes())
+    programs = RuntimePrograms.from_simulation(simulation) if shared_programs else None
+    if shared_programs:
+        graph, keep, residuals, reconstruction, _ = export_model(simulation, shared_programs=True)
+        locations, groups = state_locations(simulation)
+        keep, residuals, reconstruction, fixed = eliminate_fixed_states(
+            graph, keep, residuals, reconstruction, np.asarray(simulation.Values), groups)
+        # Fingerprint actual parameterized equations AFTER safe state elimination.
+        # Runtime schedules and unembedded initial states do not define code.
+        digest.update(graph.fingerprint(residuals + reconstruction).encode())
+        digest.update(repr(keep).encode())
+    else:
+        # Preserve the specialized implementation as a measurement/reference path,
+        # including its inexpensive compute-stack fingerprint on warm runs.
+        from daetools.pyDAE import cnDifferential
+        differential = np.asarray(simulation.VariableTypes) == cnDifferential
+        digest.update(np.asarray(simulation.Values, dtype=float)[differential].tobytes())
+        with TemporaryDirectory(prefix="fingerprint-", dir=cache_directory) as temporary:
+            stacks, indexes = _export_stack_files(simulation, temporary)
+            digest.update(stacks.read_bytes())
+            digest.update(indexes.read_bytes())
+    digest.update(b"runtime programs v1" if shared_programs else b"specialized programs")
     descriptions = [
         (v.Name, v.NumberOfPoints, v.ReportingOn, v.OverallIndex)
         for v in simulation.model.Variables
@@ -123,6 +133,8 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
         ).encode()
     )
     model_key = digest.hexdigest()
+    run_metadata = {"program_sha256": programs.fingerprint if programs else None,
+                    "shared_programs": shared_programs}
     cache_index = cache_directory / f"model-{model_key}.json"
     report_variables = []
     report_indices = []
@@ -168,26 +180,22 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
                     "vector_exponentials_requested": requested,
                     "cache_reason": "Reusing compiled model",
                 }
-                library = _load_kernel(library_path)
+                library = _load_kernel(library_path, shared_programs=shared_programs)
             except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
                 reason = "Cached files missing or damaged"
             else:
                 progress("checking_cache", message="Reusing compiled model", cache_hit=True,
                          model_sha256=model_key)
-                return CompiledModel(library, keep, sparsity, report_variables, len(report_indices), metadata)
+                metadata.update(run_metadata)
+                return CompiledModel(library, keep, sparsity, report_variables, len(report_indices), metadata, programs)
         else:
             reason = "No reusable model for these inputs and runtime"
         progress("generating", message=reason, cache_hit=False, model_sha256=model_key)
-        graph, keep, residuals, reconstruction, _ = export_model(simulation)
-        locations, groups = state_locations(simulation)
-        keep, residuals, reconstruction, fixed = eliminate_fixed_states(
-            graph,
-            keep,
-            residuals,
-            reconstruction,
-            np.asarray(simulation.Values),
-            groups,
-        )
+        if not shared_programs:
+            graph, keep, residuals, reconstruction, _ = export_model(simulation)
+            locations, groups = state_locations(simulation)
+            keep, residuals, reconstruction, fixed = eliminate_fixed_states(
+                graph, keep, residuals, reconstruction, np.asarray(simulation.Values), groups)
         if len(residuals) != len(keep):
             raise RuntimeError("Algebraic reduction did not produce a square system.")
         owners = match_rows(graph, residuals, keep)
@@ -226,7 +234,11 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
             vectorize=vectorize,
             vector_exponentials=vector_exponentials,
         )
-        source += callback_source(sparsity, linear_solver=linear_solver)
+        if shared_programs:
+            for name in ("evaluate", "jacobian", "reconstruct"):
+                source = source.replace(f"PB_EXPORT void {name}(", f"static void {name}_values(")
+            source = program_source() + source + program_wrappers()
+        source += callback_source(sparsity, linear_solver=linear_solver, shared_programs=shared_programs)
         check_cancelled()
         generation_s = perf_counter() - started - cpu_compile_s - waiting - cpu_wait_s
         library_path, compilation = compile_kernel(
@@ -251,6 +263,8 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
             "cache_wait_s": waiting + cpu_wait_s + compilation.get("cache_wait_s", 0.0),
             "runtime_identity": runtime_identity(),
             "axial_cells": simulation.case.run.model.axial_cells,
+            "source_bytes": len(source.encode("utf-8")),
+            "parameter_slots": [entry[3] for entry in boundary_slots(simulation.model.gas_species)] if shared_programs else [],
             "original_unknowns": simulation.NumberOfEquations,
             "compiler_version": compiler_version,
             "reduced_unknowns": len(keep),
@@ -276,10 +290,11 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
             "indices": sparsity.indices.tolist(),
             "indptr": sparsity.indptr.tolist(),
         }
-        library = _load_kernel(library_path)
+        library = _load_kernel(library_path, shared_programs=shared_programs)
         check_cancelled()
         record["record_sha256"] = hashlib.sha256(json.dumps(record, sort_keys=True, allow_nan=False).encode()).hexdigest()
         write_record(cache_index, record)
+        metadata.update(run_metadata)
         return CompiledModel(
             library,
             np.asarray(keep),
@@ -287,14 +302,16 @@ def prepare_model(simulation, cache_directory: Path) -> CompiledModel:
             report_variables,
             len(report_roots),
             metadata,
+            programs,
         )
 
 
-def _load_kernel(library_path):
+def _load_kernel(library_path, *, shared_programs=False):
     library = C.CDLL(str(library_path))
     for name in ("evaluate", "jacobian", "reconstruct"):
         function = getattr(library, name)
-        function.argtypes = [C.c_double, C.c_void_p, C.c_void_p, C.c_double, C.c_void_p]
+        function.argtypes = [C.c_double, C.c_void_p, C.c_void_p, C.c_double, C.c_void_p] + (
+            [C.c_void_p] if shared_programs else [])
         function.restype = None
     return library
 
@@ -364,6 +381,7 @@ def integrate(simulation):
         compiled.metadata["generation_s"] += linear_metadata["linear_generation_s"]
         compiled.metadata["cache_hit"] &= linear_metadata["linear_cache_hit"]
     keep = compiled.keep
+    program_args = (compiled.programs.pointer,) if compiled.programs is not None else ()
     nonlinear_library = None
     if settings.nonlinear_refresh_interval:
         from .nonlinear import prepare_nonlinear_library
@@ -391,7 +409,7 @@ def integrate(simulation):
         # normalizes initial matrix rows without changing the state error weights.
         initial_jacobian = np.empty(compiled.sparsity.nnz)
         compiled.library.jacobian(
-            0, y0.ctypes.data, yp0.ctypes.data, 1, initial_jacobian.ctypes.data
+            0, y0.ctypes.data, yp0.ctypes.data, 1, initial_jacobian.ctypes.data, *program_args
         )
         if not np.isfinite(initial_jacobian).all():
             raise RuntimeError(
@@ -421,6 +439,7 @@ def integrate(simulation):
         step_growth_threshold=settings.step_growth_threshold,
         nonlinear_refresh_interval=settings.nonlinear_refresh_interval,
         nonlinear_library=nonlinear_library,
+        programs=compiled.programs,
     ) as solver:
         started = perf_counter()
         values, derivatives = solver.solve(times)
@@ -436,6 +455,7 @@ def integrate(simulation):
             derivatives[i].ctypes.data,
             0,
             reported[i].ctypes.data,
+            *program_args,
         )
     if not np.isfinite(reported).all():
         raise RuntimeError("Compiled result reconstruction produced nonfinite values.")

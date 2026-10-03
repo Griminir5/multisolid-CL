@@ -6,6 +6,8 @@ differential variables; only named explicit algebraic definitions are removed.
 """
 
 import math
+import hashlib
+import json
 from functools import lru_cache
 
 
@@ -81,6 +83,26 @@ class Graph:
     def constant(self, x):
         return self.make("const", float(x))
 
+    def parameter(self, name, slot):
+        """An exogenous input whose identity survives constant folding."""
+        return self.make("param", name, slot)
+
+    def fingerprint(self, roots):
+        """Hash reachable instructions independently of discarded graph nodes."""
+        nodes, mapping = [], {}
+
+        def visit(node):
+            if node not in mapping:
+                op, *args = self.nodes[node]
+                if op not in ("const", "var", "dot", "time", "cj", "param"):
+                    args = [visit(arg) for arg in args]
+                mapping[node] = len(nodes)
+                nodes.append((op, *args))
+            return mapping[node]
+
+        indices = [visit(node) for node in roots]
+        return hashlib.sha256(json.dumps([nodes, indices], allow_nan=False).encode()).hexdigest()
+
     def from_dae(self, node, index_map):
         import daetools.pyDAE as d
 
@@ -133,7 +155,7 @@ class Graph:
         op, *args = self.nodes[node]
         if op in ("var", "dot"):
             return frozenset(args)
-        if op in ("const", "time", "cj"):
+        if op in ("const", "time", "cj", "param"):
             return frozenset()
         return frozenset().union(*(self.dependencies(a) for a in args))
 
@@ -178,7 +200,7 @@ class Graph:
             op, *a = self.nodes[n]
             if op == "var" and a[0] in replacements:
                 result = sub(replacements[a[0]])
-            elif op in ("const", "var", "dot", "time", "cj"):
+            elif op in ("const", "var", "dot", "time", "cj", "param"):
                 result = n
             else:
                 result = self.make(op, *(sub(x) for x in a))
@@ -198,7 +220,7 @@ class Graph:
             return {a[0]: self.one}
         if op == "dot":
             return {a[0]: self.make("cj")}
-        if op in ("const", "time", "cj"):
+        if op in ("const", "time", "cj", "param"):
             return {}
         ga = self.gradient(a[0])
         gb = self.gradient(a[1]) if len(a) > 1 else {}
@@ -271,11 +293,14 @@ class Graph:
             if n in refs:
                 return
             op, *args = self.nodes[n]
-            if op not in ("const", "var", "dot", "time", "cj"):
+            if op not in ("const", "var", "dot", "time", "cj", "param"):
                 for arg in args:
                     visit(arg)
             if op == "const":
                 refs[n] = repr(args[0])
+                return
+            if op == "param":
+                refs[n] = f"runtime[{args[1]}]"
                 return
             if op == "var":
                 refs[n] = f"y[{variable_map[args[0]]}]"
@@ -309,14 +334,15 @@ class Graph:
         for i, n in enumerate(roots):
             visit(n)
             lines.append(f"out[{i}] = {refs[n]};")
+        parameters = "const double* runtime, " if any(n[0] == "param" for n in self.nodes) else ""
         return (
-            f'PB_EXPORT void {name}(double t, const double* y, const double* yp, double cj, double* out) {{\n'
+            f'PB_EXPORT void {name}(double t, const double* y, const double* yp, double cj, {parameters}double* out) {{\n'
             + "\n".join(lines)
             + "\n}\n"
         )
 
 
-def export_model(simulation):
+def export_model(simulation, *, shared_programs=False):
     g = Graph()
     mapping = simulation.IndexMappings
     infos = sorted(
@@ -324,9 +350,19 @@ def export_model(simulation):
         key=lambda x: x.EquationIndex,
     )
     roots = []
+    boundaries = {}
+    if shared_programs:
+        from .program_data import boundary_slots
+        model = simulation.model
+        for equation, variable, component, name, slot in boundary_slots(model.gas_species):
+            old = mapping[getattr(model, variable).OverallIndex + component]
+            boundaries[equation] = g.make("sub", g.make("var", old), g.parameter(name, slot))
     for info in infos:
         from .cache import check_cancelled
         check_cancelled()
+        if info.Equation.Name in boundaries:
+            roots.append(boundaries[info.Equation.Name])
+            continue
         try:
             roots.append(g.from_dae(info.Node, mapping))
         except (KeyError, NotImplementedError) as exc:
