@@ -10,6 +10,7 @@ from .editor_widgets import DraftDelegate, Preview, action_button, cell, display
 from .general import form_panel
 from .inputs import zone_weight_percentages
 from .theme import colors, numeric_font
+from .validation import set_field_issue
 
 
 WEIGHT_PERCENT_ROLE = Qt.ItemDataRole.UserRole + 73
@@ -50,6 +51,7 @@ class ZoneDelegate(DraftDelegate):
         painter.drawText(secondary, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                          QFontMetrics(numeric_font(12)).elidedText(percentage, Qt.TextElideMode.ElideRight, secondary.width()))
         painter.restore()
+        self.paint_issue(painter, option, index)
 
     def createEditor(self, parent, option, index):
         editor = super().createEditor(parent, option, index)
@@ -162,8 +164,15 @@ class BedPage(QWidget):
                                                                          tooltip=f"Remove zone {row + 1}"))
         self.add_button = table_action(self.zones, len(zones), "+ Add zone", self.add_zone)
         self.add_button.setEnabled(not self.editor.read_only)
+        self.update_empty_state(not zones)
         self.loading = False
         self.update_weight_percentages(reload_species=True)
+
+    def update_empty_state(self, empty):
+        message = "At least one solid zone is required." if empty else ""
+        set_field_issue(self.zones, message)
+        set_field_issue(self.add_button, message)
+        return message
 
     def update_weight_percentages(self, *, reload_species=False):
         species = self.editor.get(("solids", "solid_species"), [])

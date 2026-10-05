@@ -5,8 +5,10 @@ from math import isfinite
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QBrush, QPalette
 from .choice import BinaryChoice
-from .theme import NUMERIC_ROLE, LOCKED_ROLE, numeric, numeric_font, style_figure, manager
+from .theme import NUMERIC_ROLE, LOCKED_ROLE, numeric, numeric_font, style_figure, manager, colors
+from .validation import ISSUE_ROLE
 
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
@@ -136,6 +138,23 @@ class DraftDelegate(QStyledItemDelegate):
             option.font = numeric_font()
         if index.data(LOCKED_ROLE):
             option.backgroundBrush = option.palette.alternateBase()
+        if index.data(ISSUE_ROLE):
+            option.backgroundBrush = QBrush(QColor(colors()["missing"]))
+            option.palette.setColor(QPalette.ColorRole.Highlight, QColor(colors()["missing"]))
+            option.palette.setColor(QPalette.ColorRole.HighlightedText, QColor(colors()["ink"]))
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        self.paint_issue(painter, option, index)
+
+    @staticmethod
+    def paint_issue(painter, option, index):
+        if index.data(ISSUE_ROLE):
+            painter.save()
+            painter.setPen(QColor(colors()["error"]))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(option.rect.adjusted(0, 0, -1, -1))
+            painter.restore()
 
     def createEditor(self, parent, option, index):
         editor = super().createEditor(parent, option, index)

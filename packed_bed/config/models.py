@@ -14,6 +14,7 @@ from pydantic import (
 )
 
 from packed_bed.axial_schemes import SUPPORTED_SCHEMES
+from .issues import field_error
 
 
 def _require_string(value: str) -> str:
@@ -241,7 +242,8 @@ class RunConfig(ConfigModel):
     @model_validator(mode="after")
     def validate_reporting_window(self) -> "RunConfig":
         if self.simulation.reporting_interval_s > self.simulation.time_horizon_s:
-            raise ValueError("reporting_interval_s must not exceed time_horizon_s.")
+            raise field_error("reporting_interval_s must not exceed time_horizon_s.",
+                              ("simulation", "reporting_interval_s"), ("simulation", "time_horizon_s"))
         return self
 
     @model_validator(mode="after")
@@ -249,42 +251,51 @@ class RunConfig(ConfigModel):
         if self.solver.band_reciprocals and (
             self.solver.backend != "compiled" or self.solver.name != "band"
         ):
-            raise ValueError(
-                "band_reciprocals requires solver.backend: compiled and solver.name: band."
+            raise field_error(
+                "band_reciprocals requires solver.backend: compiled and solver.name: band.",
+                ("solver", "band_reciprocals"), ("solver", "backend"), ("solver", "name")
             )
         if self.solver.vector_exponentials and self.solver.backend != "compiled":
-            raise ValueError(
-                "vector_exponentials currently requires solver.backend: compiled."
+            raise field_error(
+                "vector_exponentials currently requires solver.backend: compiled.",
+                ("solver", "vector_exponentials"), ("solver", "backend")
             )
         if self.solver.nonlinear_refresh_interval and self.solver.backend != "compiled":
-            raise ValueError(
-                "nonlinear_refresh_interval currently requires solver.backend: compiled."
+            raise field_error(
+                "nonlinear_refresh_interval currently requires solver.backend: compiled.",
+                ("solver", "nonlinear_refresh_interval"), ("solver", "backend")
             )
         if self.solver.name == "band" and self.solver.backend != "compiled":
-            raise ValueError("solver.name: band requires solver.backend: compiled.")
+            raise field_error("solver.name: band requires solver.backend: compiled.",
+                              ("solver", "name"), ("solver", "backend"))
         if self.solver.scale_residuals and self.solver.backend != "compiled":
-            raise ValueError(
-                "scale_residuals currently requires solver.backend: compiled."
+            raise field_error(
+                "scale_residuals currently requires solver.backend: compiled.",
+                ("solver", "scale_residuals"), ("solver", "backend")
             )
         if (
             self.solver.step_growth_threshold != 2.0
             and self.solver.backend != "compiled"
         ):
-            raise ValueError(
-                "step_growth_threshold currently requires solver.backend: compiled."
+            raise field_error(
+                "step_growth_threshold currently requires solver.backend: compiled.",
+                ("solver", "step_growth_threshold"), ("solver", "backend")
             )
         if self.solver.backend == "compiled":
             if self.solver.name not in {"superlu", "klu", "band"}:
-                raise ValueError(
-                    "The compiled backend requires solver.name: superlu, klu or band."
+                raise field_error(
+                    "The compiled backend requires solver.name: superlu, klu or band.",
+                    ("solver", "name"), ("solver", "backend")
                 )
             if self.simulation.report_time_derivatives:
-                raise ValueError(
-                    "The compiled backend does not support report_time_derivatives: true."
+                raise field_error(
+                    "The compiled backend does not support report_time_derivatives: true.",
+                    ("simulation", "report_time_derivatives"), ("solver", "backend")
                 )
             if self.outputs.solver_incidence_matrix:
-                raise ValueError(
-                    "The compiled backend does not support solver_incidence_matrix: true."
+                raise field_error(
+                    "The compiled backend does not support solver_incidence_matrix: true.",
+                    ("outputs", "solver_incidence_matrix"), ("solver", "backend")
                 )
         return self
 
@@ -300,9 +311,9 @@ class SolidZoneConfig(ConfigModel):
     @model_validator(mode="after")
     def validate_bounds(self) -> "SolidZoneConfig":
         if self.x_end_m <= self.x_start_m:
-            raise ValueError("x_end_m must be greater than x_start_m.")
+            raise field_error("x_end_m must be greater than x_start_m.", ("x_end_m",), ("x_start_m",))
         if not self.values:
-            raise ValueError("values must not be empty.")
+            raise field_error("values must not be empty.", ("values",))
         return self
 
 
@@ -336,9 +347,9 @@ class SolidConfig(ConfigModel):
                 differences.append(f"missing {', '.join(missing)}")
             if extra:
                 differences.append(f"unexpected {', '.join(extra)}")
-            raise ValueError(
+            raise field_error(
                 f"solids.initial_profile.zones[{zone_index}].values species mismatch: "
-                f"{'; '.join(differences)}."
+                f"{'; '.join(differences)}.", ("initial_profile", "zones", zone_index, "values")
             )
         return self
 

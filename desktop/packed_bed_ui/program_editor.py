@@ -3,6 +3,7 @@
 from copy import deepcopy
 from uuid import uuid4
 import math
+from pydantic import TypeAdapter, ValidationError
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -11,11 +12,14 @@ from PyQt6.QtWidgets import (
 )
 
 from packed_bed.programs import NORMAL_MOLAR_DENSITY_MOL_PER_M3
+from packed_bed.config.models import FeedState, FeedRampTarget, FractionMapping
+from packed_bed.config.issues import model_issues
 
 from .editor_widgets import Preview, action_button, cell, choices, display, number, select_value, table, table_action
 
 
 from .theme import numeric, numeric_font
+from .validation import messages_for, set_field_issue
 
 
 CHANNELS = ("inlet_flow", "inlet_temperature", "inlet_composition", "outlet_pressure")
@@ -269,18 +273,13 @@ class ChannelTable(QGroupBox):
         summary.addWidget(total, 1)
         summary.addWidget(normalize)
         update_total()
-        scroll.setWidget(content)
-        outer.addWidget(scroll)
-        outer.addLayout(summary)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        outer.addWidget(buttons)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        # Preserve unexpected imported keys for validation, unless explicitly editing those values.
-        values = {**composition, **{key: number(field.text()) for key, field in composition_fields.items()}}
-        if feed:
+        adapter = TypeAdapter(FeedRampTarget if optional else FeedState if feed else FractionMapping)
+
+        def edited_value():
+            # Keep unexpected imported species visible to the case validator.
+            values = {**composition, **{key: number(field.text()) for key, field in composition_fields.items()}}
+            if not feed:
+                return values
             value = deepcopy(original)
             for key, field in fields.items():
                 if not optional or enabled[key].isChecked():
@@ -291,8 +290,43 @@ class ChannelTable(QGroupBox):
                 value["composition"] = values
             else:
                 value.pop("composition", None)
-        else:
-            value = values
+            return value
+
+        def validate_fields():
+            try:
+                adapter.validate_python(edited_value(), strict=True)
+                issues = []
+            except ValidationError as exc:
+                issues = list(model_issues(exc))
+            for key, field in fields.items():
+                set_field_issue(field, messages_for(issues, (key,)) if field.isEnabled() else "")
+            for key, field in composition_fields.items():
+                path = ("composition", key) if feed else (key,)
+                set_field_issue(field, messages_for(issues, path) if composition_enabled.isChecked() else "")
+            for key, check in enabled.items():
+                set_field_issue(check, messages_for(issues, (key,)))
+            set_field_issue(composition_enabled, messages_for(issues, ("composition",)) if optional else "")
+            message = messages_for(issues, ("composition",) if feed else ())
+            set_field_issue(total, message if composition_enabled.isChecked() or not edited_value() else "")
+            total.setProperty("state", "error" if message else "")
+            total.style().unpolish(total)
+            total.style().polish(total)
+
+        for field in (*fields.values(), *composition_fields.values()):
+            field.textChanged.connect(validate_fields)
+        for check in (*enabled.values(), composition_enabled):
+            check.toggled.connect(validate_fields)
+        validate_fields()
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+        outer.addLayout(summary)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        outer.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        value = edited_value()
         if row == 0:
             channel["initial"] = value
         else:

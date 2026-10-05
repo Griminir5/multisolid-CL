@@ -12,6 +12,9 @@ from packed_bed.plotting import PLOT_REGISTRY
 from packed_bed.reports import REPORT_REGISTRY
 from packed_bed.solver_support import DESKTOP_SOLVERS, SOLVER_LABELS, require_desktop_solver
 from types import SimpleNamespace
+from pydantic import ValidationError
+from packed_bed.config.issues import model_issues
+from .validation import messages_for, set_field_issue
 
 from .theme import numeric
 
@@ -57,7 +60,8 @@ class GeneralPage(QWidget):
                      kind="spin", bounds=(0, 1024), default=0)
         threads.setToolTip("KLU factorization is serial. This setting still controls other applicable numerical work.")
         editor.field(form, ("run", "solver", "relative_tolerance"), "Relative tolerance")
-        form.addRow(action_button("Advanced solver settings…", self.advanced))
+        self.advanced_button = action_button("Advanced solver settings…", self.advanced)
+        form.addRow(self.advanced_button)
         self.cache_status = QLabel("Cache checked when the run starts")
         self.cache_status.setWordWrap(True)
         form.addRow(self.cache_status)
@@ -197,6 +201,26 @@ class GeneralPage(QWidget):
                                (key != "band_reciprocals" or self.editor.get(("run", "solver", "name")) == "band"))
             form.addRow(label, control)
             controls[key] = (control, value)
+
+        def validate_fields():
+            values = dict(self.editor.get(("run", "solver"), {}))
+            for key, (control, _) in controls.items():
+                if control.isEnabled():
+                    values[key] = (control.isChecked() if isinstance(control, QCheckBox) else
+                                   control.value() if isinstance(control, QSpinBox) else number(control.text()))
+            try:
+                SolverConfig.model_validate(values)
+                issues = []
+            except ValidationError as exc:
+                issues = list(model_issues(exc))
+            for key, (control, _) in controls.items():
+                set_field_issue(control, messages_for(issues, (key,)))
+
+        for control, _ in controls.values():
+            signal = (control.toggled if isinstance(control, QCheckBox) else
+                      control.valueChanged if isinstance(control, QSpinBox) else control.textChanged)
+            signal.connect(validate_fields)
+        validate_fields()
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)

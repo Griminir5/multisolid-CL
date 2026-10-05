@@ -68,7 +68,12 @@ The Chemistry graph uses a separate Graphviz `neato` runtime. See
    scales the entered mole fractions to sum to 1 while preserving their ratios.
    Fill every species with a non-negative number and use a positive total to enable it.
    Drafts save after a short pause, including incomplete
-   values. Hover over a validation message for its full details.
+   values. Missing or invalid inputs have a warm red border and soft red fill;
+   hover over a field or table cell for an explanation. A red marker identifies
+   tabs containing errors, and highlights clear as values are corrected. For
+   rules involving several values, such as composition totals, the affected
+   group is highlighted. **Details…** also explains errors that cannot be tied
+   to an individual field.
 5. **Run** in the project case list executes one case. **Run all included cases** runs the checked
    cases as one batch, continuing after individual failures. **Maximum workers**
    sets the number of simultaneous cases and is saved with the project. Each case

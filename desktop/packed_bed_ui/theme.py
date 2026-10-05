@@ -294,4 +294,18 @@ QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QPlainTextEdit:focus, QTextEdi
 QSpinBox:focus, QDoubleSpinBox:focus { padding-right: 21px; }
 QComboBox:focus { padding-right: 21px; }
 QCheckBox:focus { outline: 2px solid @focus; }
+QLineEdit[invalidInput="true"], QComboBox[invalidInput="true"], QSpinBox[invalidInput="true"],
+QTableView[invalidInput="true"], QTreeView[invalidInput="true"],
+QPushButton[invalidInput="true"], QCheckBox[invalidInput="true"] {
+    background: @missing; border: 1px solid @error;
+}
+QTableView QPushButton[role="tableAction"][invalidInput="true"] {
+    background: @missing; border: 1px solid @error; color: @error;
+}
+QWidget[invalidInput="true"] QPushButton[segment="true"] {
+    background: @missing; border-color: @error; color: @ink;
+}
+QToolButton[role="channelTitle"][invalidInput="true"] { color: @error; background: @missing; }
+QLineEdit[invalidInput="true"]:focus, QComboBox[invalidInput="true"]:focus,
+QSpinBox[invalidInput="true"]:focus, QPushButton[invalidInput="true"]:focus { border: 2px solid @focus; }
 '''

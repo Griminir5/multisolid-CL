@@ -20,6 +20,7 @@ from .models import (
     RunConfig,
     SolidConfig,
 )
+from .issues import InputIssue, model_issues
 
 if TYPE_CHECKING:
     from packed_bed.definitions import DefinitionEnvironment
@@ -138,6 +139,28 @@ def resolve_case(**kwargs) -> Case:
 def inspect_case(**kwargs) -> CaseInputs:
     """Validate inputs using static metadata, without importing plugin implementations."""
     return _resolve_case(**kwargs, metadata_only=True)
+
+
+def input_field_issues(documents):
+    """Inspect every document for field errors, even when another is unfinished.
+
+    This is supplementary editor feedback. Full case/run validation remains the
+    authority for readiness, plugin resolution and runtime availability.
+    """
+    run_data = documents.get("run", {})
+    simulation = run_data.get("simulation", {}) if isinstance(run_data, dict) else {}
+    mode = simulation.get("program_mode") if isinstance(simulation, dict) else None
+    program_type = FeedProgramConfig if mode == "feed_stream" else ProgramConfig
+    issues, parsed = [], {}
+    for name, schema in (("run", RunConfig), ("chemistry", ChemistryConfig),
+                         ("program", program_type), ("solids", SolidConfig)):
+        try:
+            parsed[name] = schema.model_validate(documents.get(name, {}))
+        except ValidationError as exc:
+            issues.extend(model_issues(exc, (name,)))
+    if len(parsed) == 4:
+        _validate_input_shapes(parsed["chemistry"], parsed["solids"], parsed["program"], parsed["run"], issues=issues)
+    return issues
 
 
 def _resolve_case(
@@ -328,28 +351,39 @@ def _validate_input_shapes(
     solids: SolidConfig,
     program: ProgramConfig | FeedProgramConfig,
     run: RunConfig,
+    *, issues=None,
 ) -> list[str]:
     errors: list[str] = []
+    def add(message, *paths):
+        errors.append(message)
+        if issues is not None:
+            issues.append(InputIssue(message, tuple(paths)))
+
     overlap = sorted(set(chemistry.gas_species) & set(solids.solid_species))
     if overlap:
-        errors.append(
+        add(
             "chemistry.gas_species and solids.solid_species must be disjoint; "
-            f"found: {', '.join(overlap)}."
+            f"found: {', '.join(overlap)}.", ("chemistry", "gas_species"), ("solids", "solid_species")
         )
 
     previous_end: float | None = None
     for zone_index, zone in enumerate(solids.initial_profile.zones):
         if zone_index == 0 and not math.isclose(zone.x_start_m, 0.0, rel_tol=0.0, abs_tol=1e-12):
-            errors.append("solids.initial_profile.zones must start at x = 0.")
+            add("solids.initial_profile.zones must start at x = 0.",
+                ("solids", "initial_profile", "zones", 0, "x_start_m"))
         if previous_end is not None and not math.isclose(
             zone.x_start_m, previous_end, rel_tol=0.0, abs_tol=1e-12
         ):
-            errors.append("solids.initial_profile.zones must be contiguous without gaps or overlaps.")
+            add("solids.initial_profile.zones must be contiguous without gaps or overlaps.",
+                ("solids", "initial_profile", "zones", zone_index, "x_start_m"),
+                ("solids", "initial_profile", "zones", zone_index - 1, "x_end_m"))
         previous_end = zone.x_end_m
     if previous_end is None:
-        errors.append("solids.initial_profile.zones must not be empty.")
+        add("solids.initial_profile.zones must not be empty.", ("solids", "initial_profile", "zones"))
     elif not math.isclose(previous_end, run.model.bed_length_m, rel_tol=0.0, abs_tol=1e-12):
-        errors.append("solids.initial_profile.zones must end at run.model.bed_length_m.")
+        add("solids.initial_profile.zones must end at run.model.bed_length_m.",
+            ("solids", "initial_profile", "zones", len(solids.initial_profile.zones) - 1, "x_end_m"),
+            ("run", "model", "bed_length_m"))
 
     expected_gases = set(chemistry.gas_species)
     if isinstance(program, FeedProgramConfig):
@@ -377,7 +411,10 @@ def _validate_input_shapes(
             ("program.inlet_composition", program.inlet_composition),
         )
     for path, composition in compositions:
+        previous_count = len(errors)
         _append_key_mismatch(errors, set(composition), expected_gases, path)
+        if issues is not None and len(errors) > previous_count:
+            issues.append(InputIssue(errors[-1], (tuple(int(key) if key.isdigit() else key for key in path.split('.')),)))
 
     if not run.simulation.repeat_program:
         for path, channel in channels:
@@ -390,11 +427,12 @@ def _validate_input_shapes(
             ):
                 continue
             difference = duration - run.simulation.time_horizon_s
-            errors.append(
+            add(
                 f"{path}.steps must sum to run.simulation.time_horizon_s "
                 f"({run.simulation.time_horizon_s:.16g}) within "
                 f"{_PROGRAM_DURATION_SUM_ABS_TOLERANCE_S:.1e} s, got {duration:.17g} "
-                f"(difference {difference:+.3e} s)."
+                f"(difference {difference:+.3e} s).",
+                *(tuple(path.split('.')) + ("steps", i, "duration_s") for i in range(len(channel.steps)))
             )
     return errors
 

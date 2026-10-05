@@ -22,6 +22,7 @@ from .editor_widgets import choices, display, number, select_value
 from .general import GeneralPage
 from .program_editor import ProgramPage
 from .inputs import get_value, input_readiness, resolve_documents, set_value
+from .validation import refresh_field_issues
 
 
 @dataclass
@@ -65,6 +66,10 @@ class InputEditor(QWidget):
         self.debounce.setSingleShot(True)
         self.debounce.setInterval(350)
         self.debounce.timeout.connect(self.save)
+        self.field_validation = QTimer(self)
+        self.field_validation.setSingleShot(True)
+        self.field_validation.setInterval(200)
+        self.field_validation.timeout.connect(self.update_field_issues)
         self.setObjectName("caseEditor")
         apply_theme(QApplication.instance())
         layout = QVBoxLayout(self)
@@ -96,6 +101,10 @@ class InputEditor(QWidget):
         # These remain useful to callers inspecting the numerical previews.
         self.figures = [self.program.preview.figure, self.bed.preview.figure]
         self.canvases = [self.program.preview.canvas, self.bed.preview.canvas]
+        apply_theme(QApplication.instance()).changed.connect(self.update_field_issues)
+
+    def update_field_issues(self):
+        return refresh_field_issues(self)
 
     def set_validation(self, state, text, details=""):
         self._validation_message = details
@@ -260,6 +269,7 @@ class InputEditor(QWidget):
         if self.loading or self.read_only or self.case is None:
             return
         self.dirty = True
+        self.field_validation.start()
         self.debounce.start()
         self.set_validation("active", "Saving changes…")
         for preview in (self.program.preview, self.bed.preview):
@@ -334,6 +344,8 @@ class InputEditor(QWidget):
         if self.case is None:
             return
         self.bed.update_weight_percentages(reload_species=True)
+        self.field_validation.stop()
+        refresh_field_issues(self)
         for preview in (self.program.preview, self.bed.preview):
             preview.clear()
         try:
@@ -342,7 +354,7 @@ class InputEditor(QWidget):
             self.case.validate_for_run()
         except (ValueError, OSError) as exc:
             message = str(exc)
-            self.set_validation("warning", "Draft — cannot run. Review the input details.", message)
+            self.set_validation("warning", "Draft — cannot run. Review highlighted inputs or Details.", message)
             if not self.figures[0].axes:
                 for preview in (self.program.preview, self.bed.preview):
                     preview.clear("Preview unavailable while inputs are incomplete or invalid. See the validation message below.")
