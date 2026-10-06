@@ -199,6 +199,8 @@ class ModelConfig(ConfigModel):
 
 
 class SolverConfig(ConfigModel):
+    # Missing fields in saved inputs retain their historical interpretation.
+    # New authoring uses the complete, explicit profile in for_new_case().
     backend: Literal["daetools", "compiled"] = "daetools"
     name: Literal[
         "klu",
@@ -222,6 +224,26 @@ class SolverConfig(ConfigModel):
     nonlinear_refresh_interval: int = Field(default=0, ge=0, strict=True)
     vector_exponentials: bool = Field(default=False, strict=True)
     band_reciprocals: bool = Field(default=False, strict=True)
+
+    @classmethod
+    def for_new_case(cls) -> "SolverConfig":
+        """The complete compiled-band profile selected by the 2026-09-29 study."""
+        return cls(
+            backend="compiled",
+            name="band",
+            threads=1,
+            relative_tolerance=1.0e-7,
+            concentration_absolute_tolerance=1.0e-11,
+            max_nonlinear_iterations=20,
+            nonlinear_convergence_coefficient=0.1,
+            maximum_order=3,
+            scale_residuals=True,
+            step_growth_threshold=1.25,
+            nonlinear_refresh_interval=4,
+            suppress_algebraic_errors=False,
+            vector_exponentials=False,
+            band_reciprocals=False,
+        )
 
 
 class OutputConfig(ConfigModel):

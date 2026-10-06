@@ -202,13 +202,19 @@ Available schemes are `upwind1`, `central`, `linear_upwind2`, `muscl_minmod`, `w
 The default interior flow mode is `forward_only`.
 The `reversible` mode permits flow reversal at interior faces. It does not change the inlet and outlet boundary conditions.
 
-`solver.name` selects a backend from the registry in [simulation.py](packed_bed/simulation.py).
-The default is `klu`. The default example selects `superlu`.
+New desktop cases use the [tested Compiled/band profile](desktop/COMPILED.md#new-case-defaults):
+one thread, relative tolerance `1e-7`, concentration absolute tolerance `1e-11`,
+maximum BDF order 3, and the complete advanced settings listed there.
+Those explicit settings can also be used in CLI case files.
+
+`solver.name` selects a linear solver from the registry in [simulation.py](packed_bed/simulation.py).
+For compatibility, omitted fields in existing YAML retain their historical defaults:
+`backend: daetools` and `name: klu`. The default example selects `superlu`.
 Use a backend included in your DAETools installation.
 `threads: 0` retains environment limits and uses the DAETools default thread count.
 A positive value sets the thread count.
 
-The IDAS defaults are `suppress_algebraic_errors: false`, `max_nonlinear_iterations: 4`, and `nonlinear_convergence_coefficient: 0.33`.
+The historical IDAS fallbacks are `suppress_algebraic_errors: false`, `max_nonlinear_iterations: 4`, and `nonlinear_convergence_coefficient: 0.33`.
 The default example changes these values and uses `relative_tolerance: 1.0e-3`.
 Compare important results with a stricter tolerance before you use a new solver configuration.
 

@@ -132,7 +132,7 @@ Unicode characters and run the external checker against that extracted folder:
 
 ```powershell
 & $py tools/check_windows_release.py --bundle 'build/release/Portable check α/MultiSolid' --output build/release/portable-check
-./tools/test_windows_installer.ps1 -Installer dist/releases/MultiSolid-0.1.0-windows-x64-setup.exe -ReleasePython $py -WorkArea build/release/installer-check
+./tools/test_windows_installer.ps1 -Installer dist/releases/MultiSolid-0.2.0-windows-x64-setup.exe -ReleasePython $py -WorkArea build/release/installer-check
 ```
 
 The installer test requires a new workspace directory and no existing registered

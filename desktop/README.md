@@ -46,7 +46,8 @@ The Chemistry graph uses a separate Graphviz `neato` runtime. See
    The folder is created on submission; existing folders cannot be overwritten
    or merged. Opening a project resumes it in place.
 2. Inside the project, use **New Case** to start from an empty draft in **Feed** mode with a repeating
-   program and relative tolerance `1e-5`. **Import Case** copies a `run.yaml` and its referenced inputs
+   program and the [tested Compiled/band solver defaults](COMPILED.md#new-case-defaults), including
+   relative tolerance `1e-7`. **Import Case** copies a `run.yaml` and its referenced inputs
    into this project, preserving the original files.
 3. Project actions are in the top **Project** menu. Each case row shows its name,
    input readiness, latest result, and icon actions: **Run**, **Duplicate**, **Edit**,

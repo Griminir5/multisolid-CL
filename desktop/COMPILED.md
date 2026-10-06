@@ -1,7 +1,37 @@
 # Managed compiled execution
 
-Select **Compiled** and a linear solver in General, then Run normally. Standard
-and Compiled both expose KLU. Standard/SuperLU remains the new-case default.
+New cases start with **Compiled / band** and the complete tested profile below.
+Select a backend and linear solver in General, then Run normally. Standard
+and Compiled both expose KLU.
+
+## New-case defaults
+
+The 29 September 2026 solver study selected this complete profile for new cases:
+
+```yaml
+solver:
+  backend: compiled
+  name: band
+  threads: 1
+  relative_tolerance: 1.0e-7
+  concentration_absolute_tolerance: 1.0e-11
+  max_nonlinear_iterations: 20
+  nonlinear_convergence_coefficient: 0.1
+  maximum_order: 3
+  scale_residuals: true
+  step_growth_threshold: 1.25
+  nonlinear_refresh_interval: 4
+  suppress_algebraic_errors: false
+  vector_exponentials: false
+  band_reciprocals: false
+```
+
+New drafts save every value explicitly. Imported, reopened, duplicated and
+study-derived cases retain their existing settings; omitted fields in older
+files keep their historical loader defaults. CLI users can use this solver
+section in a case file. Advanced settings remain editable in General.
+
+## Available solvers and runtime
 
 Standard also offers dense LAPACK, AztecOO with ILUT,
 Ifpack ILU or ML, and SUNDIALS GMRES with Ifpack ILU. These use the existing

@@ -85,6 +85,7 @@ def check(destination):
             resolve_documents(documents)
             passed("both program modes without example files")
             from packed_bed_ui.project import Project, read_json
+            from packed_bed.file_io import retry_file_operation
             from packed_bed.reports import load_dataset
             project = Project.create(destination / "Project with spaces \u03b1", "Release check")
             for backend, name in (("daetools", "superlu"), ("compiled", "superlu"),
@@ -146,7 +147,7 @@ def check(destination):
                 try:
                     deadline = time.monotonic() + 60
                     while time.monotonic() < deadline and process.poll() is None:
-                        state = read_json(job)
+                        state = retry_file_operation(read_json, job)
                         if state["state"] == "running":
                             (job.parent / (".cancel-" + state["attempt_id"])).touch()
                             break

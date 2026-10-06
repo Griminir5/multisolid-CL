@@ -60,6 +60,25 @@ def _small_reactive_case(tmp_path, backend, gas_voidage_mode="bed_and_particle")
     )
 
 
+def test_new_case_defaults_complete_reactive_run(native_tools, tmp_path, monkeypatch):
+    from packed_bed.config.models import SolverConfig
+    from packed_bed.reports import load_dataset
+    from packed_bed.simulation import run_case
+
+    monkeypatch.setenv("PACKED_BED_COMPILED_CACHE", str(tmp_path / "cache"))
+    case = _small_reactive_case(tmp_path, "compiled")
+    case = replace(case, run=case.run.model_copy(update={"solver": SolverConfig.for_new_case()}))
+    result = run_case(case)
+    assert result.status == "success"
+    assert result.solver_stats["linear_solver"] == "band"
+    assert result.solver_stats["row_scaling"] != "none"
+    actual = load_dataset(result.results_path)
+    assert actual.time.values[-1] == 100.0
+    assert all(bool(np.isfinite(value).all()) for value in actual.data_vars.values())
+    assert float(abs(actual.temperature - actual.temperature.isel(time=0)).max()) > 1.0
+    assert float(abs(actual.heat_balance_error).max()) < 0.01
+
+
 @pytest.mark.parametrize("linear_solver, gas_voidage_mode", (("superlu", "bed_and_particle"), ("klu", "bed_and_particle"), ("band", "bed_only")))
 def test_reactive_run_reports_cache_and_tight_reference(
     native_tools, tmp_path, monkeypatch, linear_solver, gas_voidage_mode

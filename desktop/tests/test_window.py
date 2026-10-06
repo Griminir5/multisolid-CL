@@ -36,7 +36,7 @@ def test_window_opens_on_welcome_then_project_case_list(qt_app, tmp_path, source
     window.close()
 
 
-def test_new_case_starts_empty_with_feed_repeat_and_tolerance_defaults(qt_app, tmp_path, monkeypatch):
+def test_new_case_starts_empty_with_feed_repeat_and_tested_solver_defaults(qt_app, tmp_path, monkeypatch):
     from PyQt6.QtWidgets import QComboBox, QDialog, QLineEdit
     from packed_bed_ui.window import MainWindow
 
@@ -51,7 +51,18 @@ def test_new_case_starts_empty_with_feed_repeat_and_tolerance_defaults(qt_app, t
     window._new_case()
     case, = project.cases
     assert case.name == "Fresh"
-    assert case.documents["run"]["solver"]["relative_tolerance"] == 1e-5
+    expected_solver = {
+        "backend": "compiled", "name": "band", "threads": 1,
+        "relative_tolerance": 1e-7, "concentration_absolute_tolerance": 1e-11,
+        "max_nonlinear_iterations": 20, "nonlinear_convergence_coefficient": 0.1,
+        "maximum_order": 3, "scale_residuals": True, "step_growth_threshold": 1.25,
+        "nonlinear_refresh_interval": 4, "suppress_algebraic_errors": False,
+        "vector_exponentials": False, "band_reciprocals": False,
+    }
+    assert case.documents["run"]["solver"] == expected_solver
+    assert window.editor.general.backend.currentData() == "compiled"
+    assert window.editor.general.solver.currentData() == "band"
+    assert window.editor.fields[("solver", "relative_tolerance")].text() == "1e-07"
     assert case.documents["run"]["simulation"]["repeat_program"] is True
     assert case.documents["run"]["simulation"]["program_mode"] == "feed_stream"
     assert window.editor.program.mode.currentData() == "feed_stream"
@@ -64,6 +75,7 @@ def test_new_case_starts_empty_with_feed_repeat_and_tolerance_defaults(qt_app, t
     assert top.widget(1).title() == "Material zones"
     window.close()
     reopened = Project.open(project.root).cases[0]
+    assert reopened.documents["run"]["solver"] == expected_solver
     assert reopened.documents["run"]["simulation"]["program_mode"] == "feed_stream"
 
 

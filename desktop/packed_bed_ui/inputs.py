@@ -8,7 +8,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from packed_bed.config.load import inspect_case
-from packed_bed.config.models import ModelConfig, SimulationConfig
+from packed_bed.config.models import ModelConfig, SimulationConfig, SolverConfig
 
 
 BED_RUN_FIELDS = {
@@ -26,7 +26,7 @@ def empty_documents(case_id):
                            "reporting_interval_s": 1.0, "mass_scheme": "weno3", "heat_scheme": "weno3",
                            "report_time_derivatives": False, "repeat_program": True, "program_mode": "feed_stream"},
             "model": {"axial_cells": 20},
-            "solver": {"backend": "daetools", "name": "superlu", "threads": 1, "relative_tolerance": 1e-5},
+            "solver": SolverConfig.for_new_case().model_dump(),
             "outputs": {"requested_reports": [], "requested_plots": []},
         },
         "chemistry": {"gas_species": [], "reaction_families": [], "reaction_ids": []},

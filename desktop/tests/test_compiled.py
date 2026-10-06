@@ -55,6 +55,37 @@ def test_klu_choice_preserves_documents(compiled_editor):
     assert not editor.dirty
 
 
+def test_new_case_profile_survives_reopen_and_standard_switch(compiled_editor, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+    from packed_bed.config.models import SolverConfig
+    from packed_bed_ui.inputs import empty_documents
+
+    editor, case = compiled_editor
+    settings = empty_documents(case.id)["run"]["solver"]
+    case.documents["run"]["solver"] = settings
+    editor.set_case(case)
+    assert case.resolve().run.solver == SolverConfig.for_new_case()
+    case.save()
+    reopened = Project.open(case.project.root).cases[0]
+    assert reopened.resolve().run.solver == SolverConfig.for_new_case()
+    duplicate = case.project.duplicate_case(case, "Copy")
+    assert duplicate.documents["run"]["solver"] == settings
+
+    before = deepcopy(case.documents)
+    backend = editor.general.backend
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Cancel)
+    backend.setCurrentIndex(backend.findData("daetools"))
+    assert case.documents == before
+    assert backend.currentData() == "compiled"
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Ok)
+    backend.setCurrentIndex(backend.findData("daetools"))
+    standard = case.resolve().run.solver
+    expected = dict(before["run"]["solver"], backend="daetools", name="superlu", scale_residuals=False,
+                    step_growth_threshold=2.0, nonlinear_refresh_interval=0)
+    assert standard.model_dump() == expected
+
+
 @pytest.mark.parametrize("name", (
     "trilinos_lapack", "trilinos_aztecoo",
     "trilinos_aztecoo_ifpack", "trilinos_aztecoo_ml", "sundials_gmres_ifpack",
