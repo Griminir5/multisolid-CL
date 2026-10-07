@@ -75,11 +75,19 @@ class CaseDocuments:
 class CaseInputs(CaseDocuments):
     selection: object
 
+    @property
+    def solid_molecular_weights(self) -> dict[str, float]:
+        return {name: self.selection.species[name]["definition"]["mw"] for name in self.solids.solid_species}
+
 
 @dataclass(frozen=True, kw_only=True)
 class Case(CaseDocuments):
     """The complete runtime handoff. Construct executable definitions in a worker."""
     definitions: DefinitionEnvironment
+
+    @property
+    def solid_molecular_weights(self) -> dict[str, float]:
+        return {name: self.definitions.properties.get_record(name).mw for name in self.solids.solid_species}
 
 
 def load_case(run_yaml_path: str | Path, *, definitions=None, catalogue=None, approved=()) -> Case:

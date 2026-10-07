@@ -4,7 +4,7 @@ from copy import deepcopy
 
 from PyQt6.QtCore import Qt, QSignalBlocker, QRect
 from PyQt6.QtGui import QColor, QFontMetrics, QPalette
-from PyQt6.QtWidgets import QApplication, QStyle, QStyleOptionViewItem, QSplitter, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QStyle, QStyleOptionViewItem, QSplitter, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QMessageBox, QVBoxLayout, QWidget
 
 from .editor_widgets import DraftDelegate, Preview, action_button, cell, display, number, table, table_action
 from .general import form_panel
@@ -92,9 +92,15 @@ class BedPage(QWidget):
         self.settings_split.setChildrenCollapsible(False)
         group = QGroupBox("Material zones")
         zones_layout = QVBoxLayout(group)
-        self.units = QLabel()
-        self.units.setWordWrap(True)
-        zones_layout.addWidget(self.units)
+        units_form = QFormLayout()
+        units_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
+        self.concentration_unit = editor.field(
+            units_form, ("solids", "initial_profile", "concentration_unit"), "Concentration units",
+            options=[("mol/m³", "mol_per_m3"), ("kg/m³", "kg_per_m3")], default="mol_per_m3", binary=True,
+        )
+        self.concentration_unit.setToolTip("Units of the entered concentrations. Changing units does not convert the values.")
+        self.concentration_unit.currentIndexChanged.connect(lambda: self.update_units())
+        zones_layout.addLayout(units_form)
         self.zones = table([])
         self.zones.setItemDelegate(ZoneDelegate(self.zones))
         self.zones.itemChanged.connect(self.edit_zone)
@@ -133,12 +139,15 @@ class BedPage(QWidget):
         self.load_zones()
 
     def update_units(self):
-        basis = self.editor.get(("solids", "initial_profile", "basis"), "bed")
-        self.units.setText(f"Voidages as fractions · solids: mol/m³ {basis} above, zone wt% below")
+        if not self.editor.loading and not self.loading:
+            self.update_weight_percentages()
+
+    def concentration_unit_label(self):
+        unit = self.editor.get(("solids", "initial_profile", "concentration_unit"), "mol_per_m3")
+        return {"mol_per_m3": "mol/m³", "kg_per_m3": "kg/m³"}.get(unit, str(unit))
 
     def load_zones(self):
         self.loading = True
-        self.update_units()
         self.species = self.editor.get(("solids", "solid_species"), [])
         self.columns = ["x_start_m", "x_end_m", "e_b", "e_p", "d_p"] + list(self.species)
         self.zones.clearSpans()
@@ -188,11 +197,13 @@ class BedPage(QWidget):
                 except ValueError:
                     pass  # Missing definitions display an undefined percentage.
         basis = self.editor.get(("solids", "initial_profile", "basis"), "bed")
+        concentration_unit = self.editor.get(("solids", "initial_profile", "concentration_unit"), "mol_per_m3")
+        unit = self.concentration_unit_label()
         zones = self.editor.get(("solids", "initial_profile", "zones"), [])
         with QSignalBlocker(self.zones), QSignalBlocker(self.zones.model()):
             for row, zone in enumerate(zones):
                 values = {name: zone.get("values", {}).get(name) for name in species}
-                percentages = zone_weight_percentages(values, self.molecular_weights)
+                percentages = zone_weight_percentages(values, self.molecular_weights, concentration_unit=concentration_unit)
                 for column, name in enumerate(species, start=5):
                     item = self.zones.item(row, column)
                     if item is None:
@@ -201,10 +212,11 @@ class BedPage(QWidget):
                     value = "—" if percent is None else "<0.1" if 0 < percent < .05 else f"{percent:.1f}"
                     annotation = value + " wt%"
                     item.setData(WEIGHT_PERCENT_ROLE, annotation)
-                    description = f"{name}: {item.text()} mol/m³ {basis}; {annotation} of initial solids in this zone."
+                    description = f"{name}: {item.text()} {unit} {basis}; {annotation} of initial solids in this zone."
                     item.setData(Qt.ItemDataRole.AccessibleTextRole, description)
                     item.setToolTip(description + ("\nComplete this zone's concentrations and material definitions."
-                                                   if percent is None else "\nCalculated from concentrations and molecular weights."))
+                                                   if percent is None else "\nCalculated from mass concentrations."
+                                                   if concentration_unit == "kg_per_m3" else "\nCalculated from concentrations and molecular weights."))
         self.zones.viewport().update()
 
     def anchor_zones(self):

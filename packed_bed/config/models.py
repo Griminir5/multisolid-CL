@@ -348,6 +348,9 @@ SolidZones = Annotated[
 
 class SolidProfileConfig(ConfigModel):
     basis: Literal["solid", "bed"]
+    # TODO: When perovskites are implemented, require mol_per_m3 whenever any
+    # selected solid is a perovskite; mass concentration must not be allowed.
+    concentration_unit: Literal["mol_per_m3", "kg_per_m3"] = "mol_per_m3"
     zones: SolidZones
 
 

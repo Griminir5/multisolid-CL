@@ -163,6 +163,23 @@ def test_unknown_gas_voidage_mode_is_rejected(tmp_path):
         load_case(_write_case(tmp_path, documents))
 
 
+@pytest.mark.parametrize("unit", (None, "mol_per_m3", "kg_per_m3"))
+def test_solid_concentration_unit_defaults_and_round_trips(tmp_path, unit):
+    documents = _case_documents()
+    if unit is not None:
+        documents["solids.yaml"]["initial_profile"]["concentration_unit"] = unit
+    case = load_case(_write_case(tmp_path, documents))
+    assert case.solids.initial_profile.concentration_unit == (unit or "mol_per_m3")
+    assert case.solids.model_dump()["initial_profile"]["concentration_unit"] == (unit or "mol_per_m3")
+
+
+def test_unknown_solid_concentration_unit_is_rejected(tmp_path):
+    documents = _case_documents()
+    documents["solids.yaml"]["initial_profile"]["concentration_unit"] = "g_per_m3"
+    with pytest.raises(PackedBedValidationError, match="concentration_unit"):
+        load_case(_write_case(tmp_path, documents))
+
+
 @pytest.mark.parametrize("backend", ("daetools", "compiled"))
 @pytest.mark.parametrize("name", ("superlu_mt", "trilinos_umfpack", "intel_pardiso", "trilinos_klu"))
 def test_removed_solvers_are_rejected_without_substitution(tmp_path, backend, name):

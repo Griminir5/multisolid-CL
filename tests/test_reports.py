@@ -372,16 +372,25 @@ def test_empty_report_selection_writes_only_scheduled_time(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize("mode, expected_gas_fraction", [("bed_only", 0.4), ("bed_and_particle", 0.7)])
-def test_initial_profile_artifact_uses_selected_gas_voidage(tmp_path, monkeypatch, mode, expected_gas_fraction):
+@pytest.mark.parametrize("unit", ("mol_per_m3", "kg_per_m3"))
+def test_initial_profile_artifact_uses_selected_gas_voidage(tmp_path, monkeypatch, mode, expected_gas_fraction, unit):
     from packed_bed.artifacts import render_initial_solid_profile
     from packed_bed.plotting.definitions import save_figure
 
     case, _process = _synthetic_case_and_process(tmp_path)
     model = case.run.model.model_copy(update={"gas_voidage_mode": mode})
     case = replace(case, run=case.run.model_copy(update={"model": model}))
+    profile = case.solids.initial_profile.model_copy(update={"concentration_unit": unit})
+    case = replace(case, solids=case.solids.model_copy(update={"initial_profile": profile}))
     rendered_fractions = {}
 
     def capture_fractions(figure, path):
+        assert figure.axes[0].get_ylabel() == ("kg/m^3 bed" if unit == "kg_per_m3" else "mol/m^3 bed")
+        for patch, name in zip(figure.axes[1].patches, case.solids.solid_species):
+            expected = profile.zones[0].values[name]
+            if unit == "kg_per_m3":
+                expected /= case.solid_molecular_weights[name]
+            np.testing.assert_allclose(patch.get_data().values, expected)
         for patch in figure.axes[2].patches:
             rendered_fractions[patch.get_label()] = patch.get_data().values.copy()
         save_figure(figure, path)

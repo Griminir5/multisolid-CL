@@ -101,6 +101,15 @@ Use kelvin, pascals, metres, seconds, and mol/s unless a field specifies another
 Each composition must include every selected gas species. The mole fractions must sum to 1.
 Solid zones must cover the bed without gaps or overlaps.
 
+Solid concentrations default to mol/m³. To enter mass concentrations, set
+`initial_profile.concentration_unit: kg_per_m3` in `solids.yaml`, or select
+**kg/m³** under **Bed → Concentration units** in the desktop editor. The existing
+`basis: bed` or `basis: solid` selects the volume in either case. The unit applies
+to every zone's `values`; changing the selector leaves the entered numbers as they
+are. Mass inputs are divided by each selected species' molecular weight (kg/mol)
+to obtain mol/m³ internally. For `basis: solid`, the usual solid-volume fraction
+is then applied. Simulation results and the bed preview remain in mol/m³ of bed.
+
 `model.gas_voidage_mode` selects the gas storage volume used for concentrations
 in mol/m³ of bed:
 

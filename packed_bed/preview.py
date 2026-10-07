@@ -45,7 +45,9 @@ def preview_case(case: Case) -> CasePreview:
     )
     values = [_series_from_smoothed_program(p, times, smooth_ramp_width_s=width) for p in programs]
     centers, faces = build_uniform_axial_grid(case.run.model.bed_length_m, case.run.model.axial_cells)
-    e_b, e_p, concentrations = build_cell_profiles(case.solids, centers)
+    e_b, e_p, concentrations = build_cell_profiles(
+        case.solids, centers, molecular_weights=case.solid_molecular_weights,
+    )
     return CasePreview(
         time_s=times,
         flow_mol_s=values[0],

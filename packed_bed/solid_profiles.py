@@ -22,8 +22,8 @@ def zone_edges(solids_config):
     )
 
 
-def build_cell_profiles(solids_config, cell_centers_m):
-    """Assign each cell's voidages and bed-volume solid concentrations together."""
+def build_cell_profiles(solids_config, cell_centers_m, *, molecular_weights=None):
+    """Assign voidages and solid concentrations in mol/m³ bed; weights are kg/mol."""
 
     cell_centers_m = np.asarray(cell_centers_m, dtype=float)
     solid_species = solids_config.solid_species
@@ -52,6 +52,14 @@ def build_cell_profiles(solids_config, cell_centers_m):
 
     if cell_centers_m.size and not np.all(assigned):
         raise ValueError("Solid profile zones did not cover every cell center.")
+
+    if solids_config.initial_profile.concentration_unit == "kg_per_m3":
+        if molecular_weights is None:
+            raise ValueError("Mass concentrations require molecular weights in kg/mol.")
+        weights = np.asarray([molecular_weights[name] for name in solid_species], dtype=float)
+        if not np.all(np.isfinite(weights) & (weights > 0)):
+            raise ValueError("Solid molecular weights must be finite and positive.")
+        profile /= weights[:, np.newaxis]
 
     if solids_config.initial_profile.basis == "solid":
         profile *= solid_fraction_from_voidages(e_b, e_p)[np.newaxis, :]

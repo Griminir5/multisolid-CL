@@ -83,3 +83,16 @@ def test_zone_weight_percentages_use_each_composition_and_molecular_weights(valu
 def test_zone_weight_percentages_never_show_a_partial_or_zero_mass_denominator(values, weights):
     from packed_bed_ui.inputs import zone_weight_percentages
     assert zone_weight_percentages(values, weights) == dict.fromkeys(values)
+
+
+@pytest.mark.parametrize('values,expected', [
+    ({'Ni': 10, 'oxide': 2}, {'Ni': 1000 / 12, 'oxide': 200 / 12}),
+    ({'Ni': 0, 'oxide': 2}, {'Ni': 0, 'oxide': 100}),
+    ({'Ni': 0, 'oxide': 0}, {'Ni': None, 'oxide': None}),
+    ({'Ni': '1e-', 'oxide': 2}, {'Ni': None, 'oxide': None}),
+    ({'Ni': -1, 'oxide': 2}, {'Ni': None, 'oxide': None}),
+    ({'Ni': float('inf'), 'oxide': 2}, {'Ni': None, 'oxide': None}),
+])
+def test_mass_concentration_weight_percentages(values, expected):
+    from packed_bed_ui.inputs import zone_weight_percentages
+    assert zone_weight_percentages(values, {}, concentration_unit='kg_per_m3') == pytest.approx(expected)

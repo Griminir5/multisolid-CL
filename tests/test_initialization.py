@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import fields
 from pathlib import Path
 
 import numpy as np
@@ -79,6 +80,39 @@ def test_gas_storage_mode_changes_only_gas_inventory_and_its_energy(tmp_path):
     cell_volume = 3.14159*.01**2*np.diff(bed.face_coordinates_m)
     assert pores.bed_mass_kg-bed.bed_mass_kg == pytest.approx(float(np.sum(removed_gas[0]*PROPERTY_REGISTRY.get_record("N2").mw*cell_volume)))
     assert pores.bed_heat_j-bed.bed_heat_j == pytest.approx(float(np.sum((removed_gas.T @ bed.gas_enthalpy_j_mol)*cell_volume)))
+
+
+@pytest.mark.parametrize("basis", ("bed", "solid"))
+def test_mass_inputs_match_molar_initial_state_and_metadata_preview(tmp_path, basis):
+    from packed_bed.config.load import inspect_case_file
+    from packed_bed.preview import preview_case
+
+    documents = _case_documents()
+    documents["run.yaml"]["model"]["axial_cells"] = 4
+    documents["solids.yaml"]["solid_species"] = ["oxide", "Ni"]
+    documents["chemistry.yaml"]["species_definitions"] = {"oxide": "builtin:NiO"}
+    profile = documents["solids.yaml"]["initial_profile"]
+    profile["basis"] = basis
+    left = profile["zones"][0]
+    left.update(x_end_m=0.5, values={"Ni": 10.0, "oxide": 2.0})
+    profile["zones"].append(dict(left, x_start_m=0.5, x_end_m=1.0,
+                                 e_b=0.5, e_p=0.2, values={"Ni": 0.0, "oxide": 8.0}))
+    molar_case = load_case(_write_case(tmp_path, documents))
+    expected = calculate_initial_state(molar_case)
+
+    profile["concentration_unit"] = "kg_per_m3"
+    for zone in profile["zones"]:
+        zone["values"] = {name: value * molar_case.solid_molecular_weights[name]
+                          for name, value in zone["values"].items()}
+    run_path = _write_case(tmp_path, documents)
+    mass_case = load_case(run_path)
+    actual = calculate_initial_state(mass_case)
+    for field in fields(expected):
+        np.testing.assert_allclose(getattr(actual, field.name), getattr(expected, field.name), err_msg=field.name)
+    for case in (mass_case, inspect_case_file(run_path)):
+        np.testing.assert_allclose(preview_case(case).solid_concentrations_mol_m3_bed,
+                                   expected.solid_concentration_mol_m3)
+        assert case.solids.model_dump()["initial_profile"]["zones"][0]["values"] == profile["zones"][0]["values"]
 
 
 @pytest.mark.parametrize("basis, expected", (("bed", [1.0, 4.0]), ("solid", [0.3, 1.6])))

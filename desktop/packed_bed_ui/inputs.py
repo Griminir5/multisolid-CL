@@ -82,17 +82,21 @@ def resolve_documents(documents, catalogue=None):
                         **{f"{name}_data": value for name, value in documents.items()})
 
 
-def zone_weight_percentages(values, molecular_weights):
+def zone_weight_percentages(values, molecular_weights, *, concentration_unit="mol_per_m3"):
     """Mass fractions for one zone, without requiring the rest of a valid case.
 
     Zone volume and any common bed/solid volume conversion cancel in the ratio.
-    An incomplete concentration or missing material invalidates the whole denominator.
+    Molar inputs need molecular weights; mass inputs can be normalized directly.
+    An incomplete concentration invalidates the whole denominator.
     """
     unavailable = dict.fromkeys(values)
+    if concentration_unit not in ("mol_per_m3", "kg_per_m3"):
+        return unavailable
     try:
         masses = {}
         for name, value in values.items():
-            concentration, mw = float(value), float(molecular_weights[name])
+            concentration = float(value)
+            mw = 1.0 if concentration_unit == "kg_per_m3" else float(molecular_weights[name])
             if not math.isfinite(concentration) or concentration < 0 or not math.isfinite(mw) or mw <= 0:
                 return unavailable
             masses[name] = concentration * mw

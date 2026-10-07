@@ -682,3 +682,37 @@ def test_zone_weight_percentages_are_inline_live_and_preserve_drafts_and_saved_i
     editor.set_case(case, read_only=True)
     assert percentages(0) == ['0.0 wt%', '100.0 wt%']
     assert not zones.item(0, 5).flags() & Qt.ItemFlag.ItemIsEditable or not zones.editTriggers()
+
+
+def test_mass_concentration_selector_updates_percentages_preview_and_saved_units(qt_app, design, tmp_path, source_case):
+    from packed_bed_ui.bed import WEIGHT_PERCENT_ROLE
+    from packed_bed.properties import PROPERTY_REGISTRY
+
+    project = Project.create(tmp_path / 'project')
+    case = project.add_case_from_files(source_case)
+    case.documents['solids']['solid_species'].append('oxide')
+    case.documents['chemistry']['species_definitions'] = {'oxide': 'builtin:NiO'}
+    profile = case.documents['solids']['initial_profile']
+    profile['zones'][0]['values'] = {'Ni': 10, 'oxide': 2}
+    case.save()
+    editor = InputEditor()
+    original = deepcopy(case.documents)
+    editor.set_case(case)
+    assert case.documents == original
+    assert editor.bed.concentration_unit.currentData() == 'mol_per_m3'
+    select_value(editor.bed.concentration_unit, 'kg_per_m3')
+    assert profile['zones'][0]['values'] == {'Ni': 10, 'oxide': 2}
+    zones = editor.bed.zones
+    assert [zones.item(0, col).data(WEIGHT_PERCENT_ROLE) for col in (5, 6)] == ['83.3 wt%', '16.7 wt%']
+    assert 'kg/m³ solid' in zones.item(0, 5).toolTip()
+    assert editor.save()
+    for patch, name, value in zip(editor.bed.preview.figure.axes[0].patches, ('Ni', 'NiO'), (10, 2)):
+        np.testing.assert_allclose(patch.get_data().values, .3 * value / PROPERTY_REGISTRY.get_record(name).mw)
+    reopened = Project.open(project.root).cases[0]
+    assert reopened.documents['solids']['initial_profile']['concentration_unit'] == 'kg_per_m3'
+    editor.set_case(reopened, read_only=True)
+    assert editor.bed.concentration_unit.currentData() == 'kg_per_m3'
+    assert not editor.bed.concentration_unit.isEnabled()
+    editor.set_case(reopened)
+    select_value(editor.bed.concentration_unit, 'mol_per_m3')
+    assert [zones.item(0, col).data(WEIGHT_PERCENT_ROLE) for col in (5, 6)] == ['79.7 wt%', '20.3 wt%']

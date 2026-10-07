@@ -136,15 +136,15 @@ def render_initial_solid_profile(case: Case, output_dir) -> dict[str, Path]:
         case.run.model.axial_cells,
     )
     authored_edges = zone_edges(case.solids)
-    e_b, e_p, bed_basis_concentration = build_cell_profiles(case.solids, cell_centers)
+    e_b, e_p, bed_basis_concentration = build_cell_profiles(
+        case.solids, cell_centers, molecular_weights=case.solid_molecular_weights,
+    )
     gas_fraction = gas_fraction_from_voidages(e_b, e_p, mode=case.run.model.gas_voidage_mode)
     solid_fraction = solid_fraction_from_voidages(e_b, e_p)
     d_p = build_face_scalar_profile(case.solids, face_positions, "d_p")
 
-    unit_label = {
-        "solid": "mol/m^3 solid",
-        "bed": "mol/m^3 bed",
-    }.get(case.solids.initial_profile.basis, case.solids.initial_profile.basis)
+    unit = "kg/m^3" if case.solids.initial_profile.concentration_unit == "kg_per_m3" else "mol/m^3"
+    unit_label = f"{unit} {case.solids.initial_profile.basis}"
 
     figure, axes = plt.subplots(4, 1, figsize=(12, 15), sharex=True)
 

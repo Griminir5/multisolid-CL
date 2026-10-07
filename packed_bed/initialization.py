@@ -55,7 +55,7 @@ def calculate_initial_state(
     face_coordinates = np.linspace(0.0, case.run.model.bed_length_m, cell_count + 1)
     cell_coordinates = 0.5 * (face_coordinates[:-1] + face_coordinates[1:])
     interparticle_voidage, intraparticle_voidage, solid_concentration = build_cell_profiles(
-        case.solids, cell_coordinates
+        case.solids, cell_coordinates, molecular_weights=case.solid_molecular_weights
     )
     particle_diameter = build_face_scalar_profile(case.solids, face_coordinates, "d_p")
     gas_fraction = gas_fraction_from_voidages(
