@@ -226,11 +226,7 @@ QToolButton:checked { background: @selected; }
 QPushButton[segment="true"] { spacing: 0; padding: 5px 8px; font-weight: 600; }
 QPushButton[segment="true"]:checked { background: #d9f36d; color: #242720; border-color: @contrastBorder; }
 QPushButton[role="welcomeAction"] { font-size: 13px; padding: 6px 7px; }
-QLabel#artCaption { color: #b7c0a2; font-size: 11px; }
 QWidget#animationPane { background: #242720; }
-QPushButton[role="artControl"] { background: #242720; color: #f1f0e8; border-color: #858978; font-size: 13px; }
-QPushButton[role="artControl"]:hover { background: #343a2c; }
-QPushButton[role="artControl"]:focus { border-color: #8dcaf2; }
 QPushButton[primary="true"], QPushButton[role="primary"] { background: #d9f36d; color: #242720; border-color: #242720; font-weight: 700; }
 QPushButton[primary="true"]:hover, QPushButton[role="primary"]:hover { background: #e4fc91; }
 QPushButton:disabled, QToolButton:disabled { color: @disabled; border-color: @line; background: @alternate; }

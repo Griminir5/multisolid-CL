@@ -1,10 +1,10 @@
-"""A slow, pausable identity animation; never a calculated process preview."""
+"""A slow identity animation; never a calculated process preview."""
 
 from functools import lru_cache
 from math import cos, floor, pi, sin
 from random import Random
 
-from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, QTimer
 from PyQt6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
@@ -53,22 +53,18 @@ class CycleEmblem(QWidget):
 
     Three phase offsets evoke cyclic operation without prescribing reactor
     connections, products or calculated conversion fronts. Time advances only
-    while visible and playing; the user's pause preference survives relaunches.
+    while visible.
     """
 
-    pausedChanged = pyqtSignal(bool)
     SUPER_CYCLE_SECONDS = 720
     SWEEPS = 30
     PERIOD_SECONDS = 48
     HELIX_ROTATION_SECONDS = 36
     HELIX_TURNS = 1 / 6
     COPPER = "#d79a72"
-    PAUSE_KEY = "appearance/pause_welcome_animation"
 
-    def __init__(self, parent=None, *, settings=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.settings = settings
-        self.paused = settings.value(self.PAUSE_KEY, False, type=bool) if settings is not None else False
         self._seconds = 0.0
         self._clock = QElapsedTimer()
         self.timer = QTimer(self)
@@ -88,7 +84,7 @@ class CycleEmblem(QWidget):
         return self._seconds + (self._clock.elapsed() / 1000 if self._clock.isValid() else 0)
 
     def _start(self):
-        if not self.paused and self.isVisible() and not self.timer.isActive():
+        if self.isVisible() and not self.timer.isActive():
             self._clock.start()
             self.timer.start()
 
@@ -96,15 +92,6 @@ class CycleEmblem(QWidget):
         self._seconds = self.seconds
         self._clock.invalidate()
         self.timer.stop()
-
-    def set_paused(self, paused):
-        self._stop()
-        self.paused = bool(paused)
-        if self.settings is not None:
-            self.settings.setValue(self.PAUSE_KEY, self.paused)
-        self.pausedChanged.emit(self.paused)
-        self._start()
-        self.update()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -225,7 +212,13 @@ class CycleEmblem(QWidget):
         font.setPixelSize(11)
         painter.setFont(font)
         painter.setPen(QColor("#b7c0a2"))
-        painter.drawText(22, 28, "OXIDATION / REDUCTION")
+        # Labels frame the main diagonal; plus marks occupy the other corners.
+        labels = QRectF(22, 18, width - 44, height - 36)
+        painter.drawText(labels, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+                         "OXIDATION / REDUCTION")
+        painter.drawText(labels, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom,
+                         "CHEMICAL LOOPING")
         painter.setPen(QPen(QColor(ACID), 1))
-        painter.drawLine(width - 29, 23, width - 19, 23)
-        painter.drawLine(width - 24, 18, width - 24, 28)
+        for x, y in ((width - 24, 23), (24, height - 23)):
+            painter.drawLine(x - 5, y, x + 5, y)
+            painter.drawLine(x, y - 5, x, y + 5)

@@ -54,7 +54,7 @@ class MainWindow(QMainWindow):
         welcome_content = QVBoxLayout(content)
         welcome_content.setContentsMargins(24, 24, 24, 16)
         welcome_content.setSpacing(16)
-        self.hero = WelcomeHero(self._new_project, self._open, self._import_archive, self.locations.settings)
+        self.hero = WelcomeHero(self._new_project, self._open, self._import_archive)
         welcome_content.addWidget(self.hero, 2)
         welcome_content.addWidget(themed_label("Recent projects", "section"))
         self.recent_list = QTreeWidget()

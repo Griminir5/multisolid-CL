@@ -3,7 +3,7 @@ from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from .theme import manager, colors
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QMenuBar, QPushButton, QVBoxLayout, QWidget
-from .theme import label, numeric
+from .theme import label
 from .welcome_animation import CycleEmblem
 
 
@@ -67,7 +67,7 @@ class Masthead(QWidget):
 
 
 class WelcomeHero(QFrame):
-    def __init__(self, create, open_project, import_archive, settings):
+    def __init__(self, create, open_project, import_archive):
         super().__init__()
         self.setObjectName('welcomeHero')
         self.setMinimumHeight(330)
@@ -112,27 +112,9 @@ class WelcomeHero(QFrame):
         art = QVBoxLayout(self.art_pane)
         art.setContentsMargins(0, 0, 0, 0)
         art.setSpacing(0)
-        self.animation = CycleEmblem(settings=settings)
+        self.animation = CycleEmblem()
         art.addWidget(self.animation, 1)
-        art_footer = QHBoxLayout()
-        art_footer.setContentsMargins(20, 12, 16, 12)
-        caption = numeric(label('CHEMICAL LOOPING'), 11)
-        caption.setObjectName('artCaption')
-        art_footer.addWidget(caption)
-        art_footer.addStretch()
-        self.pause_button = QPushButton()
-        self.pause_button.setProperty('role', 'artControl')
-        self.pause_button.setFixedHeight(40)
-        self.pause_button.clicked.connect(lambda: self.animation.set_paused(not self.animation.paused))
-        self.animation.pausedChanged.connect(self.update_pause)
-        self.update_pause(self.animation.paused)
-        art_footer.addWidget(self.pause_button)
-        art.addLayout(art_footer)
         layout.addWidget(self.art_pane, 1)
-
-    def update_pause(self, paused):
-        self.pause_button.setText('Play animation' if paused else 'Pause animation')
-        self.pause_button.setAccessibleName(self.pause_button.text())
 
 
 def recent_empty():
