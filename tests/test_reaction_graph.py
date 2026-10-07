@@ -81,13 +81,15 @@ def test_example_and_large_network_have_svg_elements_for_all_nodes_and_edges(fam
         assert not groups[edge.id].findall('.//{*}text')
 
 
-def test_bundle_discovery_and_child_environment(monkeypatch, tmp_path):
+@pytest.mark.parametrize("plugin_file", ["config6", "config6a", "libgvplugin_core.so.6"])
+def test_bundle_discovery_and_child_environment(monkeypatch, tmp_path, plugin_file):
     root = tmp_path / "runtime with spaces"
     exe = root / "bin" / ("neato.exe" if rg.sys.platform == "win32" else "neato")
     exe.parent.mkdir(parents=True)
     exe.touch()
     (root / "lib" / "graphviz").mkdir(parents=True)
-    (root / "lib" / "graphviz" / "config6").touch()
+    # A newly staged Linux bundle has plugins before neato -c creates its cache.
+    (root / "lib" / "graphviz" / plugin_file).touch()
     monkeypatch.setattr(rg, "_bundle_roots", lambda: [root])
     monkeypatch.setenv("MULTISOLID_GRAPHVIZ", "/does/not/exist")
     monkeypatch.setenv("GVBINDIR", "host-plugin-path")

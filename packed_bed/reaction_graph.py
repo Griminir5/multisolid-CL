@@ -159,8 +159,14 @@ class GraphvizCommand:
             ):
                 env[name] = os.pathsep.join([*(str(p) for p in paths), env.get(name, "")])
             plugins = self.bundle / "lib" / "graphviz"
-            # Windows distributions keep plugins and config beside the executables.
-            env["GVBINDIR"] = str(plugins if (plugins / "config6").is_file() else self.bundle / "bin")
+            # Linux uses config6 or config6a; during staging, only the libraries
+            # exist until neato -c creates the cache. Windows keeps plugins in
+            # bin and may have an unrelated lib/graphviz/tcl support directory.
+            has_plugins = (
+                any((plugins / name).is_file() for name in ("config6", "config6a"))
+                or any(path.is_file() for path in plugins.glob("libgvplugin_*.so*"))
+            )
+            env["GVBINDIR"] = str(plugins if has_plugins else self.bundle / "bin")
             fonts = self.bundle / "etc" / "fonts" / "fonts.conf"
             if fonts.is_file():
                 env["FONTCONFIG_FILE"] = str(fonts)
