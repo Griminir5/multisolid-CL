@@ -34,8 +34,8 @@ packed-bed-ui
 as an optional argument to open it directly. Opening projects and generating
 previews do not need DAETools. Execution needs DAETools with SuperLU.
 The Chemistry graph uses a separate Graphviz `neato` runtime. See
-[Graphviz setup and bundling](GRAPHVIZ.md); source development can also use
-`neato` on `PATH` or the `MULTISOLID_GRAPHVIZ` executable override.
+[Graphviz setup and bundling](BUILD_WINDOWS.md#graphviz-runtime); source development
+can also use `neato` on `PATH` or the `MULTISOLID_GRAPHVIZ` executable override.
 
 ## Use the starter
 
@@ -46,7 +46,7 @@ The Chemistry graph uses a separate Graphviz `neato` runtime. See
    The folder is created on submission; existing folders cannot be overwritten
    or merged. Opening a project resumes it in place.
 2. Inside the project, use **New Case** to start from an empty draft in **Feed** mode with a repeating
-   program and the [tested Compiled/band solver defaults](COMPILED.md#new-case-defaults), including
+   program and the Compiled/band solver defaults, including
    relative tolerance `1e-7`. **Import Case** copies a `run.yaml` and its referenced inputs
    into this project, preserving the original files.
 3. Project actions are in the top **Project** menu. Each case row shows its name,
@@ -137,7 +137,8 @@ generation, and compilation. Cancel stops workers and compiler children. The cac
 survives reruns, is excluded from project archives, and can be deleted while idle.
 A writable project is required. KLU factorization is serial on both backends.
 The packaged application supplies its compiler and libraries; source developers
-can stage the same bundle using the [compiled runtime guide](COMPILED.md).
+can stage the Windows bundle using the
+[compiled runtime guide](BUILD_WINDOWS.md#compiled-runtime).
 
 For a non-repeating program, the horizon is calculated from the longest channel
 and is disabled in General. Every non-empty channel must have the same duration;

@@ -17,7 +17,7 @@ function Run-Python {
     if ($LASTEXITCODE -ne 0) { throw "Release step failed with exit code $LASTEXITCODE" }
 }
 # Dependencies and both vendor bundles must first be prepared as documented in
-# desktop/WINDOWS_PACKAGING.md. Application wheels are always rebuilt here.
+# desktop/BUILD_WINDOWS.md. Application wheels are always rebuilt here.
 Run-Python tools/build_app_wheels.py
 $wheels = @('multisolid_cl', 'multisolid_cl_ui') | ForEach-Object {
     $wheelMatches = @(Get-ChildItem -LiteralPath 'build/release/wheels' -Filter "$_-*.whl")

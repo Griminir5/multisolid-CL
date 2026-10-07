@@ -42,5 +42,6 @@ those projects.
   Its applicable licence and all bundled native-library/font notices travel with
   the staged distribution. `tools/bundle_graphviz.py` retains these notices and
   records versions, source metadata and file hashes in `graphviz/bundle.json`.
-  See [Graphviz bundling](desktop/GRAPHVIZ.md) for the release layout and checks.
+  See [Graphviz bundling](desktop/BUILD_WINDOWS.md#graphviz-runtime) for Windows staging
+  and the [release layout and checks](desktop/BUILD_WINDOWS.md#freeze-validate-and-package).
 - VTK: BSD-3-Clause.

@@ -44,7 +44,8 @@ For the DAETools plotter, install the GUI dependencies with `python -m pip insta
 The system graph uses the separate Graphviz `neato` executable, shared with the
 desktop preview. For source development, install Graphviz on `PATH` or set
 `MULTISOLID_GRAPHVIZ` to the executable. No Python Graphviz binding is needed.
-See [bundling Graphviz](desktop/GRAPHVIZ.md) for staging the separate runtime.
+See [bundling Graphviz](desktop/BUILD_WINDOWS.md#graphviz-runtime) for staging the
+Windows runtime.
 
 **Validate a case.** Start with the [default case](packed_bed/examples/default_case/run.yaml).
 
@@ -211,9 +212,10 @@ Available schemes are `upwind1`, `central`, `linear_upwind2`, `muscl_minmod`, `w
 The default interior flow mode is `forward_only`.
 The `reversible` mode permits flow reversal at interior faces. It does not change the inlet and outlet boundary conditions.
 
-New desktop cases use the [tested Compiled/band profile](desktop/COMPILED.md#new-case-defaults):
+New desktop cases use the Compiled/band profile:
 one thread, relative tolerance `1e-7`, concentration absolute tolerance `1e-11`,
-maximum BDF order 3, and the complete advanced settings listed there.
+maximum BDF order 3, and the advanced defaults defined by `SolverConfig.for_new_case()`
+in [models.py](packed_bed/config/models.py).
 Those explicit settings can also be used in CLI case files.
 
 `solver.name` selects a linear solver from the registry in [simulation.py](packed_bed/simulation.py).
@@ -229,7 +231,8 @@ Compare important results with a stricter tolerance before you use a new solver 
 
 **Use the compiled CPU backend.** The desktop's managed distribution includes its
 compiler and native libraries for Linux x64 and Windows x64; see the
-[compiled runtime guide](desktop/COMPILED.md) for building that distribution.
+[Windows compiled runtime guide](desktop/BUILD_WINDOWS.md#compiled-runtime) for
+the Windows build instructions.
 For source/CLI use without a managed bundle, install the optional runtime with
 `python -m pip install -e ".[compiled]"` and a native C++17 compiler:
 
