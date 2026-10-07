@@ -246,6 +246,7 @@ def test_preview_cancellation_does_not_create_cases(qt_app, workspace_project):
 
 def test_definition_selection_and_library_share_save_cancel_and_duplicate(qt_app, workspace_project, monkeypatch):
     from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
     from PyQt6.QtWidgets import QDialog
     from packed_bed_ui.definition_editor import DefinitionDialog, DefinitionList
     project, _, study = workspace_project
@@ -269,11 +270,24 @@ def test_definition_selection_and_library_share_save_cancel_and_duplicate(qt_app
     picker.items.setCurrentRow(0)
     picker.manage("New")
     assert len(project.study_store.definitions) == 2
-    picker.items.item(0).setCheckState(Qt.CheckState.Unchecked)
+    picker.show()
+    qt_app.processEvents()
+    position = picker.items.visualItemRect(picker.items.item(0)).center()
+    QTest.mouseDClick(picker.items.viewport(), Qt.MouseButton.LeftButton, pos=position)
     assert original not in picker.checked()
     assert original in project.study_store.definitions
 
     library = DefinitionList(project.study_store, study.baseline, kind="bed")
+    edits = []
+    library.show()
+    qt_app.processEvents()
+    with monkeypatch.context() as patch:
+        patch.setattr(library, "manage", lambda action: edits.append(action))
+        QTest.mouseClick(library.items.viewport(), Qt.MouseButton.LeftButton,
+                        pos=library.items.visualItemRect(library.items.item(0)).center())
+        QTest.mouseDClick(library.items.viewport(), Qt.MouseButton.LeftButton,
+                         pos=library.items.visualItemRect(library.items.item(0)).center())
+    assert edits == ["Edit"]
     library.items.setCurrentRow(0)
     library.manage("Delete")
     assert len(project.study_store.definitions) == 1

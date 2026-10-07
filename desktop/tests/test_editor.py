@@ -128,6 +128,7 @@ def test_zero_step_program_has_zero_derived_horizon(editing):
 
 def test_report_selection_dialog_and_removal_persist(editing, qt_app):
     from PyQt6.QtCore import QTimer, Qt
+    from PyQt6.QtTest import QTest
     from PyQt6.QtWidgets import QListWidget
 
     editor, case = editing
@@ -137,7 +138,20 @@ def test_report_selection_dialog_and_removal_persist(editing, qt_app):
         for i in range(items.count()):
             item = items.item(i)
             if item.data(Qt.ItemDataRole.UserRole) in ("velocity", "gas_flux"):
-                item.setCheckState(Qt.CheckState.Checked)
+                items.scrollToItem(item)
+                position = items.visualItemRect(item).center()
+                QTest.mouseClick(items.viewport(), Qt.MouseButton.LeftButton, pos=position)
+                assert item.checkState() == Qt.CheckState.Unchecked
+                QTest.mouseDClick(items.viewport(), Qt.MouseButton.LeftButton, pos=position)
+                assert item.checkState() == Qt.CheckState.Checked
+                QTest.mouseDClick(items.viewport(), Qt.MouseButton.LeftButton, pos=position)
+                assert item.checkState() == Qt.CheckState.Unchecked
+                QTest.mouseDClick(items.viewport(), Qt.MouseButton.LeftButton, pos=position)
+            elif item.data(Qt.ItemDataRole.UserRole) == "pressure":
+                items.scrollToItem(item)
+                QTest.mouseDClick(items.viewport(), Qt.MouseButton.LeftButton,
+                                 pos=items.visualItemRect(item).center())
+                assert item.checkState() == Qt.CheckState.Checked
         dialog.accept()
     QTimer.singleShot(0, choose)
     editor.general.reports.add()
@@ -152,8 +166,9 @@ def test_report_selection_dialog_and_removal_persist(editing, qt_app):
     assert not editor.general.plots.show_buttons[0].isEnabled()
 
 
-def test_species_and_families_update_graph_and_dependent_drafts(editing, monkeypatch):
+def test_species_and_families_update_graph_and_dependent_drafts(editing, qt_app, monkeypatch):
     from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
     from packed_bed.kinetics import FAMILY_REGISTRY
 
     editor, case = editing
@@ -166,7 +181,12 @@ def test_species_and_families_update_graph_and_dependent_drafts(editing, monkeyp
     assert case.documents["solids"]["initial_profile"]["zones"][0]["values"]["NiO"] == ""
     root = editor.chemistry.families.topLevelItem(0)
     first_reaction = root.child(0).data(0, Qt.ItemDataRole.UserRole)
-    root.child(0).setCheckState(0, Qt.CheckState.Unchecked)
+    editor.tabs.setCurrentWidget(editor.chemistry)
+    editor.show()
+    qt_app.processEvents()
+    tree = editor.chemistry.families
+    position = tree.visualRect(tree.indexFromItem(root.child(0), 0)).center()
+    QTest.mouseDClick(tree.viewport(), Qt.MouseButton.LeftButton, pos=position)
     assert first_reaction not in case.documents["chemistry"]["reaction_ids"]
     assert editor.chemistry.graph.scene().items()
     editor.chemistry.remove_family("nickel_medrano")

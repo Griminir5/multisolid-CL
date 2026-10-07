@@ -5,13 +5,13 @@ from uuid import uuid4
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
-                             QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QScrollArea, QSizePolicy,
+                             QLabel, QLineEdit, QListWidgetItem, QMessageBox, QScrollArea, QSizePolicy,
                              QVBoxLayout, QWidget)
 
 from .catalogue_widgets import species_choices
 
 from .editor import InputEditor
-from .editor_widgets import SelectionList, action_button, choices, dialog_buttons, message, row
+from .editor_widgets import CheckableListWidget, SelectionList, action_button, choices, dialog_buttons, message, row
 from .inputs import apply_definition, definition_payload, empty_documents
 from .project import portable_documents
 from .studies import ReusableDefinition
@@ -151,8 +151,9 @@ class DefinitionList(QWidget):
         self.kind.setVisible(kind is None)
         self.kind.currentIndexChanged.connect(lambda: self.refresh())
         layout.addWidget(self.kind)
-        self.items = QListWidget()
-        self.items.itemDoubleClicked.connect(lambda _: self.manage("Edit"))
+        self.items = CheckableListWidget()
+        if not self.checkable:
+            self.items.itemDoubleClicked.connect(lambda _: self.manage("Edit"))
         layout.addWidget(self.items)
         actions = ("New", "Edit", "Duplicate") if self.checkable else ("New", "Edit", "Duplicate", "Delete")
         layout.addLayout(row(*(action_button(action, lambda _, action=action: self.manage(action)) for action in actions)))

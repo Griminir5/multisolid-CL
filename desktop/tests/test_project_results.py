@@ -288,7 +288,8 @@ def test_results_case_rows_preview_and_rerun_preserve_missing_selections(qt_app,
 
 def test_results_entry_cancel_and_success_only_selection(qt_app, runs, monkeypatch):
     from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import QDialogButtonBox, QHBoxLayout, QLineEdit, QPushButton
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QDialogButtonBox, QHBoxLayout, QLineEdit, QPushButton, QTreeWidget
     from packed_bed_ui.results import CaseSelectionDialog
     from packed_bed_ui.window import MainWindow
 
@@ -315,9 +316,24 @@ def test_results_entry_cancel_and_success_only_selection(qt_app, runs, monkeypat
     assert ok.isEnabled()
     buttons["Clear all"].click()
     assert not dialog.selected_cases()
-    dialog.items[a.id].parent().setCheckState(0, Qt.CheckState.Checked)
+    dialog.show()
+    qt_app.processEvents()
+    tree = dialog.findChild(QTreeWidget)
+    group = dialog.items[a.id].parent()
+    QTest.mouseDClick(tree.viewport(), Qt.MouseButton.LeftButton,
+                     pos=tree.visualRect(tree.indexFromItem(group, 0)).center())
     assert dialog.selected_cases() == [a.id]
+    assert group.isExpanded()
     assert dialog.items[failed.id].checkState(0) != Qt.CheckState.Checked
+    dialog.findChild(QLineEdit).clear()
+    qt_app.processEvents()
+    QTest.mouseDClick(tree.viewport(), Qt.MouseButton.LeftButton,
+                     pos=tree.visualRect(tree.indexFromItem(dialog.items[failed.id], 0)).center())
+    assert dialog.selected_cases() == [a.id]
+    position = tree.visualRect(tree.indexFromItem(dialog.items[a.id], 1)).center()
+    QTest.mouseDClick(tree.viewport(), Qt.MouseButton.LeftButton, pos=position)
+    assert not dialog.selected_cases()
+    assert not ok.isEnabled()
     dialog.close()
 
     # Restore ordinary case metadata before opening the full project.

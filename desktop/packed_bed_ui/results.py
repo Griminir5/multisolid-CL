@@ -10,11 +10,11 @@ import numpy as np
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+    QMessageBox, QTreeWidgetItem, QVBoxLayout,
 )
 
 from .case_list import result_label
-from .editor_widgets import action_button
+from .editor_widgets import CheckableTreeWidget, action_button
 from .report import ColumnsDialog, ExportDialog, ReportPage, TemplateDialog
 from .project import read_json, write_json
 from .project_results import (
@@ -39,7 +39,7 @@ class CaseSelectionDialog(QDialog):
                       "For a failed run's partial data, open that case's Report tab.")
         note.setWordWrap(True)
         layout.addWidget(note)
-        tree = QTreeWidget()
+        tree = CheckableTreeWidget()
         tree.setHeaderLabels(["Case / study", "Latest run"])
         tree.setColumnWidth(0, 380)
         layout.addWidget(tree)

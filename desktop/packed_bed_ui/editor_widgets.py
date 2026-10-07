@@ -13,7 +13,8 @@ from .validation import ISSUE_ROLE
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QGroupBox, QToolButton,
-    QSizePolicy, QStyledItemDelegate, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QSizePolicy, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableWidget, QTableWidgetItem,
+    QTreeWidget, QVBoxLayout, QWidget,
 )
 
 
@@ -193,6 +194,44 @@ def cell(widget, row, column, value, *, editable=True, tooltip="", numeric_value
     return item
 
 
+class _DoubleClickChecks:
+    """Toggle checkable rows while preserving ordinary checkbox clicks."""
+
+    def mouseDoubleClickEvent(self, event):
+        position = event.position().toPoint()
+        index = self.indexAt(position).siblingAtColumn(0)
+        flags = index.flags()
+        state = index.data(Qt.ItemDataRole.CheckStateRole)
+        if (event.button() == Qt.MouseButton.LeftButton and self.isEnabled()
+                and flags & Qt.ItemFlag.ItemIsEnabled
+                and flags & Qt.ItemFlag.ItemIsUserCheckable
+                and (state is not None or flags & Qt.ItemFlag.ItemIsAutoTristate)):
+            option = QStyleOptionViewItem()
+            option.initFrom(self)
+            option.rect = self.visualRect(index)
+            option.features = QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
+            option.checkState = Qt.CheckState(state) if state is not None else Qt.CheckState.Unchecked
+            check = self.style().subElementRect(QStyle.SubElement.SE_ItemViewItemCheckIndicator, option, self)
+            # Retain Qt's double-click/release handling without expanding tree groups.
+            QAbstractItemView.mouseDoubleClickEvent(self, event)
+            # The first click already toggles the checkbox itself. Only row text
+            # needs an additional toggle.
+            if state is None or not check.contains(position):
+                target = Qt.CheckState.Unchecked if option.checkState == Qt.CheckState.Checked else Qt.CheckState.Checked
+                self.model().setData(index, target.value, Qt.ItemDataRole.CheckStateRole)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
+class CheckableListWidget(_DoubleClickChecks, QListWidget):
+    """A list whose enabled checkboxes can also be toggled by double-clicking a row."""
+
+
+class CheckableTreeWidget(_DoubleClickChecks, QTreeWidget):
+    """A tree with row double-click toggles and normal expansion for non-checkable headings."""
+
+
 def choose_items(parent, title, catalog, selected):
     """Choose multiple additions without changing the existing selection."""
     dialog = QDialog(parent)
@@ -203,7 +242,7 @@ def choose_items(parent, title, catalog, selected):
     search.setPlaceholderText("Filter available items…")
     search.setAccessibleName("Filter available items")
     layout.addWidget(search)
-    items = QListWidget()
+    items = CheckableListWidget()
     for key, (label, description) in catalog.items():
         item = QListWidgetItem(label, items)
         item.setData(Qt.ItemDataRole.UserRole, key)

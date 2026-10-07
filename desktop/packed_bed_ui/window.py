@@ -67,7 +67,6 @@ class MainWindow(QMainWindow):
         self.recent_list.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.recent_list.header().setStretchLastSection(True)
         self.recent_list.headerItem().setToolTip(1, "Date and time in your local time zone.")
-        self.recent_list.itemClicked.connect(lambda item, _: self.open_project(item.data(0, Qt.ItemDataRole.UserRole)))
         self.recent_list.itemActivated.connect(lambda item, _: self.open_project(item.data(0, Qt.ItemDataRole.UserRole)))
         welcome_content.addWidget(self.recent_list, 1)
         self.recent_empty = recent_empty()

@@ -2,7 +2,7 @@
 
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import (
-    QSplitter, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QTreeWidget, QTreeWidgetItem,
+    QSplitter, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QTreeWidgetItem,
     QVBoxLayout, QWidget, QDialog, QFormLayout, QComboBox,
 )
 
@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from packed_bed.definitions import bound_reactions, resolve_bindings, binding_candidates
 from packed_bed.plugins.catalogue import builtin_manifest, split_ref
 
-from .editor_widgets import CollapsibleSection, SelectionList, action_button, choose_items, dialog_buttons
+from .editor_widgets import CheckableTreeWidget, CollapsibleSection, SelectionList, action_button, choose_items, dialog_buttons
 from .catalogue_widgets import species_choices, component_key, definition_details
 from .reaction_graph import NetworkView
 
@@ -46,7 +46,7 @@ class ChemistryPage(QWidget):
         group = CollapsibleSection("Reaction families")
         self.sections["reactions"] = group
         group_layout = group.content_layout
-        self.families = QTreeWidget()
+        self.families = CheckableTreeWidget()
         self.families.setColumnCount(4)
         self.families.setHeaderHidden(True)
         self.families.setMinimumHeight(100)

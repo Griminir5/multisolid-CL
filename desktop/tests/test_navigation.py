@@ -134,6 +134,8 @@ def test_recent_probes_do_not_block_ui_or_read_project_contents(qt_app, tmp_path
 
 
 def test_recency_changes_for_edits_and_execution_not_background_status(qt_app, saved_case, monkeypatch):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
     from packed_bed_ui.window import MainWindow
 
     window = MainWindow()
@@ -150,7 +152,14 @@ def test_recency_changes_for_edits_and_execution_not_background_status(qt_app, s
     assert window.locations.entries[0]["last_interaction"] > edited[0]["last_interaction"]
     window._close_project()
     assert window.cancel_button.isHidden()
-    window.recent_list.itemClicked.emit(window.recent_list.topLevelItem(0), 0)
+    window.show()
+    qt_app.processEvents()
+    recent = window.recent_list
+    position = recent.visualItemRect(recent.topLevelItem(0)).center()
+    QTest.mouseClick(recent.viewport(), Qt.MouseButton.LeftButton, pos=position)
+    assert window.project is None
+    assert window.pages.currentWidget() is window.welcome
+    QTest.mouseDClick(recent.viewport(), Qt.MouseButton.LeftButton, pos=position)
     assert window.project.root == saved_case.project.root
     assert window.project.metadata["cases"][0]["name"] == "Renamed"
     assert window.recent_menu.actions()[0].text().startswith(window.project.metadata["name"])
