@@ -18,6 +18,7 @@ from .axial_schemes import (
 from .config import Case
 from .initialization import CIRCLE_CONSTANT
 from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S, RatioProgram
+from .properties import wilke_mixture_viscosity
 from .reactions import KineticsContext, ReactionNetwork
 from pyUnits import J, K, Pa, kg, m, mol, s
 
@@ -174,7 +175,7 @@ class PackedBedModel(daeModel):
         self.Dax = daeVariable("Dax", dispersion_type, self, "Face axial dispersion coefficient", [self.x_faces])
         self.u_s = daeVariable("u_s", velocity_type, self, "Face superficial velocity", [self.x_faces])
         self.P = daeVariable("pres_bed", pres_type, self, "Pressure inside a cell", [self.x_centers])
-        self.mu_g = daeVariable("mu_g", viscosity_type, self, "Mole-averaged gas viscosity in a cell", [self.x_centers])
+        self.mu_g = daeVariable("mu_g", viscosity_type, self, "Wilke mixture gas viscosity in a cell", [self.x_centers])
         self.rho_g = daeVariable("rho_g", density_type, self, "Gas density in a cell", [self.x_centers])
 
         self.mass_in_total = self.mass_out_total = self.mass_bed_total = None
@@ -594,9 +595,11 @@ class PackedBedModel(daeModel):
 
         eq = self.CreateEquation("gas_mixture_viscosity")
         idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-        mu_mix_expr = Constant(0 * Pa * s)
-        for gas_idx, species_name in enumerate(self.gas_species):
-            mu_mix_expr = mu_mix_expr + self.y_gas(gas_idx, idx_cell) * self.property_registry.viscosity_expression(species_name, self.T(idx_cell))
+        mu_mix_expr = wilke_mixture_viscosity(
+            [self.y_gas(gas_idx, idx_cell) for gas_idx in range(len(self.gas_species))],
+            [self.property_registry.viscosity_expression(name, self.T(idx_cell)) for name in self.gas_species],
+            [self.property_registry.get_record(name).mw for name in self.gas_species],
+        )
         eq.Residual = self.mu_g(idx_cell) - mu_mix_expr
 
         eq = self.CreateEquation("gas_density_closure")

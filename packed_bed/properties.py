@@ -10,6 +10,36 @@ import numpy as np
 
 PolynomialCoefficients = tuple[float, ...]
 
+
+def wilke_mixture_viscosity(mole_fractions, viscosities, molecular_weights):
+    """Wilke gas viscosity for numeric values or DAETools scalar expressions.
+
+    Inputs have matching species order, positive pure-component viscosities,
+    and positive molecular weights in consistent units. Zero mole fractions
+    are supported. Molecular weights must be numeric so their factors are
+    evaluated once when building the symbolic equations.
+
+    mu_mix = sum_i y_i mu_i / sum_j y_j phi_ij, with
+    phi_ij = [1 + sqrt(mu_i/mu_j) (M_j/M_i)**0.25]**2
+             / sqrt(8 (1 + M_i/M_j)).
+    """
+    if not (len(mole_fractions) == len(viscosities) == len(molecular_weights) > 0):
+        raise ValueError("Wilke mixing requires nonempty, matching species arrays.")
+    terms = []
+    for i, (y_i, mu_i, mw_i) in enumerate(zip(mole_fractions, viscosities, molecular_weights)):
+        # phi_ii = 1 exactly; do not divide by mole fractions, which may be zero.
+        denominator = y_i
+        for j, (y_j, mu_j, mw_j) in enumerate(zip(mole_fractions, viscosities, molecular_weights)):
+            if i == j:
+                continue
+            phi_ij = (1.0 + (mu_i / mu_j)**0.5 * (mw_j / mw_i)**0.25)**2 / math.sqrt(
+                8.0 * (1.0 + mw_i / mw_j)
+            )
+            denominator = denominator + y_j * phi_ij
+        terms.append(y_i * mu_i / denominator)
+    return sum(terms[1:], terms[0])
+
+
 def _as_float_array(temperature):
     return np.asarray(temperature, dtype=float)
 

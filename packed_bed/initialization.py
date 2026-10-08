@@ -8,6 +8,7 @@ import numpy as np
 
 from .config import Case
 from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S, GAS_CONSTANT_J_PER_MOL_K
+from .properties import wilke_mixture_viscosity
 from .solid_profiles import (
     build_cell_profiles,
     build_face_scalar_profile,
@@ -96,7 +97,9 @@ def calculate_initial_state(
     ])
 
     mixture_molecular_weight = float(inlet_composition @ gas_molecular_weights)
-    mixture_viscosity = float(inlet_composition @ gas_viscosities)
+    mixture_viscosity = float(wilke_mixture_viscosity(
+        inlet_composition, gas_viscosities, gas_molecular_weights,
+    ))
     area_m2 = CIRCLE_CONSTANT * case.run.model.bed_radius_m**2
     inlet_molar_flux = inlet_flow / area_m2
 

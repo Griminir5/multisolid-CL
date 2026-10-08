@@ -126,6 +126,14 @@ Ergun still uses interparticle voidage and the solver calculates flow and veloci
 variations across the bed. For example, add `gas_voidage_mode: bed_only` under
 `model:` in `run.yaml` to exclude particle-pore gas storage.
 
+Gas mixture viscosity uses [Wilke's mixing rule](https://idaes-pse.readthedocs.io/en/stable/explanations/components/property_package/general/transport_properties/viscosity_wilke.html)
+in both initialization and the solver's Ergun closure:
+`mu_mix = sum_i [y_i * mu_i / (sum_j y_j * phi_ij)]`, where
+`phi_ij = (1 + sqrt(mu_i / mu_j) * (MW_j / MW_i)^0.25)^2 / sqrt(8 * (1 + MW_i / MW_j))`.
+Here `y` is mole fraction, `mu` is the species viscosity at the cell temperature,
+and `MW` is molecular weight. The implementation supports pure gases and zero
+mole fractions without dividing by composition.
+
 A program channel has an `initial` value and an optional list of `hold` or `ramp` steps.
 Each step has a `duration_s`. Each ramp also has a `target`.
 A channel without steps stays constant.
@@ -362,6 +370,49 @@ Use a new output directory. It retains `summary.csv`, raw measurements, per-atte
 manifests and logs, reference datasets, and quantity differences. Historical example
 timings from the earlier source/CLI benchmark are in the
 [solver benchmark report](docs/solver_benchmarks.md).
+
+**Viscosity mixing benchmark (2026-10-08).** Switching from molar averaging to
+Wilke mixing gave the following timings for
+`examples/simulations/default_case/run.yaml`: 9 gases, 20 cells, 1,000 simulated
+seconds, reports every second, one numerical thread, relative tolerance `1e-3`,
+and concentration absolute tolerance `1e-5`. Values are medians of three serial
+repeats after one warm-up per variant; execution order alternates. Plotting is
+disabled. Compiled repeats use cached kernels. End-to-end time includes process
+startup, initialization, integration, and NetCDF/manifest output.
+
+| Solver | Molar average, end-to-end | Wilke, end-to-end | Change | Integration, molar → Wilke |
+| --- | ---: | ---: | ---: | ---: |
+| DAETools / SuperLU | 6.287 s | 8.148 s | +29.6% | 5.441 → 7.281 s |
+| Compiled / SuperLU | 1.868 s | 2.287 s | +22.4% | 0.336 → 0.432 s |
+| Compiled / band | 2.076 s | 2.580 s | +24.3% | 0.153 → 0.276 s |
+
+Measured on an Intel Core i7-1255U with Linux x86-64, Python 3.12.3,
+DAETools 2.6.0, and the managed
+Zig 0.16.0 / SUNDIALS 7.5.0 runtime. Band runs use `step_growth_threshold: 1.25`
+and `nonlinear_refresh_interval: 4`. The first compiled runs, including code
+generation and compilation, took 41.5 → 48.7 s for SuperLU and 41.9 → 49.6 s
+for band. These are case-specific measurements; the default desktop profile
+has tighter tolerances and may behave differently.
+
+All runs reached 1,000 s with finite reported values. Across these solvers, the
+largest before/after differences were 13.4 Pa in pressure drop, 0.88 K in cell
+temperature, and 0.00198 in outlet mole fraction. These include adaptive solver
+error at the stated tolerances. Evaluating both mixing rules at the same
+baseline temperature/composition samples changed viscosity by up to +28.3%.
+Wilke adds pairwise species interactions, so its expression cost grows
+quadratically with the number of gases.
+
+Reproduce against the original molar-average source (requires Git and tar):
+
+```sh
+mkdir -p build/viscosity_baseline
+git archive c35c4b9989322ea3c98afd86ef50beafb5d47958 packed_bed | tar -x -C build/viscosity_baseline
+python tools/benchmark_viscosity.py --baseline-source build/viscosity_baseline --output build/viscosity_comparison --repeats 3
+```
+
+Use a fresh output directory. The [benchmark script](tools/benchmark_viscosity.py)
+retains source hashes, run configurations, logs, datasets, cold-run measurements,
+cached timings, solver statistics, and output differences in `summary.json`.
 
 **Select reports and plots.** Reports determine the contents of `results.nc`.
 The [report registry](packed_bed/reports.py) defines the variables, dimensions, and units.
