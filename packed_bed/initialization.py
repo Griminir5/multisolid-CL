@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import numpy as np
 
@@ -12,11 +13,9 @@ from .properties import wilke_mixture_viscosity
 from .solid_profiles import (
     build_cell_profiles,
     build_face_scalar_profile,
+    build_uniform_axial_grid,
     gas_fraction_from_voidages,
 )
-
-
-CIRCLE_CONSTANT = 3.14159
 
 
 @dataclass(frozen=True)
@@ -53,8 +52,7 @@ def calculate_initial_state(
 
     property_registry = case.definitions.properties
     cell_count = case.run.model.axial_cells
-    face_coordinates = np.linspace(0.0, case.run.model.bed_length_m, cell_count + 1)
-    cell_coordinates = 0.5 * (face_coordinates[:-1] + face_coordinates[1:])
+    cell_coordinates, face_coordinates = build_uniform_axial_grid(case.run.model.bed_length_m, cell_count)
     interparticle_voidage, intraparticle_voidage, solid_concentration = build_cell_profiles(
         case.solids, cell_coordinates, molecular_weights=case.solid_molecular_weights
     )
@@ -100,7 +98,7 @@ def calculate_initial_state(
     mixture_viscosity = float(wilke_mixture_viscosity(
         inlet_composition, gas_viscosities, gas_molecular_weights,
     ))
-    area_m2 = CIRCLE_CONSTANT * case.run.model.bed_radius_m**2
+    area_m2 = math.pi * case.run.model.bed_radius_m**2
     inlet_molar_flux = inlet_flow / area_m2
 
     def ergun_terms(voidage, particle_diameter_m, density_weight):

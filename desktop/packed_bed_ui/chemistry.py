@@ -3,7 +3,7 @@
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import (
     QSplitter, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QTreeWidgetItem,
-    QVBoxLayout, QWidget, QDialog, QFormLayout, QComboBox,
+    QVBoxLayout, QWidget, QDialog, QDialogButtonBox, QFormLayout, QComboBox,
 )
 
 from types import SimpleNamespace
@@ -76,11 +76,11 @@ class ChemistryPage(QWidget):
         self.graph = NetworkView()
         graph_layout.addWidget(self.graph, 1)
         controls = QHBoxLayout()
-        controls.addWidget(action_button("−", lambda: self.graph.zoom(1 / 1.2), tooltip="Zoom out"))
-        controls.addWidget(action_button("+", lambda: self.graph.zoom(1.2), tooltip="Zoom in"))
-        controls.addWidget(action_button("Fit", self.graph.fit, tooltip="Fit graph to window (0)"))
+        controls.addWidget(action_button("−", lambda: self.graph.zoom(1 / 1.2), tooltip="Zoom out", inspection=True))
+        controls.addWidget(action_button("+", lambda: self.graph.zoom(1.2), tooltip="Zoom in", inspection=True))
+        controls.addWidget(action_button("Fit", self.graph.fit, tooltip="Fit graph to window (0)", inspection=True))
         controls.addStretch()
-        self.graph_retry = action_button("Retry", self.graph.retry)
+        self.graph_retry = action_button("Retry", self.graph.retry, inspection=True)
         controls.addWidget(self.graph_retry)
         graph_layout.addLayout(controls)
         self.graph_status = QLabel()
@@ -132,7 +132,7 @@ class ChemistryPage(QWidget):
                                                              tooltip=f"Remove {name}"))
             if family:
                 root.setToolTip(0, definition_details(catalogue, 'mechanisms', family.reference))
-                self.families.setItemWidget(root, 2, action_button('Bindings…', lambda _, name=name: self.bind_roles(name)))
+                self.families.setItemWidget(root, 2, action_button('Bindings…', lambda _, name=name: self.bind_roles(name), inspection=True))
                 self.families.setItemWidget(root, 1, action_button("+ Species", lambda _, family=family: self.add_requirements(family),
                                                                   tooltip="Add required species; compositions and loadings remain unfinished"))
                 for reaction in family.reactions:
@@ -260,14 +260,15 @@ class ChemistryPage(QWidget):
                 field.addItem(self.editor.species_label(component), component)
             field.setCurrentIndex(max(0, field.findData(family.bindings.get(role))))
             field.setPlaceholderText('No matching species selected')
-            field.setEnabled(bool(candidates))
+            field.setEnabled(bool(candidates) and not self.editor.read_only)
             fields[role] = field
             form.addRow(role, field)
         layout.addLayout(form)
         if any(not field.count() for field in fields.values()):
             layout.addWidget(QLabel('Use + Species to add any missing components, then choose their bindings here.'))
-        layout.addWidget(dialog_buttons(dialog))
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        layout.addWidget(dialog_buttons(dialog, QDialogButtonBox.StandardButton.Close if self.editor.read_only else
+                                         QDialogButtonBox.StandardButton.Save))
+        if dialog.exec() == QDialog.DialogCode.Accepted and not self.editor.read_only:
             mappings = self.editor.get(('chemistry', 'mechanisms'), {}).copy()
             mappings[name] = {'definition': family.reference,
                               'bindings': {role: field.currentData() for role, field in fields.items() if field.currentData()}}

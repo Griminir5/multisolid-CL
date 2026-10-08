@@ -202,6 +202,28 @@ def factor_values(factor, parameter=None):
     return values
 
 
+def factor_preview(factor, parameter=None, edge_count=4):
+    """Count and bounded endpoint samples without allocating a numeric range."""
+    count = factor.value_count()
+    if factor.range is None or factor.target.startswith("definition:"):
+        values = factor_values(factor, parameter)
+        return count, values if count <= 2 * edge_count else values[:edge_count] + ["…"] + values[-edge_count:]
+    start = Decimal(str(factor.range.get("start", "")))
+    end = Decimal(str(factor.range.get("end", "")))
+    numeric_value(start, parameter.integer)
+    numeric_value(end, parameter.integer)
+    step = (end - start) / (count - 1)
+    if step == 0:
+        raise StudyError("Remove duplicate values from the variation.")
+    if parameter.integer:
+        numeric_value(step, True)
+    indices = list(range(count)) if count <= 2 * edge_count else [*range(edge_count), *range(count - edge_count, count)]
+    values = [numeric_value(start + step * index, parameter.integer) for index in indices]
+    if count > 2 * edge_count:
+        values.insert(edge_count, "…")
+    return count, values
+
+
 def prepared_factors(study, definitions):
     if not study.factors:
         raise StudyError("Add at least one variation.")

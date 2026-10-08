@@ -92,7 +92,7 @@ def _smoothed_program_sample_times(programs, *, final_time: float, smooth_ramp_w
         [-8.0, -4.0, -2.0, -1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
     )
     for program in programs:
-        for segment in program.segments:
+        for segment in program.segments_until(final_time):
             start_time = float(segment.start_time)
             end_time = float(segment.end_time)
             for edge_time in (start_time, end_time):
@@ -106,7 +106,7 @@ def _smoothed_program_sample_times(programs, *, final_time: float, smooth_ramp_w
                     8,
                     min(80, int(math.ceil(duration_s / width)) * 4),
                 )
-                times.update(float(value) for value in np.linspace(start_time, end_time, interior_count))
+                times.update(float(value) for value in np.linspace(max(0, start_time), min(final_time, end_time), interior_count))
 
     return np.asarray(sorted(times), dtype=float)
 

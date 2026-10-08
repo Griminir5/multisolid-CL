@@ -20,6 +20,10 @@ SOLVER_LABELS = {
 }
 
 
+class RuntimeUnavailable(ValueError):
+    """Valid solver inputs cannot execute with the installed runtime."""
+
+
 def require_desktop_solver(case, *, native=False):
     settings = case.run.solver
     if settings.name not in DESKTOP_SOLVERS.get(settings.backend, ()):
@@ -49,4 +53,4 @@ def require_desktop_solver(case, *, native=False):
             from .simulation import create_linear_solver
             create_linear_solver(initial_solver)
     except (ImportError, RuntimeError, OSError, KeyError) as exc:
-        raise ValueError(f"{settings.backend.capitalize()} execution is unavailable: {exc}") from exc
+        raise RuntimeUnavailable(f"{settings.backend.capitalize()} execution is unavailable: {exc}") from exc

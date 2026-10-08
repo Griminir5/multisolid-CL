@@ -3,22 +3,49 @@
 from collections import Counter
 from copy import deepcopy
 import re
-from time import perf_counter
 from uuid import uuid4
 
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QUndoCommand, QUndoStack
-from PyQt6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+from PyQt6.QtWidgets import (QApplication, QProgressBar, QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
                              QHBoxLayout, QHeaderView, QLabel, QLineEdit,
                              QMessageBox, QPlainTextEdit, QSplitter, QTableView,
                              QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .definition_editor import DefinitionList, DefinitionLibrary, inspect_inputs
 from .editor_widgets import action_button, cell, choices, dialog_buttons, display, message, row, table
-from .studies import (Factor, candidate_count, combinations_from_rows, factor_values, get_value,
+from .studies import (Factor, candidate_count, combinations_from_rows, factor_preview, factor_values, get_value,
                       parameter_catalogue, rows_from_combinations)
 from .study_store import baseline_eligibility
+from .study_tasks import PreviewTask, GenerationTask
 from .study_tables import CandidateTable, DefinitionDelegate, ExplicitRows, Spreadsheet
+
+
+class GenerationProgress(QDialog):
+    def __init__(self, task, parent):
+        super().__init__(parent)
+        self.task = task
+        self.setWindowTitle("Generate study cases")
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        layout = QVBoxLayout(self)
+        self.label = QLabel("Checking reviewed inputs…")
+        layout.addWidget(self.label)
+        bar = QProgressBar()
+        bar.setRange(0, 0)
+        layout.addWidget(bar)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+        task.progress.connect(self.label.setText)
+        task.finished.connect(self.accept)
+
+    def reject(self):
+        if self.task.isRunning():
+            self.task.requestInterruption()
+            self.buttons.setEnabled(False)
+            self.label.setText("Cancelling after the current operation…")
+        else:
+            super().reject()
 
 
 def choose_baseline(parent, project, *, new=False):
@@ -148,8 +175,8 @@ class FactorDialog(QDialog):
         self.factor.range = {key: widget.text() for key, widget in self.range_fields.items()} if is_range else None
         self.factor.values = [value for value in re.split(r"[,;\s]+", self.values.toPlainText().strip()) if value]
         try:
-            values = factor_values(self.factor, self.parameter)
-            self.expanded.setPlainText(", ".join(map(display, values)))
+            count, values = factor_preview(self.factor, self.parameter)
+            self.expanded.setPlainText(f"{count} values: " + ", ".join(map(display, values)))
         except (ValueError, ArithmeticError) as exc:
             self.expanded.setPlainText("Draft — " + str(exc))
 
@@ -187,8 +214,7 @@ class StudyEditor(QWidget):
         self.undo = QUndoStack(self)
         self.debounce = QTimer(self, singleShot=True, interval=350)
         self.debounce.timeout.connect(self.begin_preview)
-        self.preview_timer = QTimer(self, interval=0)
-        self.preview_timer.timeout.connect(self.preview_batch)
+        self.preview_tasks = []
         layout = QVBoxLayout(self)
         self.name = QLineEdit(accessibleName="Study name")
         self.name.textEdited.connect(self.rename)
@@ -499,7 +525,8 @@ class StudyEditor(QWidget):
                 self.issue.setText(str(exc))
 
     def stop_preview(self):
-        self.preview_timer.stop()
+        for task in self.preview_tasks:
+            task.requestInterruption()
         self.preview = self.pending = None
         self.apply_button.setEnabled(False)
         self.cancel_preview.setEnabled(False)
@@ -535,38 +562,52 @@ class StudyEditor(QWidget):
             self.apply_button.setText(f"Replace {old_count} cases with {pending.total}" if old_count else f"Create {pending.total} cases")
             self.cancel_preview.setEnabled(True)
             self.cancel_preview.show()
-            self.preview_timer.start()
+            task = PreviewTask(pending, QApplication.instance())
+            self.preview_tasks.append(task)
+            task.batch.connect(self.preview_batch)
+            task.completed.connect(self.preview_finished)
+            task.finished.connect(lambda task=task: self.preview_tasks.remove(task))
+            task.finished.connect(task.deleteLater)
+            task.start()
         except (ValueError, ArithmeticError, TypeError) as exc:
             self.count.setText("Complete the study rule to preview cases.")
             self.issue.setText(str(exc))
 
-    def preview_batch(self):
-        batch, pending = [], self.pending
-        started = perf_counter()
-        try:
-            for candidate in pending.remaining:
-                batch.append(candidate)
-                if len(batch) == 20 or perf_counter() - started >= .025:
-                    break
-            self.candidate_model.append(batch)
-            count = len(self.candidate_model.candidates)
-            self.count.setText(self.count_prefix + f" · validated {count}/{pending.total}")
-            if count == pending.total:
-                self.preview_timer.stop()
-                self.cancel_preview.setEnabled(False)
-                self.cancel_preview.hide()
-                self.preview = pending
-                states = Counter(case.inputs for case in self.preview.candidates)
-                self.count.setText(self.count_prefix + " · " + " · ".join(f"{n} {state.lower()}" for state, n in states.items()))
-                self.store._verify_baseline(self.study)
-                entry = next(entry for entry in self.store.project.metadata["studies"] if entry["id"] == self.study.id)
-                current = entry.get("generation_signature") == pending.signature and len(pending.delete_ids) == count
-                self.apply_button.setEnabled(count > 0 and not current)
-                if current:
-                    self.replacement_note.setText("Generated cases are up to date.")
-        except (ValueError, ArithmeticError, TypeError) as exc:
+    def preview_batch(self, pending, batch):
+        if pending is not self.pending:
+            return
+        self.candidate_model.append(batch)
+        count = len(self.candidate_model.candidates)
+        self.count.setText(self.count_prefix + f" · validated {count}/{pending.total}")
+
+    def preview_finished(self, pending, error):
+        if pending is not self.pending:
+            return
+        self.cancel_preview.setEnabled(False)
+        self.cancel_preview.hide()
+        if error:
             self.stop_preview()
+            self.issue.setText(error)
+            return
+        self.preview = pending
+        count = len(pending.candidates)
+        states = Counter(case.inputs for case in pending.candidates)
+        self.count.setText(self.count_prefix + " · " + " · ".join(f"{n} {state.lower()}" for state, n in states.items()))
+        try:
+            self.store._verify_baseline(self.study)
+            entry = next(entry for entry in self.store.project.metadata["studies"] if entry["id"] == self.study.id)
+            current = entry.get("generation_signature") == pending.signature and len(pending.delete_ids) == count
+            self.apply_button.setEnabled(count > 0 and not current)
+            if current:
+                self.replacement_note.setText("Generated cases are up to date.")
+        except (ValueError, OSError) as exc:
             self.issue.setText(str(exc))
+            self.apply_button.setEnabled(False)
+
+    def finish_background_tasks(self):
+        self.stop_preview()
+        for task in list(self.preview_tasks):
+            task.wait()
 
     def show_issue(self, index, _previous=None):
         if index.isValid() and index.row() < len(self.candidate_model.candidates):
@@ -583,12 +624,27 @@ class StudyEditor(QWidget):
     def apply(self):
         if self.preview is None or not self.save():
             return
-        try:
-            self.store.apply_preview(self.preview)
-            self.undo.clear()
-            self.rebuilt.emit()
-            self.changed.emit()
-            self.begin_preview()
-        except (ValueError, OSError) as exc:
-            self.issue.setText(str(exc))
+        self.debounce.stop()
+        task = GenerationTask(self.store.project.root, self.preview, self)
+        progress = GenerationProgress(task, self)
+        outcome = []
+        task.completed.connect(lambda project, error: outcome.append((project, error)))
+        task.start()
+        progress.exec()
+        task.wait()
+        task.deleteLater()
+        progress.deleteLater()
+        if not outcome:
+            self.issue.setText("Study generation was cancelled.")
+            return
+        project, error = outcome[0]
+        if error:
+            self.issue.setText(error)
             self.apply_button.setEnabled(False)
+            return
+        self.store._adopt_metadata(project.metadata, {case.id: case.documents for case in project.cases})
+        self.store.project.edited()
+        self.undo.clear()
+        self.rebuilt.emit()
+        self.changed.emit()
+        self.begin_preview()

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from bisect import bisect_right
+from functools import cached_property
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -39,16 +41,68 @@ class ProgramSegment:
 
 @dataclass(frozen=True)
 class CompiledProgram:
+    """One startup cycle and its carried-forward repeating continuation.
+
+    Smoothing has support only within one width of each ramp endpoint. Neither
+    this representation nor its value at a time depends on the solver horizon.
+    """
     initial_value: ProgramValue
     segments: tuple[ProgramSegment, ...]
+    repeat_segments: tuple[ProgramSegment, ...] = ()
+
+    @cached_property
+    def _ends(self):
+        return tuple(segment.end_time for segment in self.segments)
+
+    @cached_property
+    def _repeat_ends(self):
+        return tuple(segment.end_time for segment in self.repeat_segments)
 
     def value_at(self, time_s: float, *, smooth_ramp_width_s: float) -> ProgramValue:
-        return _evaluate_smoothed_program_value(
-            self.initial_value,
-            self.segments,
-            time_s=time_s,
-            smooth_ramp_width_s=smooth_ramp_width_s,
-        )
+        width = float(smooth_ramp_width_s)
+        if not math.isfinite(width) or width <= 0:
+            raise ValueError("smooth_ramp_width_s must be finite and positive.")
+        if not math.isfinite(time_s):
+            raise ValueError("Program time must be finite.")
+        if not self.segments:
+            return self.initial_value
+        period = self.duration_s
+        first = max(0, math.floor((time_s - width) / period)) if self.repeat_segments else 0
+        last = max(0, math.floor((time_s + width) / period)) if self.repeat_segments else 0
+        value = None
+        for cycle in range(first, last + 1):
+            segments = self.repeat_segments if cycle else self.segments
+            ends = self._repeat_ends if cycle else self._ends
+            local = time_s - cycle * period
+            index = bisect_right(ends, local - width)
+            if value is None:
+                value = segments[index].start_value if index < len(segments) else segments[-1].end_value
+            for segment_index in range(index, len(segments)):
+                segment = segments[segment_index]
+                if segment.start_time >= local + width:
+                    break
+                fraction = _smooth_ramp_fraction_value(segment, local, width)
+                if isinstance(value, tuple):
+                    value = tuple(v + (b - a) * fraction for v, a, b in
+                                  zip(value, segment.start_value, segment.end_value))
+                else:
+                    value += (segment.end_value - segment.start_value) * fraction
+        return value
+
+    def segments_until(self, stop_time):
+        """Expand only for symbolic assembly or display, never truncate ramps."""
+        cycle = 0
+        while True:
+            segments = self.repeat_segments if cycle else self.segments
+            for segment in segments:
+                shift = cycle * self.duration_s
+                if segment.start_time > stop_time - shift:
+                    return
+                yield ProgramSegment(segment.start_time + shift, segment.end_time + shift,
+                                     segment.start_value, segment.end_value)
+            if not self.repeat_segments or not segments:
+                return
+            cycle += 1
 
     @property
     def duration_s(self) -> float:
@@ -105,28 +159,10 @@ def _require_exact_keys(actual: set[str], expected: tuple[str, ...], label: str)
     raise ValueError(f"{label} species mismatch: {'; '.join(differences)}.")
 
 
-def _interpolate_program_value(
-    start_value: ProgramValue,
-    end_value: ProgramValue,
-    fraction: float,
-) -> ProgramValue:
-    if isinstance(start_value, tuple):
-        if not isinstance(end_value, tuple):
-            raise TypeError("Expected tuple-valued program endpoints.")
-        return tuple(
-            start_component + (end_component - start_component) * fraction
-            for start_component, end_component in zip(start_value, end_value)
-        )
-
-    if isinstance(end_value, tuple):
-        raise TypeError("Expected scalar-valued program endpoints.")
-    return start_value + (end_value - start_value) * fraction
-
-
-def _smooth_positive_time_value(elapsed_time_s: float, smooth_ramp_width_s: float) -> float:
-    if smooth_ramp_width_s <= 0.0:
-        raise ValueError("smooth_ramp_width_s must be positive.")
-    return 0.5 * (elapsed_time_s + math.sqrt(elapsed_time_s * elapsed_time_s + smooth_ramp_width_s**2))
+def smooth_positive_time(elapsed, width, *, minimum=min, maximum=max):
+    """C1 compact-support smoothing of max(elapsed, 0), numeric or symbolic."""
+    clipped = minimum(maximum(elapsed + width, 0 * width), 2 * width)
+    return maximum(elapsed - width, 0 * width) + clipped * clipped / (4 * width)
 
 
 def _smooth_ramp_fraction_value(segment: "ProgramSegment", time_s: float, smooth_ramp_width_s: float) -> float:
@@ -134,92 +170,26 @@ def _smooth_ramp_fraction_value(segment: "ProgramSegment", time_s: float, smooth
     if duration_s <= 0.0:
         raise ValueError("Program segments must have positive duration.")
     return (
-        _smooth_positive_time_value(time_s - float(segment.start_time), smooth_ramp_width_s)
-        - _smooth_positive_time_value(time_s - float(segment.end_time), smooth_ramp_width_s)
+        smooth_positive_time(time_s - float(segment.start_time), smooth_ramp_width_s)
+        - smooth_positive_time(time_s - float(segment.end_time), smooth_ramp_width_s)
     ) / duration_s
 
 
-def _evaluate_smoothed_program_value(
-    initial_value: ProgramValue,
-    segments: tuple["ProgramSegment", ...],
-    *,
-    time_s: float,
-    smooth_ramp_width_s: float,
-) -> ProgramValue:
-    if not segments:
-        return initial_value
-
-    if isinstance(segments[0].start_value, tuple):
-        value = [float(component) for component in segments[0].start_value]
-        for segment in segments:
-            if not isinstance(segment.start_value, tuple) or not isinstance(segment.end_value, tuple):
-                raise TypeError("Expected tuple-valued program endpoints.")
-            fraction = _smooth_ramp_fraction_value(segment, time_s, smooth_ramp_width_s)
-            for component_idx, (start_component, end_component) in enumerate(
-                zip(segment.start_value, segment.end_value)
-            ):
-                value[component_idx] += (float(end_component) - float(start_component)) * fraction
-        return tuple(value)
-
-    value = float(segments[0].start_value)
-    for segment in segments:
-        if isinstance(segment.start_value, tuple) or isinstance(segment.end_value, tuple):
-            raise TypeError("Expected scalar-valued program endpoints.")
-        delta = float(segment.end_value) - float(segment.start_value)
-        if math.isclose(delta, 0.0, rel_tol=0.0, abs_tol=1e-12):
-            continue
-        value += delta * _smooth_ramp_fraction_value(segment, time_s, smooth_ramp_width_s)
-    return value
-
-
-def _compile_program_segments(
-    initial_value: ProgramValue,
-    steps: tuple["HoldStep | ScalarRampStep | CompositionRampStep | FeedRampStep", ...],
-    *,
-    repeat: bool,
-    time_horizon: float | None,
-    resolve_next_value,
-) -> tuple["ProgramSegment", ...]:
-    if repeat and time_horizon is None:
-        raise ValueError("time_horizon must be provided when repeat=True.")
-
-    current_time = 0.0
+def _compile_program_segments(initial_value, steps, *, repeat, time_horizon, resolve_next_value):
+    # Targets are absolute, with omitted feed fields carried forward. After the
+    # first traversal every later cycle is identical, including leading holds.
     current_value = initial_value
-    segments: list[ProgramSegment] = []
-
-    while True:
-        for step_index, step in enumerate(steps):
+    cycles = []
+    for _ in range(2 if repeat and steps else 1):
+        current_time = 0.0
+        segments = []
+        for index, step in enumerate(steps):
             next_time = current_time + step.duration_s
-            next_value = resolve_next_value(step_index, step, current_value)
-
-            if time_horizon is not None and next_time > time_horizon:
-                if current_time >= time_horizon:
-                    return tuple(segments)
-
-                fraction = (time_horizon - current_time) / step.duration_s
-                segments.append(
-                    ProgramSegment(
-                        start_time=current_time,
-                        end_time=time_horizon,
-                        start_value=current_value,
-                        end_value=_interpolate_program_value(current_value, next_value, fraction),
-                    )
-                )
-                return tuple(segments)
-
-            segments.append(
-                ProgramSegment(
-                    start_time=current_time,
-                    end_time=next_time,
-                    start_value=current_value,
-                    end_value=next_value,
-                )
-            )
-            current_time = next_time
-            current_value = next_value
-
-        if not repeat or not steps or (time_horizon is not None and current_time >= time_horizon):
-            return tuple(segments)
+            next_value = resolve_next_value(index, step, current_value)
+            segments.append(ProgramSegment(current_time, next_time, current_value, next_value))
+            current_time, current_value = next_time, next_value
+        cycles.append(tuple(segments))
+    return CompiledProgram(initial_value, cycles[0], cycles[1] if len(cycles) > 1 else ())
 
 
 def compile_scalar_channel(
@@ -239,7 +209,7 @@ def compile_scalar_channel(
             current_value if step.kind == "hold" else step.target * value_scale
         ),
     )
-    return CompiledProgram(initial_value=initial_value, segments=segments)
+    return segments
 
 
 def compile_composition_channel(
@@ -270,7 +240,7 @@ def compile_composition_channel(
         time_horizon=time_horizon,
         resolve_next_value=resolve_next_value,
     )
-    return CompiledProgram(initial_value=initial_value, segments=segments)
+    return segments
 
 
 def compile_feed_stream(
@@ -310,11 +280,11 @@ def compile_feed_stream(
     )
 
     def project(select):
-        return CompiledProgram(select(initial), tuple(
-            ProgramSegment(segment.start_time, segment.end_time,
-                           select(segment.start_value), select(segment.end_value))
-            for segment in segments
-        ))
+        def projected(values):
+            return tuple(ProgramSegment(segment.start_time, segment.end_time,
+                                        select(segment.start_value), select(segment.end_value))
+                         for segment in values)
+        return CompiledProgram(select(initial), projected(segments.segments), projected(segments.repeat_segments))
 
     flow = project(lambda value: value[0])
     species_flow = project(lambda value: value[1:-1])

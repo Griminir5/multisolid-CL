@@ -16,8 +16,7 @@ from .axial_schemes import (
     split_face_flux,
 )
 from .config import Case
-from .initialization import CIRCLE_CONSTANT
-from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S, RatioProgram
+from .programs import DEFAULT_SMOOTH_RAMP_WIDTH_S, RatioProgram, smooth_positive_time
 from .properties import wilke_mixture_viscosity
 from .reactions import KineticsContext, ReactionNetwork
 from pyUnits import J, K, Pa, kg, m, mol, s
@@ -95,6 +94,7 @@ class PackedBedModel(daeModel):
         if smooth_ramp_width_s <= 0.0:
             raise ValueError("smooth_ramp_width_s must be positive.")
         self.smooth_ramp_width_s = float(smooth_ramp_width_s)
+        self.program_horizon_s = case.run.simulation.time_horizon_s
         self.inlet_flow_program = case.inlet_flow_program
         self.inlet_composition_program = case.inlet_composition_program
         self.inlet_temperature_program = case.inlet_temperature_program
@@ -243,7 +243,7 @@ class PackedBedModel(daeModel):
 
         center_coords = [self.xval_cells(idx_cell) for idx_cell in range(Nc)]
         face_coords = [Constant(value * m) for value in self.face_locations_m]
-        cross_section_area = Constant(CIRCLE_CONSTANT) * self.R_bed() ** 2
+        cross_section_area = Constant(math.pi) * self.R_bed() ** 2
         conc_eps = Constant(1e-8 * mol / m**3)
         enthalpy_eps = Constant(1e-8 * J / mol)
         gas_molecular_weights = [
@@ -269,18 +269,14 @@ class PackedBedModel(daeModel):
                     Constant(float(program.denominator.initial_value) * mol / s),
                     program.denominator, mol / s,
                 )
-            segments = program.segments
+            segments = tuple(program.segments_until(
+                self.program_horizon_s + self.smooth_ramp_width_s))
             if not segments:
                 return default_expression
             width = Constant(self.smooth_ramp_width_s * s)
 
             def scalar(value):
                 return float(value if component is None else value[component])
-
-            def smooth_positive_time(elapsed_time):
-                return Constant(0.5) * (
-                    elapsed_time + Sqrt(elapsed_time * elapsed_time + width * width)
-                )
 
             expression = Constant(scalar(segments[0].start_value) * units)
             for segment in segments:
@@ -291,8 +287,8 @@ class PackedBedModel(daeModel):
                 end_time = Constant(float(segment.end_time) * s)
                 duration = Constant((float(segment.end_time) - float(segment.start_time)) * s)
                 ramp_fraction = (
-                    smooth_positive_time(Time() - start_time)
-                    - smooth_positive_time(Time() - end_time)
+                    smooth_positive_time(Time() - start_time, width, minimum=Min, maximum=Max)
+                    - smooth_positive_time(Time() - end_time, width, minimum=Min, maximum=Max)
                 ) / duration
                 expression = expression + Constant(delta * units) * ramp_fraction
             return expression

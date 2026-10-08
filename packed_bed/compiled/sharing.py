@@ -2,11 +2,8 @@
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from functools import lru_cache
 
-from .graph import Graph
-
-LEAVES = {"const", "var", "dot", "time", "cj", "param"}
+from .graph import Graph, LEAVES
 
 
 @dataclass
@@ -30,32 +27,23 @@ def shared_inputs(graph, roots, root_cells, keep, locations):
         groups[cell].append(root)
     users = defaultdict(int)
 
-    def visit(node, bit):
-        if users[node] & bit:
-            return
-        users[node] |= bit
-        op, *args = graph.nodes[node]
-        if op not in LEAVES:
-            for arg in args:
-                visit(arg, bit)
-
     for group, selected in enumerate(groups.values()):
-        for root in selected:
-            visit(root, 1 << group)
+        bit = 1 << group
+        for node in graph.postorder(selected):
+            users[node] |= bit
 
-    @lru_cache(None)
-    def time_only(node):
+    time_only = {}
+    for node in graph.postorder(roots):
         op, *args = graph.nodes[node]
-        if op in ("var", "dot", "cj", "param"):
-            return False
-        return op in ("const", "time") or all(time_only(arg) for arg in args)
+        time_only[node] = (op in ("const", "time") if op in LEAVES else
+                           all(time_only[arg] for arg in args))
 
     repeated = {
         node
         for node, bits in users.items()
         if bits & (bits - 1)
         and graph.nodes[node][0] not in LEAVES
-        and not time_only(node)
+        and not time_only[node]
     }
     frontier = set(roots) & repeated
     for node in users:
@@ -68,24 +56,28 @@ def shared_inputs(graph, roots, root_cells, keep, locations):
 
     canonical = {}
 
-    @lru_cache(None)
+    shapes = defaultdict(dict)
+
     def shape(node, anchor):
-        op, *args = graph.nodes[node]
-        if op in ("var", "dot"):
-            name, component, position = locations[args[0]]
-            offset = (
-                position - anchor
-                if position is not None and anchor is not None
-                else position
-            )
-            key = (op, name, component, offset)
-        elif op in LEAVES:
-            key = (op,)
-        else:
-            key = (op, *(shape(arg, anchor) for arg in args))
-        if key not in canonical:
-            canonical[key] = len(canonical)
-        return canonical[key]
+        known = shapes[anchor]
+        for current in graph.postorder([node], known):
+            op, *args = graph.nodes[current]
+            if op in ("var", "dot"):
+                name, component, position = locations[args[0]]
+                offset = (
+                    position - anchor
+                    if position is not None and anchor is not None
+                    else position
+                )
+                key = (op, name, component, offset)
+            elif op in LEAVES:
+                key = (op,)
+            else:
+                key = (op, *(known[arg] for arg in args))
+            if key not in canonical:
+                canonical[key] = len(canonical)
+            known[current] = canonical[key]
+        return known[node]
 
     extended = Graph()
     extended.nodes = graph.nodes.copy()

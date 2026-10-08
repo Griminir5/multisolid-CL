@@ -73,7 +73,7 @@ def scientific_fingerprint(documents: dict[str, dict], extensions: list) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-from packed_bed.solver_support import require_desktop_solver
+from packed_bed.solver_support import RuntimeUnavailable, require_desktop_solver
 
 
 @dataclass
@@ -139,6 +139,9 @@ class ProjectCase:
         return scientific_fingerprint(self.documents, self.definition_lock())
 
     def state(self) -> dict:
+        frozen = getattr(self.project, "execution_states", None)
+        if frozen is not None and self.id in frozen:
+            return dict(frozen[self.id])
         readiness, message = "Ready", ""
         try:
             self.validate_for_run()
@@ -146,7 +149,8 @@ class ProjectCase:
             message = str(exc)
             errors = exc.__cause__.errors() if isinstance(exc.__cause__, ValidationError) else []
             missing = any(error["type"] == "missing" or error.get("input") in (None, "") for error in errors)
-            readiness = "Needs update" if isinstance(exc, NeedsStudyUpdate) else "Underdefined" if missing else "Invalid"
+            readiness = ("Runtime unavailable" if isinstance(exc, RuntimeUnavailable) else
+                         "Needs update" if isinstance(exc, NeedsStudyUpdate) else "Underdefined" if missing else "Invalid")
         result = {"state": "not_run", "elapsed_s": 0.0}
         stale = False
         if self.run_folder.exists():
@@ -203,8 +207,14 @@ class Project:
         return Drafts(self)
 
     def edited(self):
+        self.execution_states = None
         if self.on_edit is not None:
             self.on_edit()
+
+    def freeze_execution_states(self):
+        """Capture input identity once while execution freezes project editing."""
+        self.execution_states = None
+        self.execution_states = {case.id: case.state() for case in self.cases}
 
     @property
     def study_store(self):
@@ -308,22 +318,12 @@ class Project:
         return self.study_store.import_batch(batch_path, name)
 
     def delete_case(self, case: ProjectCase) -> None:
-        """Remove this case and its latest run, rolling back if metadata cannot save."""
+        """Commit deletion with recovery if the process stops between renames."""
         if case not in self.cases:
             raise ValueError("This case does not belong to the project.")
-        index = self.cases.index(case)
-        removed = self.root / f".deleted-{case.id}"
-        retry_file_operation(case.root.rename, removed)
-        self.cases.pop(index)
-        self.metadata["cases"].pop(index)
-        try:
-            self.save()
-        except Exception:
-            self.cases.insert(index, case)
-            self.metadata["cases"].insert(index, case.metadata)
-            retry_file_operation(removed.rename, case.root)
-            raise
-        retry_file_operation(shutil.rmtree, removed)
+        metadata = deepcopy(self.metadata)
+        metadata["cases"] = [entry for entry in metadata["cases"] if entry["id"] != case.id]
+        self.study_store._commit({f"cases/{case.id}": None}, metadata, [case.id])
 
     def prepare_execution(self, cases: list[ProjectCase], *, max_workers: int | None = None) -> Path:
         if max_workers is None:

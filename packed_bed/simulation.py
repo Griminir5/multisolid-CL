@@ -65,7 +65,6 @@ class PackedBedSimulation(daeSimulation):
     ):
         daeSimulation.__init__(self)
         self.case = case
-        self.property_registry = case.definitions.properties
         self.smooth_ramp_width_s = float(smooth_ramp_width_s)
         self.model = PackedBedModel(
             case.run.simulation.system_name, case,

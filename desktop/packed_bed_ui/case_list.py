@@ -137,6 +137,7 @@ class CaseList(QTreeWidget):
         self.header().setStretchLastSection(False)
         self.items, self.groups, self.buttons = {}, {}, {}
         self.group_buttons = {}
+        self._displayed_states = {}
         self.itemChanged.connect(self._item_changed)
         self.itemDoubleClicked.connect(self._double_clicked)
 
@@ -146,6 +147,7 @@ class CaseList(QTreeWidget):
         self.clear()
         self.items, self.groups, self.buttons = {}, {}, {}
         self.group_buttons = {}
+        self._displayed_states.clear()
         studies = {study["id"]: study for study in project.metadata.get("studies", [])}
         for study_id, study in studies.items():
             group = QTreeWidgetItem(self)
@@ -199,6 +201,10 @@ class CaseList(QTreeWidget):
                 if state.get("state") != "queued":
                     state["stale"] = False
             states[case.id] = state
+            display_key = (state, active, case.name, case.metadata.get("included", True))
+            if self._displayed_states.get(case.id) == display_key:
+                continue
+            self._displayed_states[case.id] = display_key
             item = self.items[case.id]
             item.setText(1, case.name)
             item.setText(2, state["inputs"])

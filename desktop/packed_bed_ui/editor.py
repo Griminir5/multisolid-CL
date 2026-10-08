@@ -9,7 +9,7 @@ from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtSvgWidgets import QSvgWidget
 from PyQt6.QtWidgets import (
     QApplication, QAbstractButton, QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QLabel, QLineEdit,
-    QHBoxLayout, QPlainTextEdit, QPushButton, QMessageBox, QSizePolicy, QSpinBox, QTabWidget, QTreeWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QPlainTextEdit, QPushButton, QMessageBox, QScrollArea, QSizePolicy, QSpinBox, QTabWidget, QTreeWidget, QVBoxLayout, QWidget,
 )
 
 from packed_bed.plotting import PLOT_REGISTRY
@@ -82,7 +82,7 @@ class InputEditor(QWidget):
         self.program = ProgramPage(self)
         for title, page in (("General", self.general), ("Chemistry", self.chemistry),
                             ("Bed", self.bed), ("Program", self.program)):
-            self.tabs.addTab(page, title)
+            self.add_page(page, title)
         layout.addWidget(self.tabs, 1)
         self.validation = themed_label("", "validation")
         self.validation.setTextFormat(Qt.TextFormat.PlainText)
@@ -102,6 +102,14 @@ class InputEditor(QWidget):
         self.figures = [self.program.preview.figure, self.bed.preview.figure]
         self.canvases = [self.program.preview.canvas, self.bed.preview.canvas]
         apply_theme(QApplication.instance()).changed.connect(self.update_field_issues)
+
+    def add_page(self, page, title):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(page)
+        page.tab_container = scroll
+        self.tabs.addTab(scroll, title)
 
     def update_field_issues(self):
         return refresh_field_issues(self)
@@ -253,7 +261,7 @@ class InputEditor(QWidget):
                     continue  # Freeze the selector as a unit, preserving child enabled states.
                 if any(preview.isAncestorOf(widget) for preview in (self.bed.preview, self.program.preview)):
                     continue  # Plot navigation remains interactive during inspection.
-                if widget.property("layoutToggle"):
+                if widget.property("layoutToggle") or widget.property("inspectionAction"):
                     continue  # Collapsing sections only changes the layout.
                 if isinstance(widget, (QLineEdit, QSpinBox)):
                     freeze(widget.setReadOnly, widget.isReadOnly(), True)
@@ -354,7 +362,9 @@ class InputEditor(QWidget):
             self.case.validate_for_run()
         except (ValueError, OSError) as exc:
             message = str(exc)
-            self.set_validation("warning", "Draft — cannot run. Review highlighted inputs or Details.", message)
+            from packed_bed.solver_support import RuntimeUnavailable
+            self.set_validation("warning", "Inputs valid · execution runtime unavailable." if isinstance(exc, RuntimeUnavailable)
+                                else "Draft — cannot run. Review highlighted inputs or Details.", message)
             if not self.figures[0].axes:
                 for preview in (self.program.preview, self.bed.preview):
                     preview.clear("Preview unavailable while inputs are incomplete or invalid. See the validation message below.")
@@ -414,7 +424,7 @@ class CaseEditor(InputEditor):
         super().__init__(parent)
         from .report import ReportPage
         self.report = ReportPage(self)
-        self.tabs.addTab(self.report, "Report")
+        self.add_page(self.report, "Report")
 
     def set_case(self, case):
         if not super().set_case(case, read_only=bool(case.metadata.get("study_id"))):

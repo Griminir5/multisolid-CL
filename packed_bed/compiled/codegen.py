@@ -1,14 +1,12 @@
 """Share exact residual/Jacobian expression graphs across equivalent cells."""
 
-import re
 from collections import defaultdict
-from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 from scipy.sparse import csc_matrix
 
-from .graph import Graph
+from .graph import Graph, LEAVES, postorder
 from .sharing import shared_inputs
 
 
@@ -25,6 +23,7 @@ def emit_model(
     *,
     vectorize=False,
     vector_exponentials=False,
+    runtime_programs=False,
 ):
     """Share cell functions and expressions crossing cell boundaries.
 
@@ -57,9 +56,9 @@ def emit_model(
             cells,
             # Jacobian intermediates can contain derivative branch operators.
             vectorize=vectorize and name == "evaluate",
+            linkage="static",
+            include_headers=False,
         )
-        helper = helper.replace("PB_EXPORT", "static")
-        helper = re.sub(r"^#include.*\n", "", helper, flags=re.MULTILINE)
         helpers.append(
             f"namespace shared_{name} {{\n"
             "using ::fabs;using ::sqrt;using ::exp;using ::log;using ::log10;"
@@ -79,13 +78,16 @@ def emit_model(
         vectorize=vectorize,
         plans=plans,
         helpers="".join(helpers),
+        linkage="static" if runtime_programs else "PB_EXPORT",
+        function_suffix="_values" if runtime_programs else "",
     )
     metadata["shared_expressions"] = {
         name: len(plan.nodes) for name, plan in plans.items()
     }
     metadata["shared_kernel_metadata"] = shared_metadata
     if shared_metadata.get("evaluate", {}).get("residual_lanes") == 4:
-        source = "#include <immintrin.h>\n" + source
+        if metadata["residual_lanes"] != 4:
+            source = Path(__file__).with_name("cell.hpp").read_text(encoding="utf-8") + "\n" + source
         # The helper can use AVX2 even if the remaining cell functions cannot.
         metadata["residual_lanes"] = 4
     metadata["vector_exponentials"] = "scalar libm"
@@ -117,6 +119,9 @@ def _emit_model(
     vectorize=False,
     plans=None,
     helpers="",
+    linkage="PB_EXPORT",
+    function_suffix="",
+    include_headers=True,
 ):
     runtime_parameters = any(node[0] == "param" for node in graph.nodes)
     runtime_arg = "runtime," if runtime_parameters else ""
@@ -141,38 +146,22 @@ def _emit_model(
             position - cell if position is not None and cell is not None else position,
         )
 
-    @lru_cache(None)
-    def time_only(node):
+    active = list(graph.postorder([node for selected in roots.values() for node in selected]))
+    time_only = {}
+    for node in active:
         op, *args = graph.nodes[node]
-        if op in ("var", "dot", "cj", "param"):
-            return False
-        if op in ("const", "time"):
-            return True
-        return all(time_only(arg) for arg in args)
+        time_only[node] = (op in ("const", "time") if op in LEAVES else
+                           all(time_only[arg] for arg in args))
 
-    active = set()
-
-    def visit(node):
-        if node in active:
-            return
-        active.add(node)
-        op, *args = graph.nodes[node]
-        if op not in ("const", "var", "dot", "time", "cj", "param"):
-            for arg in args:
-                visit(arg)
-
-    for selected in roots.values():
-        for node in selected:
-            visit(node)
     time_nodes = {
         node
         for node in active
-        if time_only(node) and graph.nodes[node][0] not in ("const", "time")
+        if time_only[node] and graph.nodes[node][0] not in ("const", "time")
     }
     frontier = set()
     for node in active:
         op, *args = graph.nodes[node]
-        if not time_only(node) and op not in ("var", "dot", "cj", "param"):
+        if not time_only[node] and op not in ("var", "dot", "cj", "param"):
             frontier.update(arg for arg in args if arg in time_nodes)
     frontier.update(
         node for selected in roots.values() for node in selected if node in time_nodes
@@ -180,32 +169,15 @@ def _emit_model(
     frontier = sorted(frontier)
     positions = {node: i for i, node in enumerate(frontier)}
 
-    def use_cached_time(source):
-        source = re.sub(
-            r"^const double z(\d+) = .*;\n",
-            lambda match: "" if int(match[1]) in time_nodes else match[0],
-            source,
-            flags=re.MULTILINE,
-        )
-        return re.sub(
-            r"\bz(\d+)\b",
-            lambda match: (
-                f"time_values[{positions[int(match[1])]}]"
-                if int(match[1]) in positions
-                else match[0]
-            ),
-            source,
-        )
+    time_references = {node: f"time_values[{index}]" for node, index in positions.items()}
 
-    source = "#include <cmath>\n#include <cstring>\n"
+    source = "#include <cmath>\n#include <cstring>\n" if include_headers else ""
     source += (
         "static thread_local bool cached_valid=false;\n"
         "static thread_local double cached_t=0;\n"
         f"static thread_local double time_values[{max(1, len(frontier))}];\n"
     )
-    source += graph.emit("update_time", frontier, mapping).replace(
-        "PB_EXPORT", "static"
-    )
+    source += graph.emit("update_time", frontier, mapping, linkage="static")
     source += (
         f"static void ensure_time(double t{',const double* runtime' if runtime_parameters else ''}) {{\n"
         "if(!cached_valid || t!=cached_t) {\n"
@@ -217,28 +189,33 @@ def _emit_model(
     constants = defaultdict(dict)
     fixed_constants = {0.0, 1.0, -1.0, 2.0, 0.5}
 
-    @lru_cache(None)
+    normalized_nodes = defaultdict(dict)
+
     def normalized(node, cell):
-        op, *args = graph.nodes[node]
-        if node in positions:
-            # A cached expression belongs to this exact time function. Treating
-            # its constants as cell parameters could incorrectly share a cache
-            # slot between spatially different time-dependent coefficients.
-            key = ("cached_time", node)
-        elif op in ("var", "dot"):
-            key = (op, variable_key(args[0], cell))
-        elif op == "const" and args[0] not in fixed_constants:
-            bindings = constants[cell]
-            if args[0] not in bindings:
-                bindings[args[0]] = len(bindings)
-            key = ("parameter", bindings[args[0]])
-        elif op in ("const", "time", "cj", "param"):
-            key = graph.nodes[node]
-        else:
-            key = (op, *(normalized(arg, cell) for arg in args))
-        if key not in canonical:
-            canonical[key] = len(canonical)
-        return canonical[key]
+        known = normalized_nodes[cell]
+        children = lambda current: () if current in positions else graph.children(current)
+        for current in postorder([node], children, known):
+            op, *args = graph.nodes[current]
+            if current in positions:
+                # A cached expression belongs to this exact time function. Treating
+                # its constants as cell parameters could incorrectly share a cache
+                # slot between spatially different time-dependent coefficients.
+                key = ("cached_time", current)
+            elif op in ("var", "dot"):
+                key = (op, variable_key(args[0], cell))
+            elif op == "const" and args[0] not in fixed_constants:
+                bindings = constants[cell]
+                if args[0] not in bindings:
+                    bindings[args[0]] = len(bindings)
+                key = ("parameter", bindings[args[0]])
+            elif op in ("const", "time", "cj", "param"):
+                key = graph.nodes[current]
+            else:
+                key = (op, *(known[arg] for arg in args))
+            if key not in canonical:
+                canonical[key] = len(canonical)
+            known[current] = canonical[key]
+        return known[node]
 
     metadata = {
         "kernel_layout": "shared cells",
@@ -252,10 +229,10 @@ def _emit_model(
         mapping = plan.mapping if plan else original_mapping
         locations = plan.locations if plan else original_locations
         if name == "reconstruct":
-            code = use_cached_time(graph.emit(name, selected, mapping))
-            source += code.replace("double* out) {", f"double* out) {{\nensure_time(t{',runtime' if runtime_parameters else ''});")
+            source += graph.emit(name + function_suffix, selected, mapping, references=time_references,
+                                 linkage=linkage, prologue=f"ensure_time(t{',runtime' if runtime_parameters else ''});")
             continue
-        normalized.cache_clear()
+        normalized_nodes.clear()
         constants.clear()
         grouped = defaultdict(list)
         for output, node in enumerate(selected):
@@ -283,66 +260,22 @@ def _emit_model(
             )
             keys = [variable_key(old, cell) for old in dependencies]
             function = f"{name}_cell{number}"
-            variable_map = {old: f"ix[{i}]" for i, old in enumerate(dependencies)}
-            emitter = Graph()
-            emitter.nodes = graph.nodes.copy()
-            parameter_start = max(locations) + 1
-            for node, expression in enumerate(graph.nodes):
-                if expression[0] == "const" and expression[1] in constants[cell]:
-                    i = constants[cell][expression[1]]
-                    emitter.nodes[node] = ("var", parameter_start + i)
-                    variable_map[parameter_start + i] = f"PARAM_{i}"
-            code = emitter.emit(function, nodes, variable_map)
-            code = re.sub(r"y\[PARAM_(\d+)\]", r"par[\1]", code)
-            code = (
-                use_cached_time(code)
-                .replace("PB_EXPORT", "static PB_NOINLINE")
-                .replace(
-                    "double* out) {", "const int* ix,const double* par,double* out) {"
-                )
-            )
-            # Each cell writes its assigned outputs directly. The offset table
-            # retains arbitrary equation/CSC order without a temporary copy.
-            scalar_code = code.replace(
-                "double* out)", "double* PB_RESTRICT out,const int* offsets)"
-            )
-            source += re.sub(r"out\[(\d+)\] =", r"out[offsets[\1]] =", scalar_code)
-            metadata["direct_scalar_output_functions"] = (
-                metadata.get("direct_scalar_output_functions", 0) + 1
-            )
+            variable_map = {old: i for i, old in enumerate(dependencies)}
+            parameter_nodes = {node: constants[cell][expression[1]]
+                               for node, expression in enumerate(graph.nodes)
+                               if expression[0] == "const" and expression[1] in constants[cell]}
+            input_stride = max(1, len(dependencies))
+            parameter_stride = max(1, len(constants[cell]))
+            signature_args = (f"double t,const double* y,const double* yp,double cj,{runtime_decl}"
+                              "const int* ix,const double* par,double* PB_RESTRICT out,const int* offsets")
+            source += graph.emit(
+                function, nodes, variable_map,
+                references={**time_references, **{node: f"par[{index}]" for node, index in parameter_nodes.items()}},
+                input_reference=lambda op, old: f"{'y' if op == 'var' else 'yp'}[ix[{variable_map[old]}]]",
+                signature=f"static PB_NOINLINE void {function}({signature_args})",
+                store=lambda index, value: f"out[offsets[{index}]] = {value};")
+            metadata["direct_scalar_output_functions"] = metadata.get("direct_scalar_output_functions", 0) + 1
             vectorized = vectorize and name == "evaluate" and len(groups) >= 4
-            if vectorized:
-                # Keep the same graph, constants and scalar operation order in
-                # every lane. Only independent cells are evaluated together.
-                vector_code = code.replace(function + "(", function + "_vec(")
-                vector_code = vector_code.replace(
-                    "double* out)", "double* PB_RESTRICT out,const int* offsets)"
-                )
-                input_stride = max(1, len(dependencies))
-                parameter_stride = max(1, len(constants[cell]))
-                vector_code = re.sub(
-                    r"\b(yp|y)\[ix\[(\d+)\]\]",
-                    rf"gather_cells(\1,ix+\2,{input_stride})",
-                    vector_code,
-                )
-                vector_code = re.sub(
-                    r"\bpar\[(\d+)\]",
-                    rf"cell_parameter(par,\1,{parameter_stride})",
-                    vector_code,
-                )
-                vector_code = re.sub(
-                    r"const double z(\d+) =", r"const CellPacket z\1 =", vector_code
-                )
-                vector_code = re.sub(
-                    r"out\[(\d+)\] = ([^\n]+);",
-                    rf"scatter_cells(out,offsets+\1,{len(entries)},\2);",
-                    vector_code,
-                )
-                metadata["vectorized_residual_cells"] += len(groups) // 4 * 4
-                metadata["residual_lanes"] = 4
-                metadata["direct_vector_output_functions"] = (
-                    metadata.get("direct_vector_output_functions", 0) + 1
-                )
             inputs, outputs, parameters = [], [], []
             for cell, group in groups:
                 local = set().union(*(graph.dependencies(node) for _, _, node in group))
@@ -357,23 +290,24 @@ def _emit_model(
             if any(len(row) != len(parameters[0]) for row in parameters):
                 raise RuntimeError("Cell template has inconsistent parameter bindings.")
             if vectorized:
-                for j in range(len(parameters[0])):
-                    # A parameter may differ between batches. Broadcast it only
-                    # when every four-cell batch has equal lane values.
-                    same = all(
-                        repr(parameters[i + lane][j]) == repr(parameters[i][j])
-                        for i in range(0, len(groups) - 3, 4)
-                        for lane in range(4)
-                    )
-                    token = f"cell_parameter(par,{j},{parameter_stride})"
-                    if same and token in vector_code:
-                        vector_code = vector_code.replace(
-                            token, f"CellPacket(par[{j}])"
-                        )
-                        metadata["broadcast_cell_parameters"] = (
-                            metadata.get("broadcast_cell_parameters", 0) + 1
-                        )
-                source += vector_code
+                broadcast = {j for j in range(len(parameters[0])) if all(
+                    repr(parameters[i + lane][j]) == repr(parameters[i][j])
+                    for i in range(0, len(groups) - 3, 4) for lane in range(4))}
+                references = {**time_references, **{
+                    node: f"CellPacket(par[{index}])" if index in broadcast else
+                          f"cell_parameter(par,{index},{parameter_stride})"
+                    for node, index in parameter_nodes.items()}}
+                source += graph.emit(
+                    function + "_vec", nodes, variable_map, references=references,
+                    input_reference=lambda op, old: f"gather_cells({'y' if op == 'var' else 'yp'},ix+{variable_map[old]},{input_stride})",
+                    temporary_type="CellPacket",
+                    signature=f"static PB_NOINLINE void {function}_vec({signature_args})",
+                    store=lambda index, value: f"scatter_cells(out,offsets+{index},{len(entries)},{value});")
+                used = {parameter_nodes[node] for node in graph.postorder(nodes, time_references) if node in parameter_nodes}
+                metadata["broadcast_cell_parameters"] = metadata.get("broadcast_cell_parameters", 0) + len(broadcast & used)
+                metadata["vectorized_residual_cells"] += len(groups) // 4 * 4
+                metadata["residual_lanes"] = 4
+                metadata["direct_vector_output_functions"] = metadata.get("direct_vector_output_functions", 0) + 1
 
             def table(rows):
                 return (
@@ -409,13 +343,13 @@ def _emit_model(
                 f"shared_{name}::evaluate(t,y,yp,cj,{runtime_arg}extended+{len(keep)});\ny=extended;\n"
             )
         source += (
-            f'PB_EXPORT void {name}(double t,const double* y,'
+            f'{linkage} void {name}{function_suffix}(double t,const double* y,'
             f"const double* yp,double cj,{runtime_decl}double* out) {{\nensure_time(t{',runtime' if runtime_parameters else ''});\n"
             + preparation
             + "".join(calls)
             + "}\n"
         )
-    if metadata["residual_lanes"] == 4:
+    if metadata["residual_lanes"] == 4 and include_headers:
         source = (
             Path(__file__).with_name("cell.hpp").read_text(encoding="utf-8")
             + "\n"

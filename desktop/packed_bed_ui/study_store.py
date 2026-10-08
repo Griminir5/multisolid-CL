@@ -155,17 +155,21 @@ class StudyStore:
         if getattr(self.project, "executing", False) or (self.project.root / ".solver.lock").exists():
             raise StudyError("Wait for execution to finish before changing studies or definitions.")
 
-    def _commit(self, folders, metadata, deleted_case_ids=()):
+    def _commit(self, folders, metadata, deleted_case_ids=(), *, cancelled=lambda: False, progress=lambda *_: None):
         """Stage all folders, record rollback information, then commit project.json last."""
         self._require_idle()
         root = self.project.root
         recover_study_transaction(root)
+        original_manifest = (root / "project.json").read_bytes()
         transaction = root / TRANSACTION
         transaction.mkdir()
         identity = uuid4().hex
         operations = []
         try:
-            for index, (relative, contents) in enumerate(folders.items()):
+            entries = folders.items() if isinstance(folders, dict) else folders
+            for index, (relative, contents) in enumerate(entries):
+                if cancelled():
+                    raise InterruptedError("Study generation cancelled; existing cases are unchanged.")
                 target = _inside(root, relative)
                 operations.append({"path": relative, "existed": target.exists(), "replacement": contents is not None})
                 if contents is not None:
@@ -178,6 +182,11 @@ class StudyStore:
                             path.write_bytes(text)
                         else:
                             write_text(path, text)
+            if cancelled():
+                raise InterruptedError("Study generation cancelled; existing cases are unchanged.")
+            if (root / "project.json").read_bytes() != original_manifest:
+                raise StudyError("The project changed during staging. Review a fresh preview before replacing cases.")
+            progress("Committing generated cases…")
             write_json(transaction / "transaction.json", {"id": identity, "operations": operations,
                                                           "deleted_case_ids": list(deleted_case_ids)})
             for index, operation in enumerate(operations):
@@ -213,14 +222,16 @@ class StudyStore:
             case.metadata.update(metadata)
             raise
 
-    def _adopt_metadata(self, metadata):
+    def _adopt_metadata(self, metadata, case_documents=None):
         self.project.metadata = metadata
         existing = {case.id: case for case in self.project.cases}
         cases = []
         for entry in metadata["cases"]:
             case = existing.get(entry["id"])
             if case is None:
-                case = ProjectCase(self.project, entry, read_documents(self.project.root / "cases" / entry["id"] / "inputs"))
+                documents = (case_documents[entry["id"]] if case_documents is not None else
+                             read_documents(self.project.root / "cases" / entry["id"] / "inputs"))
+                case = ProjectCase(self.project, entry, documents)
             else:
                 case.metadata = entry
             cases.append(case)
@@ -297,7 +308,7 @@ class StudyStore:
         return [ExistingCase(case.id, study_id, case.run_folder.exists()) for case in self.project.cases
                 if case.metadata.get("study_id") == study_id]
 
-    def apply_preview(self, preview):
+    def apply_preview(self, preview, *, cancelled=lambda: False, progress=lambda *_: None):
         self._require_idle()
         # Read committed sources again: a stale preview must never authorize deletion.
         self.reload()
@@ -309,8 +320,13 @@ class StudyStore:
         if not preview.candidates:
             raise StudyError("Add at least one case before generating the study.")
         # Verify the reviewed documents as well; callers cannot substitute an arbitrary candidate list.
-        if list(current.remaining) != preview.candidates:
-            raise StudyError("The candidate inputs changed. Review a fresh preview.")
+        from itertools import zip_longest
+        for index, (actual, reviewed) in enumerate(zip_longest(current.remaining, preview.candidates)):
+            if cancelled():
+                raise InterruptedError("Study generation cancelled; existing cases are unchanged.")
+            if actual != reviewed:
+                raise StudyError("The candidate inputs changed. Review a fresh preview.")
+            progress(f"Checking case {index + 1}/{preview.total}…")
         metadata = deepcopy(self.project.metadata)
         metadata["cases"] = [entry for entry in metadata["cases"] if entry["id"] not in preview.delete_ids]
         folders = {f"cases/{ident}": None for ident in current.delete_ids}
@@ -322,17 +338,20 @@ class StudyStore:
             study.editor_metadata["report"] = report
             folders[f"studies/{study.id}"] = self._study_files(study)
         new_ids = []
-        for candidate in preview.candidates:
-            ident = uuid4().hex
-            new_ids.append(ident)
-            entry = {"id": ident, "name": candidate.name, "included": True, "origin": study.name,
-                     "study_id": study.id, "selections": candidate.selections}
-            if report is not None:
-                entry["report"] = deepcopy(report)
-            metadata["cases"].append(entry)
-            folders[f"cases/{ident}"] = _documents(portable_documents(candidate.documents), "inputs/")
+        def staged_folders():
+            yield from folders.items()
+            for index, candidate in enumerate(preview.candidates):
+                ident = uuid4().hex
+                new_ids.append(ident)
+                entry = {"id": ident, "name": candidate.name, "included": True, "origin": study.name,
+                         "study_id": study.id, "selections": candidate.selections}
+                if report is not None:
+                    entry["report"] = deepcopy(report)
+                metadata["cases"].append(entry)
+                progress(f"Staging case {index + 1}/{preview.total}…")
+                yield f"cases/{ident}", _documents(portable_documents(candidate.documents), "inputs/")
         next(entry for entry in metadata["studies"] if entry["id"] == study.id)["generation_signature"] = current.signature
-        self._commit(folders, metadata, preview.delete_ids)
+        self._commit(staged_folders(), metadata, preview.delete_ids, cancelled=cancelled, progress=progress)
         return [case for case in self.project.cases if case.id in new_ids]
 
     def definition_users(self, definition_id):

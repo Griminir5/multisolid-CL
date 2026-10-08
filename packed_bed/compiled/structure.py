@@ -1,6 +1,6 @@
 """Exact fixed-state elimination and equation/variable matching."""
 
-from functools import lru_cache
+from .graph import LEAVES
 
 import numpy as np
 from scipy.sparse import csc_matrix
@@ -8,33 +8,29 @@ from scipy.sparse.csgraph import maximum_bipartite_matching, reverse_cuthill_mck
 
 
 def derivative_variables(graph, roots):
-    @lru_cache(None)
-    def visit(node):
+    values = {}
+    for node in graph.postorder(roots):
         op, *args = graph.nodes[node]
-        if op == "dot":
-            return frozenset(args)
-        if op in ("const", "var", "time", "cj", "param"):
-            return frozenset()
-        return frozenset().union(*(visit(arg) for arg in args))
-
-    return [visit(root) for root in roots]
+        values[node] = (frozenset(args) if op == "dot" else frozenset() if op in LEAVES else
+                        frozenset().union(*(values[arg] for arg in args)))
+    return [values[root] for root in roots]
 
 
 def substitute_constants(graph, roots, replacements):
     """Substitute constant states and their identically zero derivatives."""
-
-    @lru_cache(None)
-    def visit(node):
+    values = {}
+    for node in graph.postorder(roots):
         op, *args = graph.nodes[node]
         if op == "var" and args[0] in replacements:
-            return graph.constant(replacements[args[0]])
-        if op == "dot" and args[0] in replacements:
-            return graph.zero
-        if op in ("const", "var", "dot", "time", "cj", "param"):
-            return node
-        return graph.make(op, *(visit(arg) for arg in args))
-
-    return [visit(root) for root in roots]
+            value = graph.constant(replacements[args[0]])
+        elif op == "dot" and args[0] in replacements:
+            value = graph.zero
+        elif op in LEAVES:
+            value = node
+        else:
+            value = graph.make(op, *(values[arg] for arg in args))
+        values[node] = value
+    return [values[root] for root in roots]
 
 
 def eliminate_fixed_states(graph, keep, residuals, reconstruction, initial, groups):

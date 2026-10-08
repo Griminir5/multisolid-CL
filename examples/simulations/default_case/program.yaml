@@ -3,27 +3,27 @@ inlet_flow:
   steps:
     - kind: ramp
       duration_s: 5.0
-      target: 36.2568
+      target: 76.2568
     - kind: hold
       duration_s: 500.0
     - kind: ramp
       duration_s: 5.0
-      target: 4.4537
+      target: 16.4537
     - kind: hold
       duration_s: 180.0
     - kind: ramp
       duration_s: 5.0
-      target: 30.2662
+      target: 60.2662
     - kind: hold
       duration_s: 500.0
     - kind: ramp
       duration_s: 5.0
-      target: 30.7559
+      target: 80.7559
     - kind: hold
       duration_s: 100.0
     - kind: ramp
       duration_s: 5.0
-      target: 4.4537
+      target: 15.4537
     - kind: hold
       duration_s: 180.0
 

@@ -8,7 +8,30 @@ differential variables; only named explicit algebraic definitions are removed.
 import math
 import hashlib
 import json
-from functools import lru_cache
+
+
+LEAVES = frozenset(("const", "var", "dot", "time", "cj", "param"))
+
+
+def postorder(roots, children, known=()):
+    """Depth-first, left-to-right postorder without using the Python call stack."""
+    done, visiting = set(), set()
+    for root in roots:
+        stack = [(root, False)]
+        while stack:
+            node, expanded = stack.pop()
+            if node in known or node in done:
+                continue
+            if expanded:
+                visiting.remove(node)
+                done.add(node)
+                yield node
+            else:
+                if node in visiting:
+                    raise ValueError("Cyclic elimination")
+                visiting.add(node)
+                stack.append((node, True))
+                stack.extend((child, False) for child in reversed(children(node)))
 
 
 class Graph:
@@ -87,131 +110,131 @@ class Graph:
         """An exogenous input whose identity survives constant folding."""
         return self.make("param", name, slot)
 
+    def children(self, node):
+        op, *args = self.nodes[node]
+        return () if op in LEAVES else args
+
+    def postorder(self, roots, known=()):
+        return postorder(roots, self.children, known)
+
     def fingerprint(self, roots):
         """Hash reachable instructions independently of discarded graph nodes."""
         nodes, mapping = [], {}
-
-        def visit(node):
-            if node not in mapping:
-                op, *args = self.nodes[node]
-                if op not in ("const", "var", "dot", "time", "cj", "param"):
-                    args = [visit(arg) for arg in args]
-                mapping[node] = len(nodes)
-                nodes.append((op, *args))
-            return mapping[node]
-
-        indices = [visit(node) for node in roots]
+        for node in self.postorder(roots):
+            op, *args = self.nodes[node]
+            if op not in LEAVES:
+                args = [mapping[arg] for arg in args]
+            mapping[node] = len(nodes)
+            nodes.append((op, *args))
+        indices = [mapping[node] for node in roots]
         return hashlib.sha256(json.dumps([nodes, indices], allow_nan=False).encode()).hexdigest()
 
     def from_dae(self, node, index_map):
         import daetools.pyDAE as d
 
-        kind = type(node).__name__
-        if kind == "adConstantNode":
-            return self.constant(node.Quantity.value)
-        if kind in ("adRuntimeParameterNode", "adDomainIndexNode"):
-            return self.constant(node.Value)
-        if kind == "adTimeNode":
-            return self.make("time")
-        if kind == "adRuntimeVariableNode":
-            return self.make("var", index_map[node.OverallIndex])
-        if kind == "adRuntimeTimeDerivativeNode":
-            return self.make("dot", index_map[node.OverallIndex])
-        if kind == "adUnaryNode":
-            mapping = {
-                d.eSign: "neg",
-                d.eSqrt: "sqrt",
-                d.eExp: "exp",
-                d.eAbs: "abs",
-                d.eLn: "log",
-                d.eLog: "log10",
-            }
-            return self.make(
-                mapping[node.Function], self.from_dae(node.Node, index_map)
-            )
-        if kind == "adBinaryNode":
-            mapping = {
-                d.ePlus: "add",
-                d.eMinus: "sub",
-                d.eMulti: "mul",
-                d.eDivide: "div",
-                d.ePower: "pow",
-                d.eMin: "min",
-                d.eMax: "max",
-            }
-            return self.make(
-                mapping[node.Function],
-                self.from_dae(node.LNode, index_map),
-                self.from_dae(node.RNode, index_map),
-            )
-        raise NotImplementedError(kind)
+        unary = {d.eSign: "neg", d.eSqrt: "sqrt", d.eExp: "exp", d.eAbs: "abs",
+                 d.eLn: "log", d.eLog: "log10"}
+        binary = {d.ePlus: "add", d.eMinus: "sub", d.eMulti: "mul", d.eDivide: "div",
+                  d.ePower: "pow", d.eMin: "min", d.eMax: "max"}
+        stack, values = [(node, False)], []
+        while stack:
+            current, expanded = stack.pop()
+            kind = type(current).__name__
+            if kind in ("adUnaryNode", "adBinaryNode"):
+                if not expanded:
+                    stack.append((current, True))
+                    if kind == "adBinaryNode":
+                        stack.append((current.RNode, False))
+                        stack.append((current.LNode, False))
+                    else:
+                        stack.append((current.Node, False))
+                    continue
+                if kind == "adBinaryNode":
+                    right, left = values.pop(), values.pop()
+                    value = self.make(binary[current.Function], left, right)
+                else:
+                    value = self.make(unary[current.Function], values.pop())
+            elif kind == "adConstantNode":
+                value = self.constant(current.Quantity.value)
+            elif kind in ("adRuntimeParameterNode", "adDomainIndexNode"):
+                value = self.constant(current.Value)
+            elif kind == "adTimeNode":
+                value = self.make("time")
+            elif kind == "adRuntimeVariableNode":
+                value = self.make("var", index_map[current.OverallIndex])
+            elif kind == "adRuntimeTimeDerivativeNode":
+                value = self.make("dot", index_map[current.OverallIndex])
+            else:
+                raise NotImplementedError(kind)
+            values.append(value)
+        return values[0]
 
     def dependencies(self, node):
-        if node not in self._dependencies:
-            self._dependencies[node] = self._dependencies_for(node)
+        for n in self.postorder([node], self._dependencies):
+            op, *args = self.nodes[n]
+            self._dependencies[n] = (frozenset(args) if op in ("var", "dot") else
+                                     frozenset() if op in LEAVES else
+                                     frozenset().union(*(self._dependencies[a] for a in args)))
         return self._dependencies[node]
 
-    def _dependencies_for(self, node):
-        op, *args = self.nodes[node]
-        if op in ("var", "dot"):
-            return frozenset(args)
-        if op in ("const", "time", "cj", "param"):
-            return frozenset()
-        return frozenset().union(*(self.dependencies(a) for a in args))
-
     def isolate(self, node, target):
-        @lru_cache(None)
-        def parts(n):
+        parts = {}
+
+        def split(n):
             op, *a = self.nodes[n]
             if target not in self.dependencies(n):
                 return self.zero, n
             if op == "var" and a[0] == target:
                 return self.one, self.zero
             if op in ("add", "sub"):
-                p, q = parts(a[0])
-                r, s = parts(a[1])
+                p, q = parts[a[0]]
+                r, s = parts[a[1]]
                 return self.make(op, p, r), self.make(op, q, s)
             if op == "neg":
-                p, q = parts(a[0])
+                p, q = parts[a[0]]
                 return self.make("neg", p), self.make("neg", q)
             if op == "mul":
                 if target not in self.dependencies(a[0]):
-                    p, q = parts(a[1])
+                    p, q = parts[a[1]]
                     return self.make("mul", a[0], p), self.make("mul", a[0], q)
                 if target not in self.dependencies(a[1]):
-                    p, q = parts(a[0])
+                    p, q = parts[a[0]]
                     return self.make("mul", a[1], p), self.make("mul", a[1], q)
             if op == "div" and target not in self.dependencies(a[1]):
-                p, q = parts(a[0])
+                p, q = parts[a[0]]
                 return self.make("div", p, a[1]), self.make("div", q, a[1])
             raise ValueError("Nonlinear elimination")
 
-        coefficient, remainder = parts(node)
+        def children(n):
+            return self.children(n) if target in self.dependencies(n) else ()
+
+        for n in postorder([node], children):
+            parts[n] = split(n)
+        coefficient, remainder = parts[node]
         return self.make("div", self.make("neg", remainder), coefficient)
 
     def substitute(self, roots, replacements):
-        visiting = set()
+        def children(n):
+            op, *args = self.nodes[n]
+            if op == "var" and args[0] in replacements:
+                return (replacements[args[0]],)
+            return self.children(n)
 
-        @lru_cache(None)
-        def sub(n):
-            if n in visiting:
-                raise ValueError("Cyclic elimination")
-            visiting.add(n)
-            op, *a = self.nodes[n]
-            if op == "var" and a[0] in replacements:
-                result = sub(replacements[a[0]])
-            elif op in ("const", "var", "dot", "time", "cj", "param"):
+        substituted = {}
+        for n in postorder(roots, children):
+            op, *args = self.nodes[n]
+            if op == "var" and args[0] in replacements:
+                result = substituted[replacements[args[0]]]
+            elif op in LEAVES:
                 result = n
             else:
-                result = self.make(op, *(sub(x) for x in a))
-            visiting.remove(n)
-            return result
-
-        return [sub(n) for n in roots]
+                result = self.make(op, *(substituted[a] for a in args))
+            substituted[n] = result
+        return [substituted[n] for n in roots]
 
     def gradient(self, n):
-        if n not in self._gradients:
-            self._gradients[n] = self._gradient_for(n)
+        for node in self.postorder([n], self._gradients):
+            self._gradients[node] = self._gradient_for(node)
         return self._gradients[n]
 
     def _gradient_for(self, n):
@@ -222,8 +245,8 @@ class Graph:
             return {a[0]: self.make("cj")}
         if op in ("const", "time", "cj", "param"):
             return {}
-        ga = self.gradient(a[0])
-        gb = self.gradient(a[1]) if len(a) > 1 else {}
+        ga = self._gradients[a[0]]
+        gb = self._gradients[a[1]] if len(a) > 1 else {}
         out = {}
         for k in ga.keys() | gb.keys():
             da = ga.get(k, self.zero)
@@ -282,20 +305,21 @@ class Graph:
                 out[k] = v
         return out
 
-    def emit(self, name, roots, variable_map):
+    def emit(self, name, roots, variable_map, *, references=None, input_reference=None,
+             temporary_type="double", signature=None, store=None, linkage="PB_EXPORT", prologue=""):
+        """Emit arithmetic with explicit addressing, types, signature and stores."""
         # Finish and store each output in dependency order, keeping common
         # expressions shared. This shortens temporary lifetimes in large kernels.
         # Output storage is separate from the input state/derivative arrays.
-        refs = {}
-        lines = []
+        refs = dict(references or {})
+        lines = [prologue] if prologue else []
+        if input_reference is None:
+            input_reference = lambda op, old: f"{'y' if op == 'var' else 'yp'}[{variable_map[old]}]"
+        if store is None:
+            store = lambda index, value: f"out[{index}] = {value};"
 
         def visit(n):
-            if n in refs:
-                return
             op, *args = self.nodes[n]
-            if op not in ("const", "var", "dot", "time", "cj", "param"):
-                for arg in args:
-                    visit(arg)
             if op == "const":
                 refs[n] = repr(args[0])
                 return
@@ -303,10 +327,10 @@ class Graph:
                 refs[n] = f"runtime[{args[1]}]"
                 return
             if op == "var":
-                refs[n] = f"y[{variable_map[args[0]]}]"
+                refs[n] = input_reference(op, args[0])
                 return
             if op == "dot":
-                refs[n] = f"yp[{variable_map[args[0]]}]"
+                refs[n] = input_reference(op, args[0])
                 return
             if op in ("time", "cj"):
                 refs[n] = "t" if op == "time" else "cj"
@@ -329,20 +353,18 @@ class Graph:
                 fn = {"abs": "fabs", "min": "fmin", "max": "fmax"}.get(op, op)
                 expression = f"{fn}({','.join(a)})"
             refs[n] = f"z{n}"
-            lines.append(f"const double z{n} = {expression};")
+            lines.append(f"const {temporary_type} z{n} = {expression};")
 
         for i, n in enumerate(roots):
-            visit(n)
-            lines.append(f"out[{i}] = {refs[n]};")
+            for node in self.postorder([n], refs):
+                visit(node)
+            lines.append(store(i, refs[n]))
         parameters = "const double* runtime, " if any(n[0] == "param" for n in self.nodes) else ""
-        return (
-            f'PB_EXPORT void {name}(double t, const double* y, const double* yp, double cj, {parameters}double* out) {{\n'
-            + "\n".join(lines)
-            + "\n}\n"
-        )
+        signature = signature or f'{linkage} void {name}(double t, const double* y, const double* yp, double cj, {parameters}double* out)'
+        return signature + " {\n" + "\n".join(lines) + "\n}\n"
 
 
-def export_model(simulation, *, shared_programs=False):
+def export_model(simulation):
     g = Graph()
     mapping = simulation.IndexMappings
     infos = sorted(
@@ -351,12 +373,11 @@ def export_model(simulation, *, shared_programs=False):
     )
     roots = []
     boundaries = {}
-    if shared_programs:
-        from .program_data import boundary_slots
-        model = simulation.model
-        for equation, variable, component, name, slot in boundary_slots(model.gas_species):
-            old = mapping[getattr(model, variable).OverallIndex + component]
-            boundaries[equation] = g.make("sub", g.make("var", old), g.parameter(name, slot))
+    from .program_data import boundary_slots
+    model = simulation.model
+    for equation, variable, component, name, slot in boundary_slots(model.gas_species):
+        old = mapping[getattr(model, variable).OverallIndex + component]
+        boundaries[equation] = g.make("sub", g.make("var", old), g.parameter(name, slot))
     for info in infos:
         from .cache import check_cancelled
         check_cancelled()

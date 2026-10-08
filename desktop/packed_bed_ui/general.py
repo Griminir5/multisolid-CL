@@ -60,7 +60,7 @@ class GeneralPage(QWidget):
                      kind="spin", bounds=(0, 1024), default=0)
         threads.setToolTip("KLU factorization is serial. This setting still controls other applicable numerical work.")
         editor.field(form, ("run", "solver", "relative_tolerance"), "Relative tolerance")
-        self.advanced_button = action_button("Advanced solver settings…", self.advanced)
+        self.advanced_button = action_button("Advanced solver settings…", self.advanced, inspection=True)
         form.addRow(self.advanced_button)
         self.cache_status = QLabel("Cache checked when the run starts")
         self.cache_status.setWordWrap(True)
@@ -221,11 +221,18 @@ class GeneralPage(QWidget):
                       control.valueChanged if isinstance(control, QSpinBox) else control.textChanged)
             signal.connect(validate_fields)
         validate_fields()
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        if self.editor.read_only:
+            for control, _ in controls.values():
+                if isinstance(control, (QLineEdit, QSpinBox)):
+                    control.setReadOnly(True)
+                else:
+                    control.setEnabled(False)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close if self.editor.read_only else
+                                   QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         form.addRow(buttons)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        if dialog.exec() == QDialog.DialogCode.Accepted and not self.editor.read_only:
             for key, (control, original) in controls.items():
                 if not control.isEnabled():
                     continue

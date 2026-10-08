@@ -312,7 +312,8 @@ def load_factory(provider, entry, catalogue, approved=()):
     if digest not in approved and not code_approved(catalogue.paths[provider]):
         raise ValueError(f'Enable code plugin {provider} on this machine before execution.')
     folder = catalogue.paths[provider].resolve()
-    if package_hash(folder) != digest:
+    files = {name: path.read_bytes() for name, path in package_files(folder)}
+    if content_hash(files.items()) != digest:
         raise ValueError(f'Plugin {provider} content has changed.')
     module_name, factory = entry.split(':')
     # A temporary archive inspection and an installed copy may have identical
@@ -323,15 +324,29 @@ def load_factory(provider, entry, catalogue, approved=()):
     try:
         sys.dont_write_bytecode = True
         if namespace not in sys.modules:
-            initializer = folder / '__init__.py'
-            spec = importlib.util.spec_from_file_location(namespace, initializer, submodule_search_locations=[str(folder)])
+            # Import only the bytes just verified. A source directory may contain
+            # valid but unrelated bytecode; relative imports and __init__ must
+            # use the same source snapshot as the factory itself.
+            snapshot = TemporaryDirectory(prefix='multisolid-plugin-source-')
+            source = Path(snapshot.name)
+            for name, data in files.items():
+                path = source / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            initializer = source / '__init__.py'
+            spec = importlib.util.spec_from_file_location(namespace, initializer, submodule_search_locations=[str(source)])
             package = importlib.util.module_from_spec(spec)
+            # Resources and deferred relative imports must outlive this call.
+            package._source_snapshot = snapshot
             sys.modules[namespace] = package
             try:
                 if initializer.is_file():
                     spec.loader.exec_module(package)
             except Exception:
-                sys.modules.pop(namespace, None)
+                for name in list(sys.modules):
+                    if name == namespace or name.startswith(namespace + '.'):
+                        sys.modules.pop(name, None)
+                snapshot.cleanup()
                 raise
         module = importlib.import_module(namespace + '.' + module_name)
         result = getattr(module, factory)

@@ -14,7 +14,7 @@ notice is in `packed_bed_ui/assets/fonts/Maratype-LICENSE.txt`. The launch splas
 appears before the scientific workspace loads; solver workers run without it.
 
 The desktop follows system light/dark appearance, uses a shared numeric font, and
-keeps editing controls and previews together. See [desktop design and validation](DESIGN.md).
+keeps editing controls and previews together.
 
 ## Start developing
 
@@ -442,16 +442,13 @@ Workers reconstruct authoritative definitions from plugin copies in their input 
 ## Checks
 
 ```sh
-python -m pytest desktop/tests -q
-python -m pytest tests/test_batch.py tests/test_cli.py tests/test_solver_infrastructure.py -q
+python -m packed_bed examples/simulations/default_case/run.yaml --validate-only
+python -m packed_bed.compiled.smoke
 python -m pip wheel --no-deps --no-build-isolation ./desktop
 ```
 
-Tests cover multi-case projects, the mixed 11-case example, portable imports,
-invalid drafts, successful-baseline eligibility, complete study rebuilds, reusable
-definitions, spreadsheet editing, staleness, transaction recovery, interrupted execution,
-project locking, and real DAETools runs compared with direct engine results.
-Qt checks run offscreen; real solver checks skip when DAETools is absent.
+Run these commands from the repository root. Native checks require the staged
+compiled runtime; building the desktop wheel checks its packaging separately.
 
 ## Project plugins
 

@@ -10,8 +10,7 @@ portable ZIP with the required runtimes included; end users do not install Pytho
 It supports projects with multiple cases, draft run settings, shared previews,
 Run case / Run all execution, and project Excel reports with Case as a selectable
 axis. Each case keeps one latest run; rerunning
-replaces its results, and input edits mark retained results stale. See its README for setup and the remaining work
-toward [PLAN.md](PLAN.md).
+replaces its results, and input edits mark retained results stale. See its README for setup.
 
 **Install the package.** Use Python 3.11 or 3.12. The commands below use PowerShell from the repository directory.
 
@@ -27,10 +26,10 @@ toward [PLAN.md](PLAN.md).
    .\.venv\Scripts\Activate.ps1
    ```
 
-3. Install the package and test dependencies.
+3. Install the package.
 
    ```powershell
-   python -m pip install -e ".[dev]"
+   python -m pip install -e .
    ```
 
 4. Install [DAETools 2.6.0](https://daetools.sourceforge.io/downloads.html) and its dependencies in the same environment.
@@ -47,10 +46,10 @@ desktop preview. For source development, install Graphviz on `PATH` or set
 See [bundling Graphviz](desktop/BUILD_WINDOWS.md#graphviz-runtime) for staging the
 Windows runtime.
 
-**Validate a case.** Start with the [default case](packed_bed/examples/default_case/run.yaml).
+**Validate a case.** Start with the [default case](examples/simulations/default_case/run.yaml).
 
 ```powershell
-python -m packed_bed packed_bed/examples/default_case/run.yaml --validate-only
+python -m packed_bed examples/simulations/default_case/run.yaml --validate-only
 ```
 
 Validation detects duplicate YAML keys, invalid fields, missing species, unresolved references, and incompatible report or plot selections.
@@ -59,7 +58,7 @@ It does not create output files. It does not establish the scientific validity o
 **Run a case.** Remove `--validate-only` to start the solver.
 
 ```powershell
-python -m packed_bed packed_bed/examples/default_case/run.yaml
+python -m packed_bed examples/simulations/default_case/run.yaml
 ```
 
 Use `--artifacts` to create the operating-program diagram and initial solid profile before the run.
@@ -72,20 +71,10 @@ The installed `packed-bed` command accepts the same arguments as `python -m pack
 
 A single run can replace files in its output directory. Use a different output directory to keep an earlier result.
 
-The default case includes three solver configurations with the same physical inputs,
-1,000-second horizon, reports and tolerances. Each uses one numerical thread.
-
-| Run file in `packed_bed/examples/default_case` | Backend / solver | Output directory |
-| --- | --- | --- |
-| `run.yaml` | DAETools / SuperLU baseline | `output` |
-| `run_compiled.yaml` | Compiled / SuperLU | `output_compiled` |
-| `run_band.yaml` | Compiled / band LU | `output_band` |
-
-For example, run `python -m packed_bed packed_bed/examples/default_case/run_band.yaml`.
-The compiled variants require the optional runtime and compiler described below.
-The band configuration uses `step_growth_threshold: 1.25` and
-`nonlinear_refresh_interval: 4` to handle sharp reaction transients. Its tolerances
-match the baseline. Optional vector exponentials and reciprocal diagonals remain disabled.
+The source example uses DAETools / SuperLU. To use compiled execution, set
+`solver.backend: compiled` and select `solver.name: superlu`, `klu`, or `band`.
+Install the optional runtime and compiler described below. Give each variant a
+separate output directory to retain comparisons.
 
 **Edit the input files.** The run file refers to three other files.
 All relative paths use the directory that contains the referring file.
@@ -142,7 +131,13 @@ With `repeat_program: true`, the next cycle starts from the previous cycle's fin
 The program does not reset to its initial value between cycles.
 
 The solver smooths ramps with a one-second width. Thus, the value at time zero can differ from the declared initial value.
-The simulation horizon limits the compiled program.
+Smoothing has compact support: a ramp affects its surroundings only within one
+smoothing width of its endpoints. Inside that interval the smoothed positive part
+is quadratic, with a continuous first derivative. Beyond it the ramp is exactly
+linear or constant. Programs retain one startup cycle and one carried-forward
+continuation, independently of the simulation horizon. Extending a run therefore
+preserves earlier boundary values. Initialization, previews, Standard execution,
+and Compiled execution use the same rule.
 
 For a flow in gas hourly space velocity, set `inlet_flow.basis: ghsv_per_h`.
 The compiler uses the bed volume, 273.15 K, and 100,000 Pa to convert GHSV to mol/s.
@@ -154,18 +149,7 @@ The default, `separate_channels`, keeps the existing flow, temperature, and
 composition channels. Each mode requires its own program format; mixing the
 formats is rejected.
 
-The default case includes a complete [feed program](packed_bed/examples/default_case/program_feed_stream.yaml)
-and matching [run configuration](packed_bed/examples/default_case/run_feed_stream.yaml):
-
-```powershell
-python -m packed_bed packed_bed/examples/default_case/run_feed_stream.yaml
-```
-
-This variant uses the original feed compositions, flowrates, temperatures, and
-flow/composition stage durations. Temperature changes with each feed, moving
-the final cooldown five seconds earlier; the independent pressure schedule is
-unchanged. The run keeps the baseline's 1,000-second horizon and writes to
-`output_feed_stream`.
+For example, a feed program has the following structure:
 
 ```yaml
 # run.yaml (excerpt)
@@ -271,7 +255,7 @@ solver:
 Then run the case normally:
 
 ```sh
-python -m packed_bed packed_bed/examples/default_case/run.yaml
+python -m packed_bed examples/simulations/default_case/run.yaml
 ```
 
 KLU is available under both backends as `klu`.
@@ -307,22 +291,14 @@ AVX2 acceleration is detected at runtime; other CPUs use scalar kernels. The opt
 `vector_exponentials: true` also requires FMA and falls back to scalar math when unavailable.
 The backend supports the usual datasets and plots;
 derivative reports, custom DAETools reporters and incidence-matrix output require `solver.backend: daetools`.
-Run `python -m pytest tests/compiled` to check native kernels, solver callbacks and reactor integration.
-
-For a whole-run comparison against the specialized program implementation, use
-`python tools/benchmark_shared_programs.py --cases PATH/TO/cases --output build/program-benchmark --workers 1 8 32 64`.
-Each input directory supplies its immediate `*/run.yaml` files. The benchmark preserves
-inputs, writes separate outputs, and records cold/warm time, kernel counts, source size,
-and per-stage solver statistics. On Windows it also measures peak committed memory
-across the coordinator, workers, and compiler descendants, with a guard against exhausting
-the machine. Plots are disabled in both variants; numerical settings and report times
-are preserved. Memory measurements are unavailable on other platforms.
+Run `python -m packed_bed.compiled.smoke` to compile and solve a small DAE with
+each supported native solver. The check needs a working native runtime and compiler.
 
 **Run a batch.** A batch expands the combinations of named axis values into separate cases.
 
 ```powershell
-python -m packed_bed batch packed_bed/examples/default_batch_case/batch.yaml --validate-only
-python -m packed_bed batch packed_bed/examples/default_batch_case/batch.yaml --workers 4 --case-timeout-s 600
+python -m packed_bed batch examples/simulations/default_batch_case/batch.yaml --validate-only
+python -m packed_bed batch examples/simulations/default_batch_case/batch.yaml --workers 4 --case-timeout-s 600
 ```
 
 The first command validates all twelve example cases without writes: two programs ×
@@ -353,23 +329,104 @@ A batch refuses to overwrite existing case directories or its summary.
 To run the batch again, select a new output directory. Automatic resume is not available.
 Use `python -m packed_bed batch --help` for the batch options.
 
-**Compare solver timings.** From the repository, run:
+**Compare review changes.** Run `python tools/benchmark_review.py --output /tmp/review-run`
+from a Linux source checkout with DAETools and the compiled runtime installed.
+The benchmark retains case inputs, datasets, balance errors, convergence counters,
+peak process memory, and separate compilation/integration times. Use a fresh output
+directory for each source revision; repetition zero warms the kernel cache.
+Relative tolerance now defaults explicitly to `1e-5`; `--relative-tolerance`
+overrides it. Absolute tolerance stays as authored unless
+`--concentration-absolute-tolerance` is supplied. For example:
 
-```sh
-python -m tools.benchmark_compiled --cases packed_bed/examples/default_case/run.yaml --output untracked/solver_timings --solvers superlu klu band --workers 1 2 --repeats 3
+```bash
+python tools/benchmark_review.py --output /tmp/review-rtol-1e5 \
+  --scenarios full_cycle --backends compiled band \
+  --relative-tolerance 1e-5 --concentration-absolute-tolerance 1e-11
 ```
 
-Install the desktop package and stage the managed runtime first. Supply multiple
-case paths to measure concurrent runs with distinct kernels. Each solver and worker
-limit gets an independent project, a Standard baseline, a first Compiled run, and
-cached repeats. The timings include worker startup, initialization, compilation,
-integration, and output; batch elapsed time measures concurrent makespan.
-The benchmark checks matching coordinates and numerical agreement, and requires
-cache hits on repeats. Inputs, tolerances, and outputs stay the same between runs.
-Use a new output directory. It retains `summary.csv`, raw measurements, per-attempt
-manifests and logs, reference datasets, and quantity differences. Historical example
-timings from the earlier source/CLI benchmark are in the
-[solver benchmark report](docs/solver_benchmarks.md).
+**October review implementation (2026-10-08).** F03–F05, F07, F09–F11,
+I01–I04 and the applicable S01–S05 cleanups are implemented. F01/F02 were already
+present; F06/F08 were excluded. `e_p` and the plugin-visible solid-total closure
+remain. S06's generic autosave controller remains deferred.
+
+[Original measurements](tools/review_results_2026_10_08.json) and the
+[`rtol=1e-5` follow-up](tools/review_rtol_1e5_results_2026_10_08.json) include individual
+timings, input/source hashes, convergence counters, balance errors and numerical
+differences for each successive engine change. The following are total run seconds,
+using the median of repetitions 1 and 2 in fresh serial processes on Linux, with
+warm compiled caches. **Every column uses relative tolerance `1e-5`.** Startup
+covers 60 seconds; dense reporting samples that interval every 0.01 seconds.
+Those runs retain concentration absolute tolerance `1e-5`. The long case covers
+1,520 seconds, with concentration absolute tolerances stated in the column labels.
+Inputs were pinned to the original example at `7c55428`, including the previous
+F01/F02 corrections. Working-tree example edits were preserved separately.
+
+| Successive source stage | Startup, compiled SuperLU | Dense reports, compiled SuperLU | Long, compiled SuperLU, atol `1e-5` | Long, compiled SuperLU, atol `1e-11` | Long, Standard SuperLU, atol `1e-5` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Numerical baseline | 2.885 | 3.130 | failed 3/3 | 2.420 | 17.490 |
+| + F10 iterative graphs | 3.418 | 3.303 | failed 3/3 | 3.722 | — |
+| + I02 output histories | 3.123 | 3.569 | failed 3/3 | 3.675 | 13.422 |
+| + I01/S05 compact programs | 3.627 | 5.051 | failed 3/3 | 3.109 | 17.407 |
+| + S01/S02 pi/grid cleanup | 3.324 | 3.289 | failed 3/3 | 3.230 | 13.214 |
+| + S03/S04 explicit emission | 3.339 | 3.514 | failed 3/3 | 3.150 | 15.291 |
+
+**Failure diagnosis:** IDA status `-9` means repeated recoverable residual failures.
+The native callback returns this condition when a residual contains NaN or infinity.
+Captured trial states have negative gas concentrations and negative total gas
+density/pressure. Xu–Froment's fractional powers of inverse hydrogen pressure and
+Medrano's fractional powers of `P/(R*T)` then evaluate negative bases and produce
+NaNs. The final source fails near 91.775 seconds at `rtol=1e-5`, while the original
+source also fails, near 117.783 seconds. This is not evidence of a failed SuperLU
+factorization. See the [IDA return codes](https://sundials.readthedocs.io/en/develop/ida/Constants_link.html)
+and the captured states in the follow-up measurements.
+
+With concentration `atol=1e-11`, compiled SuperLU completes **3/3 at every stage**.
+Compiled band also completes 3/3 on the baseline and final source, with warm medians
+of 2.207 and 2.499 seconds respectively; it retains `step_growth_threshold: 1.25`
+and `nonlinear_refresh_interval: 4`. At concentration `atol=1e-5`, band fails at every
+measured stage. Giving SuperLU the band's refresh controls alone still fails; lowering
+the concentration absolute tolerance alone succeeds. Absolute tolerance controls
+errors near zero, where relative error control contributes little. These observations
+identify sensitivity to trace concentrations; they do not guarantee stability for
+other workloads. Application defaults and user inputs were not changed by this follow-up.
+
+Compact smoothing intentionally changes the boundary conditions: during the air
+hold, the old tails supply tiny hydrogen/methane fractions while the new program
+supplies exact zeros. This changes the numerical path through sensitive kinetics.
+The earlier `rtol=1e-3` completion regression remains recorded in the original results;
+it is not the outcome at `rtol=1e-5, atol=1e-11`. Overall runtime effects remain mixed.
+
+Other measured effects:
+
+- F10, I02 and S03/S04 preserve compared numerical outputs bit for bit. A 400-cell
+  inert reactor that failed with `RecursionError` now completes in 8.216 seconds
+  with a warm cache. A 2,500-deep exporter/gradient/emitter check also passes.
+- I02 reduces retained reporting arrays in the dense case from 29.14 MB to
+  2.06 MB. Whole-process warm peak memory fell from 226.8 MiB to 211.6 MiB at
+  that isolated stage. Reconstruction time is now included in `integration_s`.
+- I01 evaluates 200 samples of a 10,000-segment program in 0.000856 seconds,
+  compared with 0.913 seconds before; program compilation/evaluation is independent
+  of the run horizon. Standard symbolic equation assembly still expands the needed
+  cycles. In the historical `rtol=1e-3` band comparison, the trajectory differs by
+  up to 42.1 K after smoothing changes.
+- S01's `math.pi` changes area by about 0.0000845%, but also changes adaptive solver
+  paths: the measured startup temperature difference reaches 5.07 K. Treat this as
+  a numerical change, not bitwise-equivalent cleanup.
+- All six schemes complete the final 60-second reactive startup, versus three on
+  the baseline. The reversible pressure-pulse case completes on both sources;
+  final velocities span −0.644 to +0.641 m/s.
+- F09 source-only plugin loading takes 0.828 ms cold and 0.298 ms warm in the small
+  fixture, versus 0.640/0.326 ms before, and rejects stale-bytecode/source mismatch.
+  F07's 100-case progress refresh takes 0.086 ms with frozen inputs versus 890 ms
+  without the frozen cache in the measured setup.
+
+The focused checks also cover deletion recovery, mode-derived horizons, immutable
+inspection dialogs, study cancellation/atomic staging, bounded billion-value range
+previews, channel focus and the initial outlet report. The offscreen main window fits
+1280 × 720 at scale 1. Native diagnostic smoke checks pass for SuperLU, two-thread
+SuperLU, KLU and band. Windows packaging was not built here. Raw runs and source
+snapshots for this session are under `/tmp/multisolid-review`; small timing differences
+on this shared machine should not be interpreted as statistically significant.
 
 **Viscosity mixing benchmark (2026-10-08).** Switching from molar averaging to
 Wilke mixing gave the following timings for
@@ -402,17 +459,9 @@ baseline temperature/composition samples changed viscosity by up to +28.3%.
 Wilke adds pairwise species interactions, so its expression cost grows
 quadratically with the number of gases.
 
-Reproduce against the original molar-average source (requires Git and tar):
-
-```sh
-mkdir -p build/viscosity_baseline
-git archive c35c4b9989322ea3c98afd86ef50beafb5d47958 packed_bed | tar -x -C build/viscosity_baseline
-python tools/benchmark_viscosity.py --baseline-source build/viscosity_baseline --output build/viscosity_comparison --repeats 3
-```
-
-Use a fresh output directory. The [benchmark script](tools/benchmark_viscosity.py)
-retains source hashes, run configurations, logs, datasets, cold-run measurements,
-cached timings, solver statistics, and output differences in `summary.json`.
+These historical viscosity measurements predate the internal-energy correction.
+The original measurement helper is no longer shipped; use the current benchmark
+above to compare source revisions with the same cases and solver settings.
 
 **Select reports and plots.** Reports determine the contents of `results.nc`.
 The [report registry](packed_bed/reports.py) defines the variables, dimensions, and units.
@@ -458,7 +507,7 @@ A failed run records its failure stage and traceback when it can write the manif
 ```python
 from packed_bed.reports import load_dataset
 
-results = load_dataset("packed_bed/examples/default_case/output/results.nc")
+results = load_dataset("examples/simulations/default_case/output/results.nc")
 outlet = results.outlet_composition.sel(gas_species="H2")
 ```
 
@@ -476,7 +525,7 @@ matrix.to_pandas().to_csv("features.csv")
 ```python
 from packed_bed.config import load_case
 
-case = load_case("packed_bed/examples/default_case/run.yaml")
+case = load_case("examples/simulations/default_case/run.yaml")
 from packed_bed.simulation import run_case
 
 result = run_case(case)
@@ -521,35 +570,14 @@ The [kinetics source notes](packed_bed/kinetics/KINETICS_SOURCES.md) describe th
 
 Keep `DeclareEquations` contiguous. Preserve equation names, order, and solver incidence during mechanical changes.
 
-**Run the tests.** Use the same environment that contains the editable package.
-
-```powershell
-python -m pytest
-```
-
-Tests use temporary output directories. Solver tests need DAETools; they skip when the package is absent.
-To run only the checks that do not need the solver, use this command:
-
-```powershell
-python -m pytest --ignore=tests/test_solver_infrastructure.py
-```
-
-The tests cover configuration, examples, transport, inert initialization, worker failures, provenance, and output structure.
-They do not establish the scientific validity of the supplied reaction mechanisms.
-
-**Use the research tools.** These commands operate from the repository directory.
-
-```powershell
-python tools/generate_clr_programs.py --help
-python -m Property_Estimation.hcap_linear_fit fe3o4 --h-ref -1118380 --output heat_capacity.png
-python -m Property_Estimation.visc_fit o2 --output viscosity.png
-```
-
-The fitting tools accept species, data paths, and polynomial order as command-line inputs.
-Without `--output`, they open a figure window.
-The local `alex_repro/` comparison script reads NetCDF outputs.
-The local `active_learning_optimization/` directory contains result extraction and comparison tools.
-These local research directories remain ignored by Git. The obsolete relaunch helper is retained as text under `active_learning_optimization/archive/`.
+**Validate a source checkout.** Use `python -m packed_bed examples/simulations/default_case/run.yaml --validate-only`
+for input validation and `python -m packed_bed.compiled.smoke` for native runtime checks.
+With the desktop dependencies, DAETools, and a C++ compiler available, run
+`QT_QPA_PLATFORM=offscreen python tools/check_review.py` on Linux for the focused
+review checks. Set `LD_LIBRARY_PATH` to the managed bundle's `lib` directory if
+its Linux shared libraries are not already on the loader path.
+The review benchmark above exercises complete reactor runs. These checks do not
+establish the scientific validity of the supplied reaction mechanisms.
 
 **License.** This project uses GPL-3.0-only. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 Third-party dependencies retain their own licenses.

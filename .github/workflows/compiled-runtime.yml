@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install '.[compiled]' pytest pefile
+      - run: python -m pip install '.[compiled]' pefile
       - if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
@@ -37,7 +37,9 @@ jobs:
         run: |
           "$(cygpath -u "$pythonLocation")/python.exe" -c "from pathlib import Path; from tools.build_compiled_runtime import fetch; print(fetch('zig_windows', Path('build/native')))"
           "$(cygpath -u "$pythonLocation")/python.exe" tools/bundle_compiled.py --compiler build/native/zig_windows-source/zig-x86_64-windows-0.16.0 --runtime build/native-prefix --destination desktop/vendor/compiled
-      - run: python -m pytest tests/compiled/test_managed.py tests/compiled/test_runtime.py tests/test_processes.py -q
+      - run: python -m packed_bed.compiled.smoke
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/desktop/vendor/compiled/lib
       - uses: actions/upload-artifact@v4
         with:
           name: compiled-runtime-${{ runner.os }}

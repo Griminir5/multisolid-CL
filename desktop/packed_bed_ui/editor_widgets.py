@@ -54,12 +54,13 @@ def choices(items, *, binary=False, vertical=False):
     return combo
 
 
-def action_button(text, callback, *, tooltip=None):
+def action_button(text, callback, *, tooltip=None, inspection=False):
     button = QPushButton(text)
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     button.setAccessibleName(tooltip or text)
     button.setToolTip(tooltip or text)
     button.clicked.connect(callback)
+    button.setProperty("inspectionAction", inspection)
     return button
 
 
@@ -77,7 +78,7 @@ class CollapsibleSection(QGroupBox):
     """An accessible section whose hidden content releases its layout space."""
     expandedChanged = pyqtSignal(bool)
 
-    def __init__(self, title):
+    def __init__(self, title, *, header_widget=None):
         super().__init__()
         self.setProperty("role", "channel")
         layout = QVBoxLayout(self)
@@ -90,7 +91,11 @@ class CollapsibleSection(QGroupBox):
         self.toggle.setProperty("layoutToggle", True)
         self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.toggle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        layout.addWidget(self.toggle)
+        self.heading = QHBoxLayout()
+        self.heading.addWidget(self.toggle, 1)
+        if header_widget is not None:
+            self.heading.addWidget(header_widget)
+        layout.addLayout(self.heading)
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)
         self.content_layout.setContentsMargins(0, 0, 0, 0)
@@ -304,7 +309,7 @@ class SelectionList(QWidget):
             label, description = self.catalog.get(key, (str(key), "Unavailable definition"))
             cell(self.table, row, 0, label, editable=False, tooltip=description)
             if self.show:
-                button = action_button("Show", lambda _, key=key: self.show_requested.emit(key), tooltip=f"Show {label}")
+                button = action_button("Show", lambda _, key=key: self.show_requested.emit(key), tooltip=f"Show {label}", inspection=True)
                 button.setEnabled(self.available)
                 self.table.setCellWidget(row, 1, button)
                 self.show_buttons.append(button)

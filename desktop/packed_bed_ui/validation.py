@@ -151,7 +151,7 @@ def refresh_field_issues(editor):
 
     icon = issue_icon()
     for page, messages in tab_messages.items():
-        index = editor.tabs.indexOf(page)
+        index = editor.tabs.indexOf(page.tab_container)
         editor.tabs.setTabIcon(index, icon if messages else QIcon())
         editor.tabs.setTabToolTip(index, "\n".join(dict.fromkeys(messages)))
     return issues

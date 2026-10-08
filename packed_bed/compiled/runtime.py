@@ -251,7 +251,7 @@ class NativeIDA:
         self.programs = programs  # Own every input and scratch array until IDA is freed.
         self.jac_values = np.empty(sparsity.nnz)
         if hasattr(kernel, "report_loop"):
-            kernel.report_loop.argtypes = [P, P, P, P, P, P, I, I, P, P, P, P, P]
+            kernel.report_loop.argtypes = [P, P, P, P, P, P, I, I, I, P, P, P, P, P, P]
             kernel.report_loop.restype = I
         self.row_scale = np.ascontiguousarray(
             np.ones(len(y0)) if row_scale is None else row_scale,
@@ -401,7 +401,8 @@ class NativeIDA:
         if flag < 0:
             raise RuntimeError(f"SUNDIALS returned {flag}")
 
-    def solve(self, times):
+    def solve(self, times, *, report_width=None):
+        """Retain requested outputs, or full histories for explicit diagnostics."""
         times = np.ascontiguousarray(times, dtype=float)
         if (
             times.ndim != 1
@@ -413,13 +414,25 @@ class NativeIDA:
             raise ValueError(
                 "Reporting times must start at zero and increase strictly."
             )
-        if len(times) == 1:
-            return self.values[None, :].copy(), self.derivatives[None, :].copy()
-        self.check(self.IDASetStopTime(self.mem, float(times[-1])))
-        values = np.empty((len(times), self.n))
-        deriv = np.empty_like(values)
-        values[0] = self.values
-        deriv[0] = self.derivatives
+        if report_width is not None and (type(report_width) is not int or report_width < 0):
+            raise ValueError("Report width must be a nonnegative integer.")
+        if len(times) > 1:
+            self.check(self.IDASetStopTime(self.mem, float(times[-1])))
+        values = np.empty((len(times), self.n if report_width is None else report_width))
+        deriv = np.empty_like(values) if report_width is None else None
+        program_pointer = self.programs.pointer if self.programs is not None else None
+
+        def retain(index):
+            if report_width is None:
+                values[index] = self.values
+                deriv[index] = self.derivatives
+            else:
+                args = (program_pointer,) if self.programs is not None else ()
+                self.kernel.reconstruct(times[index], self.values.ctypes.data,
+                                        self.derivatives.ctypes.data, 0, values[index].ctypes.data, *args)
+                if not np.isfinite(values[index]).all():
+                    raise RuntimeError(f"Compiled result reconstruction produced nonfinite values at t={times[index]:g} s.")
+
         reached = D()
         if hasattr(self.kernel, "report_loop"):
             report = I()
@@ -431,19 +444,22 @@ class NativeIDA:
                 self.values.ctypes.data,
                 self.derivatives.ctypes.data,
                 self.n,
+                -1 if report_width is None else report_width,
                 len(times),
                 times.ctypes.data,
                 values.ctypes.data,
-                deriv.ctypes.data,
+                deriv.ctypes.data if deriv is not None else None,
                 C.byref(reached),
                 C.byref(report),
+                program_pointer,
             )
             if flag < 0:
                 raise RuntimeError(
                     f"Compiled IDA failed with status {flag} while reporting "
                     f"t={times[report.value]:g} s; last reached {reached.value:g} s."
                 )
-            return values, deriv
+            return (values, deriv) if report_width is None else values
+        retain(0)
         for i, t in enumerate(times[1:], 1):
             flag = self.IDASolve(self.mem, t, C.byref(reached), self.y, self.yp, 1)
             if flag < 0:
@@ -461,9 +477,8 @@ class NativeIDA:
                 raise RuntimeError(
                     f"Compiled IDA produced nonfinite values at t={t:g} s."
                 )
-            values[i] = self.values
-            deriv[i] = self.derivatives
-        return values, deriv
+            retain(i)
+        return (values, deriv) if report_width is None else values
 
     def stats(self):
         result = {}
@@ -586,8 +601,8 @@ PB_EXPORT int jacobian_callback(double t,double cj,Ptr y,Ptr yp,Ptr r,Ptr mat,Pt
     source += """
 using Solve = int (*)(Ptr,double,double*,Ptr,Ptr,int);
 PB_EXPORT int report_loop(Solve solve,Ptr mem,Ptr yvec,Ptr ypvec,
- const double* y,const double* yp,int n,int nt,const double* times,
- double* output,double* derivatives,double* reached,int* report) {
+ const double* y,const double* yp,int n,int width,int nt,const double* times,
+ double* output,double* derivatives,double* reached,int* report,Ptr programs) {
     for(int it=0;it<nt;it++) {
         *report=it;
         if(it) {
@@ -599,10 +614,16 @@ PB_EXPORT int report_loop(Solve solve,Ptr mem,Ptr yvec,Ptr ypvec,
             if(!std::isfinite(*reached) || std::abs(*reached-times[it])>time_tolerance) return -101;
         }
         for(int j=0;j<n;j++) if(!std::isfinite(y[j]) || !std::isfinite(yp[j])) return -100;
-        memcpy(output+it*n,y,n*sizeof(double));
-        memcpy(derivatives+it*n,yp,n*sizeof(double));
+        if(width<0) {
+            memcpy(output+it*n,y,n*sizeof(double));
+            memcpy(derivatives+it*n,yp,n*sizeof(double));
+        } else {
+            RECONSTRUCT_REPORT
+            for(int j=0;j<width;j++) if(!std::isfinite(output[it*width+j])) return -102;
+        }
     }
     return 0;
 }
 """
-    return source
+    report_args = ",static_cast<ProgramData*>(programs)" if shared_programs else ""
+    return source.replace("RECONSTRUCT_REPORT", f"reconstruct(times[it],y,yp,0,output+it*width{report_args});")

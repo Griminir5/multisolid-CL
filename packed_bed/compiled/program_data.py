@@ -20,67 +20,68 @@ def boundary_slots(species):
 
 class ProgramData(C.Structure):
     # Keep in sync with program_data.hpp. All pointed-to arrays belong to one run.
-    _fields_ = [("channels", C.c_int), ("ramps", C.c_int), ("outputs", C.c_int),
-                ("valid", C.c_int), ("width", C.c_double), ("time", C.c_double)] + [
+    _fields_ = [("channels", C.c_int), ("outputs", C.c_int), ("valid", C.c_int),
+                ("width", C.c_double), ("time", C.c_double)] + [
         (name, C.c_void_p) for name in (
-            "initial", "offsets", "ramp_index", "delta", "start", "end",
-            "numerator", "denominator", "fractions", "raw", "values")]
+            "initial", "offsets", "repeat_offsets", "period", "start", "end", "base", "delta",
+            "numerator", "denominator", "raw", "values")]
 
 
 class RuntimePrograms:
-    """Immutable input arrays plus private native evaluation scratch space."""
+    """Two compact cycles per channel and private native evaluation scratch space."""
 
     def __init__(self, programs, width):
         if not math.isfinite(width) or width <= 0:
             raise ValueError("Program smoothing width must be finite and positive.")
-        initial, offsets, ramp_index, delta = [], [0], [], []
-        ramps, channels = {}, {}
+        arrays = {name: [] for name in ("initial", "repeat_offsets", "period", "start", "end", "base", "delta",
+                                       "numerator", "denominator")}
+        arrays["offsets"] = [0]
+        channels = {}
 
         def channel(program, component):
             key = (program, component)
             if key in channels:
                 return channels[key]
-            index = len(initial)
+            index = len(channels)
             channels[key] = index
             def scalar(value):
                 return float(value if component is None else value[component])
-            initial.append(scalar(program.segments[0].start_value if program.segments else program.initial_value))
-            for segment in program.segments:
-                change = scalar(segment.end_value) - scalar(segment.start_value)
-                if math.isclose(change, 0.0, rel_tol=0.0, abs_tol=1e-12):
-                    continue
-                times = (float(segment.start_time), float(segment.end_time))
-                if not all(map(math.isfinite, times)) or times[1] <= times[0]:
-                    raise ValueError("Program segments must have positive finite duration.")
-                ramp_index.append(ramps.setdefault(times, len(ramps)))
-                delta.append(change)
-            offsets.append(len(delta))
+            arrays["initial"].append(scalar(program.initial_value))
+            arrays["period"].append(program.duration_s if program.repeat_segments else 0.)
+            for cycle, segments in enumerate((program.segments, program.repeat_segments)):
+                if cycle:
+                    arrays["repeat_offsets"].append(len(arrays["start"]))
+                for segment in segments:
+                    if not (math.isfinite(segment.start_time) and math.isfinite(segment.end_time)
+                            and segment.end_time > segment.start_time):
+                        raise ValueError("Program segments must have positive finite duration.")
+                    arrays["start"].append(segment.start_time)
+                    arrays["end"].append(segment.end_time)
+                    arrays["base"].append(scalar(segment.start_value))
+                    arrays["delta"].append(scalar(segment.end_value) - scalar(segment.start_value))
+            arrays["offsets"].append(len(arrays["start"]))
             return index
 
-        numerator, denominator = [], []
         for program, component in programs:
             if isinstance(program, RatioProgram):
-                numerator.append(channel(program.numerator, component))
-                denominator.append(channel(program.denominator, None))
+                arrays["numerator"].append(channel(program.numerator, component))
+                arrays["denominator"].append(channel(program.denominator, None))
             else:
-                numerator.append(channel(program, component))
-                denominator.append(-1)
-        arrays = dict(initial=initial, offsets=offsets, ramp_index=ramp_index, delta=delta,
-                      start=[t[0] for t in ramps], end=[t[1] for t in ramps],
-                      numerator=numerator, denominator=denominator)
-        integers = {"offsets", "ramp_index", "numerator", "denominator"}
+                arrays["numerator"].append(channel(program, component))
+                arrays["denominator"].append(-1)
+        integers = {"offsets", "repeat_offsets", "numerator", "denominator"}
         self.arrays = {name: np.ascontiguousarray(values, dtype=np.int32 if name in integers else np.float64)
                        for name, values in arrays.items()}
-        fingerprint = hashlib.sha256(np.float64(width).tobytes())
+        fingerprint = hashlib.sha256(b"compact-support-program-v2" + np.float64(width).tobytes())
         for name, array in self.arrays.items():
             fingerprint.update(name.encode())
             fingerprint.update(str(array.shape).encode())
             fingerprint.update(array.tobytes())
             array.flags.writeable = False
         self.fingerprint = fingerprint.hexdigest()
-        self.arrays.update(fractions=np.empty(len(ramps)), raw=np.empty(len(initial)), values=np.empty(len(programs)))
-        self.data = ProgramData(len(initial), len(ramps), len(programs), 0, width, 0,
-                                *(self.arrays[name].ctypes.data for name, _ in ProgramData._fields_[6:]))
+        self.arrays.update(raw=np.empty(len(channels)), values=np.empty(len(programs)))
+        self.data = ProgramData(len(channels), len(programs), 0, width, 0,
+                                *(self.arrays[name].ctypes.data for name, _ in ProgramData._fields_[5:]))
         self.pointer = C.cast(C.pointer(self.data), C.c_void_p)
 
     @classmethod

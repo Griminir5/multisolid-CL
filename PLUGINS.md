@@ -36,13 +36,13 @@ Python plugins require local approval before execution. Approval covers the code
 
 ## Python authoring
 
-Copy one of the example folders from `packed_bed/examples/plugins/`:
+Copy one of the example folders from `examples/plugins/`:
 
 - `ammonia`: NH3, a custom enthalpy correlation and N2 + 3 H2 → 2 NH3 kinetics.
 - `nitrogen_oxides`: NO, NO2 and a built-in nitrogen parameter variant, without Python.
 - `enthalpy_overrides`: CO2 and H2O variants using one custom enthalpy correlation.
 
-See the [example walkthrough](packed_bed/examples/plugins/README.md) for registration, replacement, formulas and archive creation. Each plugin works independently.
+See the [example walkthrough](examples/plugins/README.md) for registration, replacement, formulas and archive creation. Each plugin works independently.
 
 The [Waste iron plugin](plugins/waste_iron/README.md) transfers the fitted oxidation/reduction kinetics and SiO2/Al2O3 property definitions from `waste_iron_kinetics` at `9660e5d`. Its folder can be registered directly or exported as an independent archive.
 

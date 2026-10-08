@@ -8,14 +8,14 @@ from pydantic import TypeAdapter, ValidationError
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QSplitter, QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout, QGroupBox,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from packed_bed.programs import NORMAL_MOLAR_DENSITY_MOL_PER_M3
 from packed_bed.config.models import FeedState, FeedRampTarget, FractionMapping
 from packed_bed.config.issues import model_issues
 
-from .editor_widgets import Preview, action_button, cell, choices, display, number, select_value, table, table_action
+from .editor_widgets import CollapsibleSection, Preview, action_button, cell, choices, display, number, select_value, table, table_action
 
 
 from .theme import numeric, numeric_font
@@ -28,30 +28,16 @@ CHANNELS = ("inlet_flow", "inlet_temperature", "inlet_composition", "outlet_pres
 from .inputs import program_duration, ensure_step_ids
 
 
-class ChannelTable(QGroupBox):
+class ChannelTable(CollapsibleSection):
     def __init__(self, page, key, title):
-        super().__init__()
+        duration = numeric(QLabel(), 12)
+        super().__init__(title, header_widget=duration)
         self.page, self.editor, self.key = page, page.editor, key
+        self.duration = duration
         self.loading = False
-        self.setProperty("role", "channel")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        self.toggle = QToolButton()
-        self.toggle.setText(title)
-        self.toggle.setCheckable(True)
-        self.toggle.setChecked(True)
-        self.toggle.setArrowType(Qt.ArrowType.DownArrow)
-        self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.toggle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.toggle.setProperty("role", "channelTitle")
-        self.toggle.setProperty("layoutToggle", True)
-        self.toggle.setToolTip("Collapse channel")
-        heading = QHBoxLayout()
-        heading.addWidget(self.toggle, 1)
-        self.duration = numeric(QLabel(), 12)
-        heading.addWidget(self.duration)
-        layout.addLayout(heading)
+        self.focus_button = action_button("Focus", lambda: page.focus_channel(key), inspection=True,
+                                          tooltip="Give this channel the available editing space; click again to show all channels")
+        self.heading.addWidget(self.focus_button)
         self.table = table(["Step type", "Duration (s)", "Target", ""])
         self.table.verticalHeader().show()
         self.table.verticalHeader().setMinimumWidth(30)
@@ -65,16 +51,8 @@ class ChannelTable(QGroupBox):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(3, 32)
         self.table.itemChanged.connect(self.edit_item)
-        layout.addWidget(self.table)
-        self.toggle.toggled.connect(self.set_expanded)
-
-    def set_expanded(self, expanded):
-        self.table.setVisible(expanded)
-        self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
-        self.toggle.setToolTip("Collapse channel" if expanded else "Expand channel")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding,
-                           QSizePolicy.Policy.Expanding if expanded else QSizePolicy.Policy.Fixed)
-        self.page.update_channel_layout()
+        self.content_layout.addWidget(self.table)
+        self.expandedChanged.connect(lambda _: self.page.update_channel_layout())
 
     def channel(self):
         return self.editor.get(("program", self.key), {})
@@ -134,7 +112,8 @@ class ChannelTable(QGroupBox):
             if self.key == "feed_stream":
                 summary = f"{display(value.get('flow', 'retain'))} · {display(value.get('temperature', 'retain'))} · {summary}"
             button = action_button(summary + "  …", lambda _, row=row: self.edit_state(row),
-                                   tooltip="Edit feed values" if self.key == "feed_stream" else "Edit species mole fractions")
+                                   tooltip="Inspect feed values" if self.key == "feed_stream" else "Inspect species mole fractions",
+                                   inspection=True)
             numeric(button, 13)
             self.table.setCellWidget(row, 2, button)
         else:
@@ -234,7 +213,7 @@ class ChannelTable(QGroupBox):
         composition_enabled.setChecked(not optional or "composition" in original and original["composition"] is not None)
         if optional:
             form.addRow(composition_enabled)
-        species = self.editor.get(("chemistry", "gas_species"), [])
+        species = list(dict.fromkeys([*self.editor.get(("chemistry", "gas_species"), []), *composition]))
         composition_fields = {}
         total = numeric(QLabel())
 
@@ -320,11 +299,18 @@ class ChannelTable(QGroupBox):
         scroll.setWidget(content)
         outer.addWidget(scroll)
         outer.addLayout(summary)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        if self.editor.read_only:
+            for field in (*fields.values(), *composition_fields.values()):
+                field.setReadOnly(True)
+            for check in (*enabled.values(), composition_enabled):
+                check.setEnabled(False)
+            normalize.hide()
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close if self.editor.read_only else
+                                   QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         outer.addWidget(buttons)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        if dialog.exec() != QDialog.DialogCode.Accepted or self.editor.read_only:
             return
         value = edited_value()
         if row == 0:
@@ -363,6 +349,7 @@ class ProgramPage(QWidget):
         controls.addWidget(options)
         self.channel_layout = QVBoxLayout()
         self.channels = {}
+        self.focused_channel = None
         for key in (*CHANNELS[:-1], "feed_stream", "outlet_pressure"):
             self.channels[key] = ChannelTable(self, key, key)
             self.channel_layout.addWidget(self.channels[key], 1)
@@ -379,12 +366,21 @@ class ProgramPage(QWidget):
         self.repeat.toggled.connect(self.change_repeat)
         self.update_channel_layout()
 
+    def focus_channel(self, key):
+        self.focused_channel = None if self.focused_channel == key else key
+        self.channels[key].toggle.setChecked(True)
+        self.update_channel_layout()
+
     def update_channel_layout(self):
         active = ("feed_stream", "outlet_pressure") if self.mode.currentData() == "feed_stream" else CHANNELS
+        if self.focused_channel not in active:
+            self.focused_channel = None
         expanded = False
         for index, (key, channel) in enumerate(self.channels.items()):
-            channel.setVisible(key in active)
-            stretch = (3 if key == "feed_stream" else 1) if key in active and channel.toggle.isChecked() else 0
+            visible = key in active and self.focused_channel in (None, key)
+            channel.setVisible(visible)
+            channel.focus_button.setText("Show all" if self.focused_channel == key else "Focus")
+            stretch = (3 if key == "feed_stream" else 1) if visible and channel.toggle.isChecked() else 0
             self.channel_layout.setStretch(index, stretch)
             expanded = expanded or bool(stretch)
         self.channel_layout.setStretch(len(self.channels), 0 if expanded else 1)
@@ -470,6 +466,7 @@ class ProgramPage(QWidget):
         ensure_step_ids(replacement, self.editor.case.metadata)
         self.editor.put(("run", "simulation", "program_mode"), mode)
         self.load()
+        self.update_horizon()
 
     def change_basis(self):
         if self.loading or self.editor.read_only or self.editor.case is None:

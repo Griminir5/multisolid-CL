@@ -120,12 +120,8 @@ class MainWindow(QMainWindow):
         for label, callback in (("New Case", self._new_case), ("Import Case", self._add_files),
                                 ("New Parameter Study", self._new_study), ("Import Parameter Study", self._add_batch)):
             button = QPushButton(label)
-            if callback is None:
-                button.setEnabled(False)
-                button.setToolTip("Parameter study creation is planned for a later step.")
-            else:
-                button.clicked.connect(callback)
-                self.mutation_buttons.append(button)
+            button.clicked.connect(callback)
+            self.mutation_buttons.append(button)
             case_actions.addWidget(button)
         case_actions.addStretch()
         layout.addLayout(case_actions)
@@ -726,9 +722,11 @@ class MainWindow(QMainWindow):
             return
         try:
             path = self.project.prepare_execution(cases, max_workers=self.max_workers.value())
+            self.project.freeze_execution_states()
             self.runner.start(path)
             self._remember_project()
         except (OSError, ValueError) as exc:
+            self.project.execution_states = None
             self._error(exc)
             return
         self._set_running(self.runner.active)
@@ -737,6 +735,8 @@ class MainWindow(QMainWindow):
     def _set_running(self, active):
         if self.project is not None:
             self.project.executing = active
+            if not active:
+                self.project.execution_states = None
         self.study_editor.setEnabled(not active)
         self.results_button.setEnabled(not active)
         self.results.setEnabled(not active and self.results.supported)
@@ -802,4 +802,5 @@ class MainWindow(QMainWindow):
                 self.project.on_edit = None
             if self.project_lock is not None:
                 self.project_lock.unlock()
+            self.study_editor.finish_background_tasks()
             event.accept()

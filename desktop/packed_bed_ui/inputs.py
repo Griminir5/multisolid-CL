@@ -121,7 +121,8 @@ def input_readiness(documents, extensions=(), *, catalogue=None):
     except (ValueError, TypeError, KeyError, OSError) as exc:
         errors = exc.__cause__.errors() if isinstance(exc.__cause__, ValidationError) else []
         missing = any(error["type"] == "missing" or error.get("input") in (None, "") for error in errors)
-        return ("Underdefined" if missing else "Invalid"), str(exc)
+        from packed_bed.solver_support import RuntimeUnavailable
+        return ("Runtime unavailable" if isinstance(exc, RuntimeUnavailable) else "Underdefined" if missing else "Invalid"), str(exc)
     return "Ready", ""
 
 

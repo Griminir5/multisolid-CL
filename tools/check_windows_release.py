@@ -39,7 +39,7 @@ def check(bundle, destination):
             if result.get("passed") is not True or result.get("frozen") is not True:
                 raise RuntimeError("The frozen application self-test did not pass.")
             plugin = destination / "plugin-check-input"
-            shutil.copytree(Path(__file__).resolve().parents[1] / "packed_bed/examples/plugins/enthalpy_overrides", plugin,
+            shutil.copytree(Path(__file__).resolve().parents[1] / "examples/plugins/enthalpy_overrides", plugin,
                             ignore=shutil.ignore_patterns("__pycache__"))
             subprocess.run([str(executable), "--check-plugin", str(plugin)], cwd=destination,
                            env=environment, stdout=log, stderr=log, timeout=120, check=True)

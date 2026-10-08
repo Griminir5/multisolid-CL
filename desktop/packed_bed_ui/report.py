@@ -385,7 +385,7 @@ class ReportPage(QWidget):
         self.error.setWordWrap(True)
         rl.addWidget(self.counts)
         rl.addWidget(self.error)
-        self.general_link = action_button("Go to General", lambda: self.editor.tabs.setCurrentWidget(self.editor.general))
+        self.general_link = action_button("Go to General", lambda: self.editor.tabs.setCurrentWidget(self.editor.general.tab_container))
         rl.addWidget(self.general_link)
         split.addWidget(left)
         split.addWidget(right)
@@ -455,16 +455,23 @@ class ReportPage(QWidget):
             return
         self.refresh_source()
         if not self.definition["sheets"]:
-            self.add_sheet(save=False)
+            columns = [{"quantity": name, "fixed": {}} for name in
+                       ("outlet_temperature", "outlet_pressure", "outlet_flow")
+                       if name in self.schema["quantities"]]
+            if "report" not in case.metadata and columns:
+                self.definition["sheets"].append({"name": "Outlet conditions", "axis": "time",
+                                                  "rows": {"mode": "all"}, "columns": columns})
+            else:
+                self.add_sheet(save=False)
         self.rebuild_sheets(1)
 
     def tab_changed(self):
-        if self.editor.tabs.currentWidget() is self and self.needs_refresh:
+        if self.editor.tabs.currentWidget() is self.tab_container and self.needs_refresh:
             self.refresh_source()
 
     def invalidate(self):
         self.needs_refresh = True
-        if self.editor.tabs.currentWidget() is self:
+        if self.editor.tabs.currentWidget() is self.tab_container:
             self.refresh_source()
 
     def refresh_source(self):
