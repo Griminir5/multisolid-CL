@@ -1,7 +1,7 @@
 """Reduce explicit DAETools closures and differentiate a shared expression graph.
 
 The model remains the source of the equations. No kinetic or transport
-correlations are duplicated here. Enthalpy and species concentrations remain
+correlations are duplicated here. Internal energy and species concentrations remain
 differential variables; only named explicit algebraic definitions are removed.
 """
 

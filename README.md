@@ -434,6 +434,10 @@ A plot failure does not discard a successful simulation result.
 
 Solid mole fraction is a derived output. It does not add a solver variable.
 The mass and heat balance reports add three and four accounting equations, respectively.
+The heat balance stores internal energy: `heat_bed_total` integrates
+`u_cell = sum(c_gas * h_gas) + sum(c_sol * h_sol) - gasfrac * P` over the bed.
+This accounts for changing pressure with fixed gas voidage, ideal gas, and negligible solid pV.
+Boundary flows carry enthalpy, including formation enthalpy; no separate reaction-heat source is added.
 The outlet composition uses the last-face species fluxes. At zero total flow, it uses the final cell's composition.
 Set `outputs.solver_incidence_matrix: true` for a labelled solver-incidence CSV and PNG.
 

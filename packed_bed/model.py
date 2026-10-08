@@ -55,7 +55,7 @@ dispersion_type = _variable_type("dispersion_type", m**2 / s, 0.0, 100.0)
 molar_source_type = _variable_type("molar_source_type", mol / (m**3 * s), -1.0e6, 1.0e6)
 temp_type = _variable_type("temp_type", K, 100.0, 2000.0, 500.0)
 molar_enthalpy_type = _variable_type("molar_enthalpy_type", J / mol, -1.0e12, 1.0e12)
-volume_enthalpy_type = _variable_type("volume_enthalpy_type", J / m**3, -1.0e12, 1.0e12)
+volume_energy_type = _variable_type("volume_energy_type", J / m**3, -1.0e12, 1.0e12)
 heat_flux_type = _variable_type("heat_flux_type", J / (s * m**2), -1.0e12, 1.0e12)
 mass_inventory_type = _variable_type("mass_inventory_type", kg, -1.0e12, 1.0e12, tolerance=1.0e-8)
 energy_inventory_type = _variable_type("energy_inventory_type", J, -1.0e20, 1.0e20, tolerance=1.0e-2)
@@ -167,7 +167,7 @@ class PackedBedModel(daeModel):
 
 
         self.T = daeVariable("temp_bed", temp_type, self, "Temperature inside a cell", [self.x_centers])
-        self.h_cell = daeVariable("h_cell", volume_enthalpy_type, self, "Enthalpy per total bed volume", [self.x_centers])
+        self.u_cell = daeVariable("u_cell", volume_energy_type, self, "Internal energy per total bed volume", [self.x_centers])
         self.h_gas = daeVariable("h_gas", molar_enthalpy_type, self, "Molar enthalpy of gas i in a cell", [self.N_gas, self.x_centers])
         self.h_sol = daeVariable("h_sol", molar_enthalpy_type, self, "Molar enthalpy of solid i in a cell", [self.N_sol, self.x_centers])
         self.J_gas_face = daeVariable("J_gas_face", heat_flux_type, self, "Enthalpy flow at cell faces attributable to component i", [self.N_gas, self.x_faces])
@@ -190,7 +190,7 @@ class PackedBedModel(daeModel):
             self.heat_in_total = daeVariable("heat_in_total", energy_inventory_type, self, "Cumulative gas-phase enthalpy that has entered the bed")
             self.heat_out_total = daeVariable("heat_out_total", energy_inventory_type, self, "Cumulative gas-phase enthalpy that has left the bed")
             self.heat_loss_total = daeVariable("heat_loss_total", energy_inventory_type, self, "Cumulative heat transferred from the bed to the environment")
-            self.heat_bed_total = daeVariable("heat_bed_total", energy_inventory_type, self, "Gas plus solid enthalpy currently residing in the bed")
+            self.heat_bed_total = daeVariable("heat_bed_total", energy_inventory_type, self, "Gas plus solid internal energy currently residing in the bed")
 
         self.F_in_const = daeParameter("F_in_const", molar_flow_type.Units, self, "Default fixed total molar flow at the inlet")
         self.y_in_const = daeParameter("y_in_const", molar_frac_type.Units, self, "Default fixed molar fraction of component i at the inlet", [self.N_gas])
@@ -456,7 +456,7 @@ class PackedBedModel(daeModel):
             heat_loss_rate_total = Constant(0.0 * J / s)
             for idx_cell in range(Nc):
                 dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
-                heat_bed_total = heat_bed_total + cross_section_area * self.h_cell(idx_cell) * dx
+                heat_bed_total = heat_bed_total + cross_section_area * self.u_cell(idx_cell) * dx
                 heat_loss_rate_total = heat_loss_rate_total + cross_section_area * heat_loss_density(idx_cell) * dx
             return heat_bed_total, heat_loss_rate_total
 
@@ -547,15 +547,17 @@ class PackedBedModel(daeModel):
         for idx_cell in range(Nc):
             dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
             eq = self.CreateEquation(f"energy_balance_cell_{idx_cell}")
-            eq.Residual = dt(self.h_cell(idx_cell)) + (
+            eq.Residual = dt(self.u_cell(idx_cell)) + (
                 Sum(self.J_gas_face.array("*", idx_cell + 1)) - Sum(self.J_gas_face.array("*", idx_cell))
             ) / dx + heat_loss_density(idx_cell)
 
         for gas_idx, species_name in enumerate(self.gas_species):
             if gas_idx == temperature_anchor_gas_idx:
-                eq = self.CreateEquation("total_cell_enthalpy")
+                eq = self.CreateEquation("total_cell_internal_energy")
                 idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")
-                eq.Residual = self.h_cell(idx_cell) - Sum(self.c_gas.array("*", idx_cell)*self.h_gas.array("*", idx_cell)) - Sum(self.c_sol.array("*", idx_cell)*self.h_sol.array("*", idx_cell))
+                # Fixed gas voidage and ideal gas: U_v = H_v - gasfrac * P;
+                # neglect solid pV. Face fluxes still carry species enthalpy.
+                eq.Residual = self.u_cell(idx_cell) + self.gasfrac(idx_cell) * self.P(idx_cell) - Sum(self.c_gas.array("*", idx_cell)*self.h_gas.array("*", idx_cell)) - Sum(self.c_sol.array("*", idx_cell)*self.h_sol.array("*", idx_cell))
             else:
                 eq = self.CreateEquation(f"gas_component_enthalpy_{self.equation_identifiers[species_name]}")
                 idx_cell = eq.DistributeOnDomain(self.x_centers, eClosedClosed, "x")

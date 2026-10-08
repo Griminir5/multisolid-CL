@@ -36,7 +36,7 @@ class InitialState:
     solid_concentration_mol_m3: np.ndarray
     gas_enthalpy_j_mol: np.ndarray
     solid_enthalpy_j_mol: np.ndarray
-    cell_enthalpy_j_m3: np.ndarray
+    cell_internal_energy_j_m3: np.ndarray
     gas_density_kg_m3: np.ndarray
     gas_viscosity_pa_s: float
     face_velocity_m_s: np.ndarray
@@ -193,13 +193,16 @@ def calculate_initial_state(
     gas_density = pressure * mixture_molecular_weight / (
         GAS_CONSTANT_J_PER_MOL_K * inlet_temperature
     )
-    cell_enthalpy = gas_concentration.T @ gas_enthalpy + solid_concentration.T @ solid_enthalpy
+    cell_internal_energy = (
+        gas_concentration.T @ gas_enthalpy + solid_concentration.T @ solid_enthalpy
+        - gas_fraction * pressure
+    )
     cell_widths = np.diff(face_coordinates)
     bed_mass = area_m2 * np.sum(
         (gas_concentration.T @ gas_molecular_weights + solid_concentration.T @ solid_molecular_weights)
         * cell_widths
     )
-    bed_heat = area_m2 * np.sum(cell_enthalpy * cell_widths)
+    bed_heat = area_m2 * np.sum(cell_internal_energy * cell_widths)
 
     face_velocity = np.empty(cell_count + 1, dtype=float)
     flow_velocity_numerator = inlet_molar_flux * GAS_CONSTANT_J_PER_MOL_K * inlet_temperature
@@ -221,7 +224,7 @@ def calculate_initial_state(
         solid_concentration_mol_m3=solid_concentration,
         gas_enthalpy_j_mol=gas_enthalpy,
         solid_enthalpy_j_mol=solid_enthalpy,
-        cell_enthalpy_j_m3=cell_enthalpy,
+        cell_internal_energy_j_m3=cell_internal_energy,
         gas_density_kg_m3=gas_density,
         gas_viscosity_pa_s=mixture_viscosity,
         face_velocity_m_s=face_velocity,
@@ -274,7 +277,7 @@ def apply_initial_state(model, state: InitialState) -> None:
         )
         model.ct_gas.SetInitialGuess(cell_index, gas_total[cell_index] * mol / m**3)
         model.ct_sol.SetInitialGuess(cell_index, solid_total[cell_index] * mol / m**3)
-        model.h_cell.SetInitialCondition(cell_index, state.cell_enthalpy_j_m3[cell_index] * J / m**3)
+        model.u_cell.SetInitialCondition(cell_index, state.cell_internal_energy_j_m3[cell_index] * J / m**3)
 
     for gas_index in range(gas_count):
         model.y_in.SetInitialGuess(gas_index, state.inlet_composition[gas_index])

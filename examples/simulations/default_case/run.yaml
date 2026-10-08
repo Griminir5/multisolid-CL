@@ -23,7 +23,7 @@ solver:
   backend: daetools
   name: superlu
   threads: 1
-  relative_tolerance: 1.0e-3
+  relative_tolerance: 1.0e-5
   suppress_algebraic_errors: true
   max_nonlinear_iterations: 12
   nonlinear_convergence_coefficient: 1.0

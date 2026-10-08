@@ -120,6 +120,7 @@ def _derive_gas_flux(dataset, _raw, case) -> None:
 
 
 def _derive_heat_balance(dataset, _raw, _case) -> None:
+    dataset.heat_bed_total.attrs["description"] = "Gas plus solid internal energy stored in the bed."
     dataset["heat_balance_error"] = (
         dataset.heat_bed_total
         - dataset.heat_bed_total.isel(time=0)
@@ -127,7 +128,9 @@ def _derive_heat_balance(dataset, _raw, _case) -> None:
         + dataset.heat_out_total
         + dataset.heat_loss_total
     )
-    dataset.heat_balance_error.attrs = {"units": "J", "derived_from": "heat totals"}
+    dataset.heat_balance_error.attrs = {
+        "units": "J", "derived_from": "stored internal energy, boundary enthalpy transfer, and heat loss"
+    }
 
 
 def _derive_mass_balance(dataset, _raw, _case) -> None:
@@ -225,7 +228,7 @@ REPORT_REGISTRY: Mapping[str, ReportSpec] = MappingProxyType({
         unit="J/(m² s)",
     ),
     "heat_balance": ReportSpec(
-        "Integral heat totals and balance error.",
+        "Stored internal energy, cumulative boundary enthalpy transfer and heat loss, and energy balance error.",
         tuple(_field(name, name) for name in (
             "heat_in_total", "heat_out_total", "heat_loss_total", "heat_bed_total"
         )),
