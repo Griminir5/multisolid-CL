@@ -295,6 +295,9 @@ Run `python -m packed_bed.compiled.smoke` to compile and solve a small DAE with
 each supported native solver. The check needs a working native runtime and compiler.
 
 **Run a batch.** A batch expands the combinations of named axis values into separate cases.
+`batch.yaml` is a CLI format. In the desktop, create a native parameter study or
+individual cases, then use **Run all cases** with **Maximum workers** to execute
+them together. The desktop does not import batch files.
 
 ```powershell
 python -m packed_bed batch examples/simulations/default_batch_case/batch.yaml --validate-only

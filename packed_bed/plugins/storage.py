@@ -18,7 +18,7 @@ import unicodedata
 import zipfile
 
 
-from .catalogue import Catalogue
+from .catalogue import Catalogue, builtin_fingerprint
 from .schema import Manifest
 from ..file_io import TemporaryDirectory, atomic_output, retry_file_operation, write_text
 
@@ -229,6 +229,13 @@ def catalogue_from_project(root, entries, lock=None):
     if lock is not None:
         if not isinstance(lock, Mapping) or set(lock) != {'builtin', 'plugins'} or not isinstance(lock['plugins'], Mapping):
             raise ValueError('An exact definition lock must contain a built-in fingerprint and a plugin content map.')
+        fingerprint = lock['builtin']
+        if not isinstance(fingerprint, str) or not re.fullmatch(r'[a-f0-9]{64}', fingerprint):
+            raise ValueError('Invalid built-in definition fingerprint: expected a SHA-256 content hash.')
+        if fingerprint != builtin_fingerprint():
+            raise ValueError('Built-in definitions no longer match the recorded content fingerprint. '
+                             'Use the matching application version, or explicitly regenerate the case '
+                             'with current definitions.')
         contents = lock['plugins']
     else:
         if not isinstance(entries, list):

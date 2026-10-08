@@ -313,10 +313,6 @@ class Project:
     def duplicate_case(self, case: ProjectCase, name: str) -> ProjectCase:
         return self.add_case(name, case.documents, report=case.metadata.get("report"))
 
-    def import_study(self, batch_path: str | Path, *, name: str | None = None):
-        """Import a pending study. Generation requires a successful baseline case."""
-        return self.study_store.import_batch(batch_path, name)
-
     def delete_case(self, case: ProjectCase) -> None:
         """Commit deletion with recovery if the process stops between renames."""
         if case not in self.cases:

@@ -118,7 +118,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.table)
         case_actions = QHBoxLayout()
         for label, callback in (("New Case", self._new_case), ("Import Case", self._add_files),
-                                ("New Parameter Study", self._new_study), ("Import Parameter Study", self._add_batch)):
+                                ("New Parameter Study", self._new_study)):
             button = QPushButton(label)
             button.clicked.connect(callback)
             self.mutation_buttons.append(button)
@@ -502,19 +502,6 @@ class MainWindow(QMainWindow):
         if path:
             try:
                 self._show_case(self.project.add_case_from_files(path))
-            except (OSError, ValueError) as exc:
-                self._error(exc)
-
-    def _add_batch(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Import Parameter Study — select batch.yaml", filter="YAML (*.yaml *.yml)")
-        if path:
-            try:
-                if not self._save_editors():
-                    return
-                study = self.project.import_study(path)
-                self._show_study(study.id)
-                self._refresh_cases()
-                self.statusBar().showMessage("Study imported. Run its baseline successfully before generating cases.")
             except (OSError, ValueError) as exc:
                 self._error(exc)
 

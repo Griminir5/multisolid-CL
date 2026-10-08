@@ -10,16 +10,14 @@ from uuid import uuid4
 
 import yaml
 
-from packed_bed.batch import load_batch_spec
-from packed_bed.config.load import read_yaml_mapping, resolve_path
+from packed_bed.config.load import read_yaml_mapping
 from packed_bed.file_io import retry_file_operation
 
-from .inputs import BED_RUN_FIELDS, definition_payload, new_step_ids
+from .inputs import new_step_ids
 from .project import (DOCUMENTS, ProjectCase, input_hashes, portable_documents, read_documents,
                       read_json, scientific_fingerprint, write_json, write_text)
-from .studies import (ExistingCase, Factor, ReusableDefinition, Study, StudyError, expand_study,
-                      generation_signature, parameter_catalogue, prepared_factors,
-                      preview_study, referenced_definitions)
+from .studies import (ExistingCase, ReusableDefinition, Study, StudyError,
+                      generation_signature, preview_study, referenced_definitions)
 
 
 TRANSACTION = ".study-transaction"
@@ -383,106 +381,5 @@ class StudyStore:
         self._commit({f"definitions/{_identity(ident)}": None}, metadata)
 
     def add_imported_baseline(self, study):
+        # Compatibility for pending studies saved before desktop batch import was removed.
         return self.project.add_case(f"{study.name} baseline", study.baseline)
-
-    def _read_import(self, path, name, study_id=None):
-        document = load_batch_spec(path)
-        base_path = resolve_path(document.base_dir, document.spec.base_case)
-        run = read_yaml_mapping(base_path, "run")
-        baseline = {"run": run, **{key: read_yaml_mapping(resolve_path(base_path.parent, run["references"][f"{key}_file"]), key)
-                                  for key in DOCUMENTS[1:]}}
-        study = Study(study_id or uuid4().hex, name, portable_documents(baseline),
-                      editor_metadata={"step_ids": new_step_ids(baseline["program"])})
-        definitions, programs, beds = {}, {}, {}
-        portable = document.spec.model_dump(mode="json")
-        portable.update(base_case="base/run.yaml", output_directory="unused-output")
-        source_files = _documents(study.baseline, "base/")
-        for label, source in document.spec.programs.items():
-            program = read_yaml_mapping(resolve_path(document.base_dir, source), label)
-            payload = definition_payload("program", {**baseline, "program": program})
-            definition = ReusableDefinition(uuid4().hex, label, "program", payload)
-            definitions[definition.id] = definition
-            programs[label] = definition.id
-            destination = f"program-{definition.id}.yaml"
-            source_files[destination] = yaml.safe_dump(program)
-            portable["programs"][label] = destination
-        for label, preset in document.spec.geometries.items():
-            payload = definition_payload("bed", baseline)
-            # Keep omitted settings inherited so importing preserves the authored rule exactly.
-            for section in BED_RUN_FIELDS:
-                payload[section] = {key: value for key, value in payload[section].items()
-                                    if key in baseline["run"].get(section, {})}
-            payload["model"].update({key: value for key, value in preset.model.items()
-                                     if key in BED_RUN_FIELDS["model"]})
-            if preset.solids_file:
-                payload["solids"] = read_yaml_mapping(resolve_path(document.base_dir, preset.solids_file), label)
-            definition = ReusableDefinition(uuid4().hex, label, "bed", payload)
-            definitions[definition.id] = definition
-            beds[label] = definition.id
-            if preset.solids_file:
-                destination = f"solids-{definition.id}.yaml"
-                source_files[destination] = yaml.safe_dump(payload["solids"])
-                portable["geometries"][label]["solids_file"] = destination
-        source_files["batch.yaml"] = yaml.safe_dump(portable, sort_keys=False)
-        study.legacy = {"spec": portable, "programs": programs, "beds": beds}
-        self._convert_native(study, definitions)
-        return study, definitions, source_files
-
-    @staticmethod
-    def _convert_native(study, definitions):
-        """Convert only a provably identical subset; everything else keeps its original rule."""
-        native = deepcopy(study)
-        native.legacy = None
-        catalogue = parameter_catalogue(native)
-        for axis in study.legacy["spec"]["axes"]:
-            target, values = None, []
-            for value in axis["values"]:
-                effects = [key for key in ("program", "geometry", "patch") if value.get(key)]
-                if len(effects) != 1:
-                    return
-                effect = effects[0]
-                if effect == "program":
-                    this_target, raw = "definition:program", study.legacy["programs"][value[effect]]
-                elif effect == "geometry":
-                    preset = study.legacy["spec"]["geometries"][value[effect]]
-                    if set(preset["model"]) - set(BED_RUN_FIELDS["model"]):
-                        return
-                    this_target, raw = "definition:bed", study.legacy["beds"][value[effect]]
-                else:
-                    patch = {key: val for key, val in value["patch"].items() if val}
-                    path = []
-                    while isinstance(patch, dict) and len(patch) == 1:
-                        key, patch = next(iter(patch.items()))
-                        path.append(key)
-                    parameter = next((parameter for parameter in catalogue if parameter.path == tuple(path)), None)
-                    if parameter is None or not isinstance(patch, (int, float)):
-                        return
-                    this_target, raw = parameter.id, patch
-                if target is not None and target != this_target:
-                    return
-                target = this_target
-                values.append(raw)
-            native.factors.append(Factor(uuid4().hex, target, values))
-        try:
-            prepared_factors(native, definitions)
-            # Compare documents, including derived timing and geometry. Ignore only display labels.
-            for first, second in zip(expand_study(study, definitions), expand_study(native, definitions), strict=True):
-                if first.documents != second.documents:
-                    return
-        except (ValueError, TypeError):
-            return
-        study.factors, study.legacy = native.factors, None
-
-    def _stage_import(self, metadata, study, definitions, sources):
-        folders = {f"studies/{study.id}": {**sources, **self._study_files(study)}}
-        for definition in definitions.values():
-            metadata.setdefault("definitions", []).append({"id": definition.id, "name": definition.name, "kind": definition.kind})
-            folders[f"definitions/{definition.id}"] = self._definition_files(definition)
-        return folders
-
-    def import_batch(self, path, name=None):
-        study, definitions, sources = self._read_import(path, name or Path(path).stem)
-        metadata = deepcopy(self.project.metadata)
-        metadata["studies"].append({"id": study.id, "name": study.name})
-        self._commit(self._stage_import(metadata, study, definitions, sources), metadata)
-        return deepcopy(self.studies[study.id])

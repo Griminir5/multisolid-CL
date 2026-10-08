@@ -97,4 +97,11 @@ The program composition maps use these component IDs. Add explicit `bindings` in
 
 `load_case` discovers a containing project and uses its current plugins; run snapshots use their saved copies. Standalone inputs can put a `definitions.json` next to `run.yaml` with `{"root": "relative/path/to/project", "lock": {"builtin": "<fingerprint>", "plugins": {"lab": "<hash>"}}}`. CLI batches copy the selected plugins into each generated case folder and write this descriptor with `root: "."`, so the case folder can be moved independently. For manually prepared descriptors, the referenced plugin folders must travel with the inputs; there is no machine-global plugin dependency.
 
+An exact lock checks both the built-in fingerprint and the selected plugin hashes
+before resolving definitions. CLI case loading, batch loading and desktop snapshot
+loading reject a mismatch. Use the application version matching the saved built-ins,
+or explicitly regenerate the inputs with the current definitions. Loading a locked
+case never silently replaces its recorded built-in fingerprint. Inputs without an
+exact lock continue to use the current definitions.
+
 For Python callers, `select_definitions(chemistry, solids, catalogue)` returns immutable metadata. `materialize_definitions(selection, catalogue)` returns the passive `DefinitionEnvironment` containing exactly `properties`, `reaction_network`, `rate_hooks` and `selection`. Pass it to `load_case(..., definitions=environment)` or `resolve_case(..., definitions=environment)`. `Case.definitions` is authoritative for validation, initialization and simulation. Independent property-registry/model-hook overrides have been removed; a supplied environment never fills missing definitions from global built-ins. `inspect_case` and `inspect_case_file` return metadata-only `CaseInputs` for editors, not partially executable cases.

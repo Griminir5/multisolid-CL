@@ -329,7 +329,7 @@ are replaced. The preview states the case and result counts before this action.
 There are no archived cases or restoration. Rebuilds preserve independent cases,
 other studies, the fixed baseline, and the reusable-definition library.
 
-### Reusable definitions and imports
+### Reusable definitions and CLI batches
 
 Use **Project → Reusable definitions…**, or create/edit definitions while choosing
 a study variation. Programs contain the operating program, its mode and repetition
@@ -343,16 +343,20 @@ Older bed definitions continue inheriting any settings they do not yet contain.
 Editing and saving them captures these settings from the displayed inputs. A bed
 variation cannot be combined with a numerical sweep of a setting that bed owns.
 
-**Import Parameter Study** copies an engine `batch.yaml` and its referenced inputs
-into a pending study. Use **Add baseline as independent case**, run that case
-successfully, then select it with **Replace baseline** before generating cases.
-The original source files are preserved. Exactly representable rules become native
-editable studies; other rules remain advanced imported studies with their original
-axis order and patch behavior, available for inspection and generation. Advanced
-rules retain the original preset ownership of companion settings.
+Create desktop studies with **New Parameter Study** using a successful baseline
+case. **Run all cases** executes included independent and generated cases together,
+using the project's **Maximum workers** setting and each case's thread count.
 
-Batch worker/time-limit settings remain in the portable original rule. Desktop
-execution uses the project's Maximum workers setting and each case's thread count.
+Engine `batch.yaml` files are used through the [CLI batch commands](../README.md),
+and cannot be imported as desktop studies. The desktop still supports importing an
+individual case's `run.yaml` and importing complete project archives.
+
+Studies imported by earlier versions remain readable and retain their saved rules.
+For those existing advanced studies, only settings overridden by the original batch
+preset apply; other settings still come from the baseline. A pending imported study
+can still use **Add baseline as independent case** and **Replace baseline** to
+establish a successful baseline. No saved cases or results are removed by retiring
+the batch-import action.
 
 ## Storage and code
 
@@ -370,7 +374,7 @@ project/
   studies/<study-id>/
     study.json                   # rule, fixed-baseline provenance, stable step targets
     baseline/                    # four copied scientific documents
-    batch.yaml                   # portable original rule, for imported studies
+    batch.yaml                   # compatibility: rule saved by an older batch import
   definitions/<definition-id>/   # metadata plus program.yaml or solids.yaml
   execution.json                 # latest Run case / Run all queue status
   execution.log                  # worker startup diagnostics
