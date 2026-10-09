@@ -196,6 +196,7 @@ class ModelConfig(ConfigModel):
     gas_voidage_mode: Literal["bed_only", "bed_and_particle"] = "bed_and_particle"
     ambient_temperature_k: PositiveFloat = 873.15
     heat_transfer_coefficient_w_per_m2_k: NonNegativeFloat = 100.0
+    axial_heat_dispersion_w_per_m_k: NonNegativeFloat = 0.0
 
 
 class SolverConfig(ConfigModel):

@@ -47,7 +47,9 @@ can also use `neato` on `PATH` or the `MULTISOLID_GRAPHVIZ` executable override.
    or merged. Opening a project resumes it in place.
 2. Inside the project, use **New Case** to start from an empty draft in **Feed** mode with a repeating
    program and the Compiled/band solver defaults, including
-   relative tolerance `1e-7`. **Import Case** copies a `run.yaml` and its referenced inputs
+   relative tolerance `1e-7`. **Outlet composition** and **Outlet conditions** plots are selected
+   by default, along with their required gas mole fraction, temperature, pressure, and gas flux reports.
+   **Import Case** copies a `run.yaml` and its referenced inputs
    into this project, preserving the original files.
 3. Project actions are in the top **Project** menu. Each case row shows its name,
    input readiness, latest result, and icon actions: **Run**, **Duplicate**, **Edit**,
@@ -61,8 +63,9 @@ can also use `neato` on `PATH` or the `MULTISOLID_GRAPHVIZ` executable override.
    and connecting links; click it again or click empty space to clear. Scroll or
    use **+/−** to zoom, drag to pan, and use **Fit** to reset the view. Layouts
    update in the background after edits and fit again when the pane resizes.
-   Bed places settings on the left and material zones on the right above
-   the numerical preview. Program edits initial values and timed hold/ramp steps
+   Bed includes a **Heat dispersion (W/m/K)** coefficient for axial heat spreading,
+   defaulting to `0` (disabled). Settings are on the left and material zones on the
+   right above the numerical preview. Program edits initial values and timed hold/ramp steps
    beside its preview, ordered as flow, temperature, composition, and pressure.
    Target headers show the units. Click a channel's arrow to collapse its settings
    and give the other channels more room. In a composition dialog, **Normalize**

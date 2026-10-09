@@ -116,6 +116,7 @@ def parameter_catalogue(study):
         ("bed_length_m", "Bed length", "m"), ("bed_radius_m", "Bed radius", "m"),
         ("ambient_temperature_k", "Ambient temperature", "K"),
         ("heat_transfer_coefficient_w_per_m2_k", "Heat-transfer coefficient", "W/m²/K"),
+        ("axial_heat_dispersion_w_per_m_k", "Axial heat dispersion", "W/m/K"),
     ):
         parameters.append(Parameter(key, label, "Bed", unit, ("run", "model", key)))
     for section, key, label, unit, integer in (

@@ -115,6 +115,15 @@ Ergun still uses interparticle voidage and the solver calculates flow and veloci
 variations across the bed. For example, add `gas_voidage_mode: bed_only` under
 `model:` in `run.yaml` to exclude particle-pore gas storage.
 
+`model.axial_heat_dispersion_w_per_m_k` sets a constant effective axial heat
+dispersion coefficient in W/(m·K), also available under **Bed → Heat dispersion**
+in the desktop editor. It defaults to `0` (disabled) and must be non-negative.
+The additional heat flux is `q = -lambda_ax * dT/dx`, per total bed cross-sectional
+area, using the shared gas/solid temperature. Interior faces exchange heat using
+the temperature difference between cell centers; the inlet and outlet have zero
+dispersive heat flux. This redistributes bed energy without adding a boundary heat
+source and applies to both Standard and Compiled solvers.
+
 Gas mixture viscosity uses [Wilke's mixing rule](https://idaes-pse.readthedocs.io/en/stable/explanations/components/property_package/general/transport_properties/viscosity_wilke.html)
 in both initialization and the solver's Ergun closure:
 `mu_mix = sum_i [y_i * mu_i / (sum_j y_j * phi_ij)]`, where

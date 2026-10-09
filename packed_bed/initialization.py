@@ -242,6 +242,7 @@ def configure_model(model, case: Case, state: InitialState) -> None:
     model.U_eff.SetValue(
         case.run.model.heat_transfer_coefficient_w_per_m2_k * J / (K * s * m**2)
     )
+    model.lambda_ax.SetValue(case.run.model.axial_heat_dispersion_w_per_m_k * J / (K * s * m))
     model.T_in_const.SetValue(float(case.inlet_temperature_program.initial_value) * K)
     model.P_out_const.SetValue(float(case.outlet_pressure_program.initial_value) * Pa)
     model.F_in_const.SetValue(float(case.inlet_flow_program.initial_value) * mol / s)

@@ -112,15 +112,19 @@ class BedPage(QWidget):
         editor.field(form, ("run", "model", "bed_radius_m"), "Radius (m)")
         self.length = editor.field(form, ("run", "model", "bed_length_m"), "Length (m)")
         self.length.editingFinished.connect(self.resize_zones)
-        self.basis = editor.field(form, ("solids", "initial_profile", "basis"), "Concentration basis", options=[
+        self.basis = editor.field(form, ("solids", "initial_profile", "basis"), "Solid density basis", options=[
             ("Bed volume", "bed"), ("Solid volume", "solid"),
         ], binary=True)
         self.basis.currentIndexChanged.connect(lambda: self.update_units())
-        editor.field(form, ("run", "model", "gas_voidage_mode"), "Gas voidage", options=[
+        editor.field(form, ("run", "model", "gas_voidage_mode"), "Gas-occupied bed fraction", options=[
             ("Interparticle only", "bed_only"), ("Interparticle + intraparticle", "bed_and_particle"),
         ], default="bed_and_particle", binary=True, vertical=True)
         editor.field(form, ("run", "model", "ambient_temperature_k"), "Ambient temperature (K)", default=273.15)
         editor.field(form, ("run", "model", "heat_transfer_coefficient_w_per_m2_k"), "Heat transfer (W/m²/K)", default=0.0)
+        dispersion = editor.field(form, ("run", "model", "axial_heat_dispersion_w_per_m_k"),
+                                  "Heat dispersion (W/m/K)", default=0.0)
+        dispersion.setToolTip("Constant effective axial heat dispersion through the bed. "
+                              "0 disables it; no dispersive heat crosses the inlet or outlet.")
         editor.field(form, ("run", "simulation", "interior_flow_mode"), "Reversible flow", kind="check",
                      default="forward_only", checked_values=("forward_only", "reversible"))
         self.settings_split.addWidget(options)

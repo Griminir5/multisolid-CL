@@ -9,25 +9,28 @@ from pydantic import ValidationError
 
 from packed_bed.config.load import inspect_case
 from packed_bed.config.models import ModelConfig, SimulationConfig, SolverConfig
+from packed_bed.plotting import PLOT_REGISTRY
 
 
 BED_RUN_FIELDS = {
     "model": ("bed_length_m", "bed_radius_m", "ambient_temperature_k",
-              "heat_transfer_coefficient_w_per_m2_k", "gas_voidage_mode"),
+              "heat_transfer_coefficient_w_per_m2_k", "axial_heat_dispersion_w_per_m_k", "gas_voidage_mode"),
     "simulation": ("interior_flow_mode",),
 }
 
 
 def empty_documents(case_id):
     """Initialize an authored draft explicitly, never as a side effect of inspection."""
+    plots = ["outlet_composition", "outlet_conditions"]
+    reports = list(dict.fromkeys(report for plot in plots for report in PLOT_REGISTRY[plot].required_reports))
     return {
         "run": {
             "simulation": {"system_name": "Case_" + case_id, "time_horizon_s": 0.0,
                            "reporting_interval_s": 1.0, "mass_scheme": "weno3", "heat_scheme": "weno3",
                            "report_time_derivatives": False, "repeat_program": True, "program_mode": "feed_stream"},
-            "model": {"axial_cells": 20},
+            "model": {"axial_cells": 20, "axial_heat_dispersion_w_per_m_k": 0.0},
             "solver": SolverConfig.for_new_case().model_dump(),
-            "outputs": {"requested_reports": [], "requested_plots": []},
+            "outputs": {"requested_reports": reports, "requested_plots": plots},
         },
         "chemistry": {"gas_species": [], "reaction_families": [], "reaction_ids": []},
         "solids": {"solid_species": [], "initial_profile": {"basis": "bed", "zones": []}},

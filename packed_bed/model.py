@@ -90,6 +90,7 @@ class PackedBedModel(daeModel):
         self.mass_scheme = case.run.simulation.mass_scheme
         self.heat_scheme = case.run.simulation.heat_scheme
         self.interior_flow_mode = case.run.simulation.interior_flow_mode
+        self.heat_dispersion_enabled = case.run.model.axial_heat_dispersion_w_per_m_k > 0.0
         requested_reports = set(case.run.outputs.requested_reports)
         if smooth_ramp_width_s <= 0.0:
             raise ValueError("smooth_ramp_width_s must be positive.")
@@ -205,6 +206,7 @@ class PackedBedModel(daeModel):
 
         self.T_env = daeParameter("T_env", K, self, "Temperature of the ambient environment outisde the reactor")
         self.U_eff = daeParameter("U_eff", J / (K * s * m**2), self, "Heat transfer coefficient from inside of the bed to the environment")
+        self.lambda_ax = daeParameter("lambda_ax", J / (K * s * m), self, "Effective axial heat dispersion per total bed cross section")
 
     def _source_expression(self, coefficients, idx_cell):
         source = Constant(0.0 * mol / (m**3 * s))
@@ -295,6 +297,14 @@ class PackedBedModel(daeModel):
 
         def heat_loss_density(idx_cell):
             return (self.T(idx_cell) - self.T_env()) * (2.0 * self.U_eff()) / self.R_bed()
+
+        def dispersive_heat_flux(face_index):
+            # Closed dispersive boundaries retain the prescribed inlet enthalpy
+            # and convective outlet flux. Interior faces exchange heat conservatively.
+            if face_index == 0 or face_index == Nf - 1:
+                return Constant(0.0 * J / (s * m**2))
+            left, right = face_index - 1, face_index
+            return -self.lambda_ax() * (self.T(right) - self.T(left)) / (center_coords[right] - center_coords[left])
 
         def interior_transport_flux(
             transport_rate,
@@ -543,9 +553,12 @@ class PackedBedModel(daeModel):
         for idx_cell in range(Nc):
             dx = face_coords[idx_cell + 1] - face_coords[idx_cell]
             eq = self.CreateEquation(f"energy_balance_cell_{idx_cell}")
-            eq.Residual = dt(self.u_cell(idx_cell)) + (
+            residual = dt(self.u_cell(idx_cell)) + (
                 Sum(self.J_gas_face.array("*", idx_cell + 1)) - Sum(self.J_gas_face.array("*", idx_cell))
             ) / dx + heat_loss_density(idx_cell)
+            if self.heat_dispersion_enabled:
+                residual = residual + (dispersive_heat_flux(idx_cell + 1) - dispersive_heat_flux(idx_cell)) / dx
+            eq.Residual = residual
 
         for gas_idx, species_name in enumerate(self.gas_species):
             if gas_idx == temperature_anchor_gas_idx:

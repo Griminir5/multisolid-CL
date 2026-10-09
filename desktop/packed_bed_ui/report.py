@@ -455,14 +455,7 @@ class ReportPage(QWidget):
             return
         self.refresh_source()
         if not self.definition["sheets"]:
-            columns = [{"quantity": name, "fixed": {}} for name in
-                       ("outlet_temperature", "outlet_pressure", "outlet_flow")
-                       if name in self.schema["quantities"]]
-            if "report" not in case.metadata and columns:
-                self.definition["sheets"].append({"name": "Outlet conditions", "axis": "time",
-                                                  "rows": {"mode": "all"}, "columns": columns})
-            else:
-                self.add_sheet(save=False)
+            self.add_sheet(save=False)
         self.rebuild_sheets(1)
 
     def tab_changed(self):
