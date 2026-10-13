@@ -80,7 +80,7 @@ from packed_bed.plugins.check import generate_metadata
 from packed_bed.plugins.storage import pack_plugin
 
 for name in ("ammonia", "nitrogen_oxides", "enthalpy_overrides"):
-    folder = Path("packed_bed/examples/plugins") / name
+    folder = Path("examples/plugins") / name
     generate_metadata(folder)
     pack_plugin(folder, Path("dist/example-plugins") / f"{name}.msplugin")
 ```

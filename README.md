@@ -1,653 +1,231 @@
-# multisolid-CL
+# MultiSolid-CL
 
-`packed_bed` simulates gas flow, heat transfer, and reactions in a packed-bed reactor.
-The model uses DAETools. YAML files specify the species, solids, operating program, geometry, solver, and outputs.
-Each run writes an xarray dataset in NetCDF format and a JSON manifest.
+MultiSolid-CL simulates gas flow, heat transfer, as well as gas-gas and gas-solid reactions in packed-bed
+reactors. It provides a Python simulation engine, a command-line interface for
+YAML-defined cases and batches, and a desktop application for projects, parameter studies,
+plots, and Excel reports. Simulations use DAETools, with an optional compiled
+SUNDIALS backend. Run data are saved as NetCDF with a JSON provenance manifest.
 
-A small PyQt6 desktop client now lives in [desktop/](desktop/README.md).
-The [Windows release build](desktop/BUILD_WINDOWS.md) produces an installer and
-portable ZIP with the required runtimes included; end users do not install Python.
-It supports projects with multiple cases, draft run settings, shared previews,
-Run case / Run all execution, and project Excel reports with Case as a selectable
-axis. Each case keeps one latest run; rerunning
-replaces its results, and input edits mark retained results stale. See its README for setup.
+## Documentation
 
-**Install the package.** Use Python 3.11 or 3.12. The commands below use PowerShell from the repository directory.
+The four guides under `docs/` are outlines for the planned documentation. The
+existing plugin and desktop references remain available while their content is
+migrated.
 
-1. Create an environment.
+| Document | Contents | Status |
+| --- | --- | --- |
+| [Plugin guide](docs/plugins.md) | Installing, using, developing, checking, and sharing plugins | Outline; links to the existing guide |
+| [Model equations](docs/equations.md) | Governing equations, assumptions, boundary conditions, and source terms | Outline |
+| [GUI guide](docs/gui-guide.md) | Projects, cases, studies, plots, and Excel reports | Outline; links to the existing guide |
+| [CLI guide](docs/cli-guide.md) | YAML inputs, single runs, batches, solver options, and outputs | Outline |
+| [Windows build guide](desktop/BUILD_WINDOWS.md) | Building, validating, and packaging the desktop distribution | Available |
+| [Plugin examples](examples/plugins/README.md) | Worked species, property, and kinetics examples | Available |
+| [Waste iron plugin](plugins/waste_iron/README.md) | Installation, kinetics, property definitions, and provenance | Available |
+| [Kinetics sources](packed_bed/kinetics/KINETICS_SOURCES.md) | References for the built-in reaction families | Available |
+| [Third-party notices](THIRD_PARTY_NOTICES.md) | Dependency attribution and accompanying licences | Available |
 
-   ```powershell
-   python -m venv .venv
-   ```
+## Install the desktop application
 
-2. Activate the environment.
+The first public desktop release is pending. Once published, download it from
+[GitHub Releases](https://github.com/Griminir5/multisolid-CL/releases). Until then,
+use the source installation below, or follow the
+[Windows build guide](desktop/BUILD_WINDOWS.md) to build a distribution.
 
-   ```powershell
-   .\.venv\Scripts\Activate.ps1
-   ```
+The Windows distribution targets **Windows 11 x64**. Choose one release asset:
 
-3. Install the package.
+| Asset | Installation |
+| --- | --- |
+| `MultiSolid-<version>-windows-x64-setup.exe` | Run the installer, then open MultiSolid from the Start menu. Installation is for the current user. |
+| `MultiSolid-<version>-windows-x64-portable.zip` | Extract the entire ZIP into a new folder, then run `MultiSolid/MultiSolid.exe`. Keep its files and subfolders together. |
 
-   ```powershell
-   python -m pip install -e .
-   ```
+Both distributions include Python, DAETools, Graphviz, and the compiler and
+libraries needed for Compiled execution. End users do not need to install these
+separately. GitHub's automatically generated source archives are source code;
+choose the installer or portable ZIP for the ready-to-run application.
 
-4. Install [DAETools 2.6.0](https://daetools.sourceforge.io/downloads.html) and its dependencies in the same environment.
-   Use the DAETools archive for your operating system and Python version.
-   From the extracted DAETools directory, run `python -m pip install .`.
+Create projects in a writable folder outside the application directory. The first
+Compiled run may take several minutes to build its model; compatible later runs
+reuse the project's cache. To update a portable installation, extract the new
+version into a new folder and open your existing project. The
+[current desktop reference](desktop/README.md) explains the project workflow.
 
-Configuration validation does not need DAETools. Simulation needs a working DAETools installation and a supported solver.
-This repository does not distribute DAETools, OpenCS, or their binary dependencies.
+## Install the full repository from source
 
-For the DAETools plotter, install the GUI dependencies with `python -m pip install -e ".[plotter]"`.
-The system graph uses the separate Graphviz `neato` executable, shared with the
-desktop preview. For source development, install Graphviz on `PATH` or set
-`MULTISOLID_GRAPHVIZ` to the executable. No Python Graphviz binding is needed.
-See [bundling Graphviz](desktop/BUILD_WINDOWS.md#graphviz-runtime) for staging the
-Windows runtime.
+Use **Python 3.11 or 3.12** and Git. These steps install the engine, CLI, desktop
+application, compiled-backend Python dependencies, and DAETools plotter support
+in one environment. Windows and Linux need a matching DAETools distribution and
+its native dependencies.
 
-**Validate a case.** Start with the [default case](examples/simulations/default_case/run.yaml).
+### 1. Get the source and create an environment
+
+The desktop application currently lives on the `application-and-ui` branch;
+the repository's default branch does not contain this layout.
+
+```sh
+git clone --branch application-and-ui https://github.com/Griminir5/multisolid-CL.git
+cd multisolid-CL
+python -m venv .venv
+```
+
+Activate the environment in PowerShell:
 
 ```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Or in a Linux shell:
+
+```sh
+source .venv/bin/activate
+```
+
+Use `python3.11` or `python3.12` to create the environment if your default `python`
+is a different version. Run the remaining repository commands from its root.
+
+### 2. Install the Python packages
+
+```sh
+python -m pip install -e ".[compiled,plotter]" -e ./desktop
+```
+
+Editable installation makes local Python changes available without reinstalling.
+The desktop package includes Excel export dependencies. Release builds use a
+separate, pinned environment described in the Windows build guide.
+
+### 3. Install DAETools
+
+Download [DAETools 2.6.0](https://daetools.sourceforge.io/downloads.html) for your
+operating system and Python version. Extract it, then, with the same virtual
+environment active, install from the extracted DAETools directory:
+
+```sh
+python -m pip install .
+```
+
+Follow the DAETools installation instructions for its native dependencies. The
+distribution must include the solver adapters you intend to use; the supplied
+single-case example uses SuperLU. Compiled execution also uses DAETools to build
+the model and solve its initial conditions. Return to the MultiSolid repository
+root after installation.
+
+### 4. Install the external tools
+
+- **Graphviz:** install the native Graphviz distribution with `neato` on `PATH`,
+  or set `MULTISOLID_GRAPHVIZ` to the full path of its executable. This supplies
+  the chemistry graph and CLI system diagram; no Python Graphviz binding is needed.
+- **C++ compiler:** for source Compiled execution, install GCC or Clang on Linux
+  and make it available on `PATH`; `CXX` can select its executable. On Windows,
+  install Visual Studio Build Tools with C++ x64 support; the application locates
+  its toolchain through the Visual Studio installer.
+
+Without a managed native bundle, Compiled execution uses the pinned
+`scikit-sundae==1.1.3` wheel's SUNDIALS runtime. Arbitrary system SUNDIALS libraries
+are not interchangeable with that runtime. Compiled KLU requires the managed
+bundle. See [native bundles](desktop/BUILD_WINDOWS.md#native-bundles) for staging
+the Windows compiler, solver libraries, and Graphviz runtime. Source execution
+also detects staged bundles under `desktop/vendor/`.
+
+### 5. Check the installation and launch
+
+```sh
 python -m packed_bed examples/simulations/default_case/run.yaml --validate-only
+packed-bed-ui
 ```
 
-Validation detects duplicate YAML keys, invalid fields, missing species, unresolved references, and incompatible report or plot selections.
-It does not create output files. It does not establish the scientific validity of a reaction or property correlation.
-
-**Run a case.** Remove `--validate-only` to start the solver.
-
-```powershell
-python -m packed_bed examples/simulations/default_case/run.yaml
-```
-
-Use `--artifacts` to create the operating-program diagram and initial solid profile before the run.
-This option also creates the system graph with Graphviz. If Graphviz is unavailable
-or fails, a warning explains why that diagram was skipped; other artifacts and the
-simulation can still proceed.
-Use `--dae-plotter` to open the DAETools plotter after the run.
-Use `--debug` to show the traceback for an unexpected error.
-The installed `packed-bed` command accepts the same arguments as `python -m packed_bed`.
-
-A single run can replace files in its output directory. Use a different output directory to keep an earlier result.
-
-The source example uses DAETools / SuperLU. To use compiled execution, set
-`solver.backend: compiled` and select `solver.name: superlu`, `klu`, or `band`.
-Install the optional runtime and compiler described below. Give each variant a
-separate output directory to retain comparisons.
-
-**Edit the input files.** The run file refers to three other files.
-All relative paths use the directory that contains the referring file.
-
-| File | Contents |
-| --- | --- |
-| `run.yaml` | File references, geometry, solver settings, output paths, reports, and plots |
-| `chemistry.yaml` | Gas species, reaction families, and reaction IDs |
-| `program.yaml` | Separate inlet channels or a feed stream, plus outlet pressure |
-| `solids.yaml` | Solid species, initial concentrations, voidages, and particle diameters |
-
-Use the complete YAML files in the example directory as templates.
-Use kelvin, pascals, metres, seconds, and mol/s unless a field specifies another unit.
-Each composition must include every selected gas species. The mole fractions must sum to 1.
-Solid zones must cover the bed without gaps or overlaps.
-
-Solid concentrations default to mol/m³. To enter mass concentrations, set
-`initial_profile.concentration_unit: kg_per_m3` in `solids.yaml`, or select
-**kg/m³** under **Bed → Concentration units** in the desktop editor. The existing
-`basis: bed` or `basis: solid` selects the volume in either case. The unit applies
-to every zone's `values`; changing the selector leaves the entered numbers as they
-are. Mass inputs are divided by each selected species' molecular weight (kg/mol)
-to obtain mol/m³ internally. For `basis: solid`, the usual solid-volume fraction
-is then applied. Simulation results and the bed preview remain in mol/m³ of bed.
-
-`model.gas_voidage_mode` selects the gas storage volume used for concentrations
-in mol/m³ of bed:
-
-| Value | Gas volume / bed volume |
-| --- | --- |
-| `bed_and_particle` (default) | `e_b + (1 - e_b) * e_p` |
-| `bed_only` | `e_b` |
-
-The selected fraction is used consistently in gas initialization, the equation of
-state, transport and gas energy storage. Solid volume always uses
-`(1 - e_b) * (1 - e_p)`. The gas-phase density remains `P * MW_mix / (R * T)`;
-Ergun still uses interparticle voidage and the solver calculates flow and velocity
-variations across the bed. For example, add `gas_voidage_mode: bed_only` under
-`model:` in `run.yaml` to exclude particle-pore gas storage.
-
-`model.axial_heat_dispersion_w_per_m_k` sets a constant effective axial heat
-dispersion coefficient in W/(m·K), also available under **Bed → Heat dispersion**
-in the desktop editor. It defaults to `0` (disabled) and must be non-negative.
-The additional heat flux is `q = -lambda_ax * dT/dx`, per total bed cross-sectional
-area, using the shared gas/solid temperature. Interior faces exchange heat using
-the temperature difference between cell centers; the inlet and outlet have zero
-dispersive heat flux. This redistributes bed energy without adding a boundary heat
-source and applies to both Standard and Compiled solvers.
-
-Gas mixture viscosity uses [Wilke's mixing rule](https://idaes-pse.readthedocs.io/en/stable/explanations/components/property_package/general/transport_properties/viscosity_wilke.html)
-in both initialization and the solver's Ergun closure:
-`mu_mix = sum_i [y_i * mu_i / (sum_j y_j * phi_ij)]`, where
-`phi_ij = (1 + sqrt(mu_i / mu_j) * (MW_j / MW_i)^0.25)^2 / sqrt(8 * (1 + MW_i / MW_j))`.
-Here `y` is mole fraction, `mu` is the species viscosity at the cell temperature,
-and `MW` is molecular weight. The implementation supports pure gases and zero
-mole fractions without dividing by composition.
-
-A program channel has an `initial` value and an optional list of `hold` or `ramp` steps.
-Each step has a `duration_s`. Each ramp also has a `target`.
-A channel without steps stays constant.
-
-With `repeat_program: true`, the next cycle starts from the previous cycle's final value.
-The program does not reset to its initial value between cycles.
-
-The solver smooths ramps with a one-second width. Thus, the value at time zero can differ from the declared initial value.
-Smoothing has compact support: a ramp affects its surroundings only within one
-smoothing width of its endpoints. Inside that interval the smoothed positive part
-is quadratic, with a continuous first derivative. Beyond it the ramp is exactly
-linear or constant. Programs retain one startup cycle and one carried-forward
-continuation, independently of the simulation horizon. Extending a run therefore
-preserves earlier boundary values. Initialization, previews, Standard execution,
-and Compiled execution use the same rule.
-
-For a flow in gas hourly space velocity, set `inlet_flow.basis: ghsv_per_h`.
-The compiler uses the bed volume, 273.15 K, and 100,000 Pa to convert GHSV to mol/s.
-The manifest retains the declared basis and the compiled values.
-
-**Ramp between feeds.** Set `simulation.program_mode: feed_stream` in `run.yaml`
-to specify one inlet feed program plus the independent outlet-pressure channel.
-The default, `separate_channels`, keeps the existing flow, temperature, and
-composition channels. Each mode requires its own program format; mixing the
-formats is rejected.
-
-For example, a feed program has the following structure:
-
-```yaml
-# run.yaml (excerpt)
-simulation:
-  program_mode: feed_stream
-```
-
-For a case selecting `N2` and `H2O`, the corresponding `program.yaml` could be:
-
-```yaml
-feed_stream:
-  basis: mol_per_s
-  initial:
-    flow: 1000.0
-    temperature: 773.15
-    composition: {N2: 1.0, H2O: 0.0}
-  steps:
-    - kind: ramp
-      duration_s: 5.0
-      target:
-        flow: 333.05
-        temperature: 673.15
-        composition: {N2: 0.0, H2O: 1.0}
-    - kind: hold
-      duration_s: 225.0
-outlet_pressure:
-  initial: 3000000.0
-  steps: []
-```
-
-Each ramp target may contain any combination of `flow`, `temperature`, and
-`composition`. Omitted fields retain their previous values, including across
-repeated cycles. A supplied composition must include every selected gas species
-and sum to one. Use a `hold` step to retain the entire feed. Flow and temperature
-must be positive; zero-flow stages are not supported. Set
-`feed_stream.basis: ghsv_per_h` to use the same GHSV conversion as the
-separate-channel mode.
-
-Feed ramps interpolate total flow **F**, species flows **F × y**, and **F × T**.
-The existing one-second smoothing applies to these quantities before dividing
-by total flow to obtain composition and temperature. This avoids species-flow
-overshoot caused by independently ramping total flow and mole fractions. For
-example, halfway from 2736.77 mol/s air to 333.05 mol/s steam, steam contributes
-166.53 mol/s and about 10.85% of the mixture. Temperature is weighted by molar
-flow; this approximates mixing without enforcing an enthalpy balance. Smoothing
-still rounds the transition edges and can change the inlet conditions at time
-zero. Plots, initialization, and both solver backends use these derived conditions;
-the manifest records the underlying flow programs and their ratios.
-
-**Select numerical settings.** The mass and heat schemes are independent.
-Available schemes are `upwind1`, `central`, `linear_upwind2`, `muscl_minmod`, `weno3`, and `weno5`.
-The default interior flow mode is `forward_only`.
-The `reversible` mode permits flow reversal at interior faces. It does not change the inlet and outlet boundary conditions.
-
-New desktop cases use the Compiled/band profile:
-one thread, relative tolerance `1e-7`, concentration absolute tolerance `1e-11`,
-maximum BDF order 3, and the advanced defaults defined by `SolverConfig.for_new_case()`
-in [models.py](packed_bed/config/models.py).
-Those explicit settings can also be used in CLI case files.
-
-`solver.name` selects a linear solver from the registry in [simulation.py](packed_bed/simulation.py).
-For compatibility, omitted fields in existing YAML retain their historical defaults:
-`backend: daetools` and `name: klu`. The default example selects `superlu`.
-Use a backend included in your DAETools installation.
-`threads: 0` retains environment limits and uses the DAETools default thread count.
-A positive value sets the thread count.
-
-The historical IDAS fallbacks are `suppress_algebraic_errors: false`, `max_nonlinear_iterations: 4`, and `nonlinear_convergence_coefficient: 0.33`.
-The default example changes these values and uses `relative_tolerance: 1.0e-3`.
-Compare important results with a stricter tolerance before you use a new solver configuration.
-
-**Use the compiled CPU backend.** The desktop's managed distribution includes its
-compiler and native libraries for Linux x64 and Windows x64; see the
-[Windows compiled runtime guide](desktop/BUILD_WINDOWS.md#compiled-runtime) for
-the Windows build instructions.
-For source/CLI use without a managed bundle, install the optional runtime with
-`python -m pip install -e ".[compiled]"` and a native C++17 compiler:
-
-| Platform | Compiler |
-| --- | --- |
-| Linux x64 | GCC (`sudo apt install g++` on Debian/Ubuntu) or Clang |
-| Windows x64 | Visual Studio Build Tools with the C++ x64 component |
-| macOS Intel / Apple Silicon | Xcode Command Line Tools (`xcode-select --install`) |
-
-On Linux/macOS, activate the Python environment with `source .venv/bin/activate`.
-The compiler is detected on `PATH`; set `CXX` to a compiler executable name or full path to override it.
-Without a managed bundle, the adapter uses the libraries from the pinned `scikit-sundae==1.1.3` wheel
-(SUNDIALS 7.5.0, double precision, 32-bit indices). Arbitrary system or Conda SUNDIALS
-installations are not interchangeable with this ABI. Wheel availability limits the supported
-platforms; see [the runtime's platform support](https://scikit-sundae.readthedocs.io/en/stable/user_guide/installation.html#platform-support).
-DAETools must also be installed for your Python version and platform.
-
-The compiled backend derives its equations from the DAETools model, eliminates explicit algebraic definitions,
-and runs native residual and analytic-Jacobian functions with SUNDIALS IDA. DAETools still solves the initial conditions.
-Set these entries under `solver` in the case's `run.yaml` (retain any other solver settings):
-
-```yaml
-solver:
-  backend: compiled
-  name: superlu  # Also band, and klu with the managed runtime.
-```
-
-Then run the case normally:
+`python -m packed_bed_ui` also launches the desktop application. To run the
+supplied case from the terminal:
 
 ```sh
 python -m packed_bed examples/simulations/default_case/run.yaml
 ```
 
-KLU is available under both backends as `klu`.
-Compiled KLU requires the managed runtime because the wheel omits KLU.
-Standard KLU uses DAE Tools' Amesos adapter; Compiled uses it for initialization
-and SUNDIALS KLU for integration. Neither substitutes another solver.
+Input validation does not need DAETools. Execution requires the selected solver
+and its dependencies. Each case run can replace files in its output directory;
+use a separate directory to retain earlier results.
 
-The solver identifiers `superlu_mt`, `trilinos_umfpack`, `intel_pardiso`, and
-`trilinos_klu` are no longer supported. Existing inputs using them require an
-explicit solver selection; use `klu` for KLU. Compiled `superlu` still uses the
-SUNDIALS SuperLU_MT library internally and supports the `threads` setting.
+## Repository structure
 
-The first run compiles a model-specific kernel; later single-case CLI runs reuse `.packed_bed_cache` beside the case.
-Console batches share `.packed_bed_cache` in the batch output directory across all cases,
-including Zig's support libraries and native solver helpers.
-Desktop workers always share `.packed_bed_cache` at the project root, outside
-replaceable run folders. It is excluded from archives and scientific fingerprints.
-Kernels use `.dll`, `.so` or `.dylib` as appropriate; cache keys include the platform, CPU architecture,
-compiler and build flags. Set `PACKED_BED_COMPILED_CACHE` to override the CLI cache directory.
-Managed Zig kernels omit debug information to reduce compilation memory.
-Failed compilations keep their full diagnostics in a `*.compiler.log` file in the cache;
-batch errors include a bounded excerpt and the log path.
-Operating programs are per-run native data: cases with the same reduced equations
-can reuse one kernel across different schedules, schedule lengths, smoothing widths,
-and separate-channel or feed-stream programs. Feed-stream composition and temperature
-are still derived after smoothing molar quantities. Initial conditions remain case-specific.
-The manifest records `program_sha256` separately from the model and kernel hashes.
-Grid, chemistry, reports, solid profiles, and other embedded coefficients remain specialized;
-the initial composition's temperature anchor can also select a different structural variant.
-Gas states needed by a possible runtime feed are retained even when one case never supplies
-that species. Shared kernels can therefore have slightly more states than specialized ones.
-AVX2 acceleration is detected at runtime; other CPUs use scalar kernels. The optional
-`vector_exponentials: true` also requires FMA and falls back to scalar math when unavailable.
-The backend supports the usual datasets and plots;
-derivative reports, custom DAETools reporters and incidence-matrix output require `solver.backend: daetools`.
-Run `python -m packed_bed.compiled.smoke` to compile and solve a small DAE with
-each supported native solver. The check needs a working native runtime and compiler.
+| Path | Purpose |
+| --- | --- |
+| [`packed_bed/`](packed_bed/) | Simulation engine, CLI, configuration, scientific definitions, and reports |
+| [`packed_bed/compiled/`](packed_bed/compiled/) | Native code generation, compiler integration, and SUNDIALS runtime support |
+| [`desktop/`](desktop/) | Desktop package metadata, Windows build instructions, and installer definition |
+| [`desktop/packed_bed_ui/`](desktop/packed_bed_ui/) | PyQt6 application, project storage, editors, studies, and Excel export |
+| [`docs/`](docs/) | Plugin, equation, GUI, and CLI guide outlines |
+| [`examples/simulations/`](examples/simulations/) | Complete single-case and batch YAML inputs |
+| [`examples/plugins/`](examples/plugins/) | Illustrative plugin packages |
+| [`plugins/`](plugins/) | Additional scientific plugins, including waste iron |
+| [`tools/`](tools/) | Runtime staging, wheel builds, desktop freezing, and release checks |
+| [`.github/workflows/`](.github/workflows/) | Native runtime CI |
 
-**Run a batch.** A batch expands the combinations of named axis values into separate cases.
-`batch.yaml` is a CLI format. In the desktop, create a native parameter study or
-individual cases, then use **Run all cases** with **Maximum workers** to execute
-them together. The desktop does not import batch files.
+Generated runtimes, build outputs, and caches are excluded from Git. Licences and
+scientific provenance notes stay beside the components they describe.
 
-```powershell
+## Development
+
+Use the editable source installation above. Keep release builds separate from
+the development environment; the
+[Windows build guide](desktop/BUILD_WINDOWS.md) defines the pinned release inputs
+and acceptance checks.
+
+Useful starting points are [configuration and validation](packed_bed/config/),
+[model equations](packed_bed/model.py), [initialization](packed_bed/initialization.py),
+[operating programs](packed_bed/programs.py), [simulation execution](packed_bed/simulation.py),
+and [reports](packed_bed/reports.py). Desktop navigation starts in
+[window.py](desktop/packed_bed_ui/window.py); project persistence is in
+[project.py](desktop/packed_bed_ui/project.py).
+
+Use [scientific plugins](docs/plugins.md) for new species, property correlations,
+or reaction families that can be distributed independently. Changes to built-in
+definitions should retain their scientific references, units, and concentration
+bases. Keep DAETools imports lazy where possible so input validation remains
+usable without the solver. When changing the model, preserve equation names,
+ordering, and solver incidence unless the change deliberately requires otherwise.
+
+Check the example inputs after configuration changes:
+
+```sh
+python -m packed_bed examples/simulations/default_case/run.yaml --validate-only
 python -m packed_bed batch examples/simulations/default_batch_case/batch.yaml --validate-only
-python -m packed_bed batch examples/simulations/default_batch_case/batch.yaml --workers 4 --case-timeout-s 600
 ```
 
-The first command validates all twelve example cases without writes: two programs ×
-two geometries × three solvers (SuperLU baseline, compiled SuperLU, compiled band).
-Running all twelve cases requires the compiled-backend dependencies above.
-The second command runs up to four cases at the same time.
-Each case keeps its own `solver.threads` setting, including in concurrent batches.
-The shipped examples use one numerical thread per case.
-Keep only the desired entries under the `solver` axis in `batch.yaml` to select solvers.
-The batch retains its 7,200-second horizon and `1e-5` relative tolerance for every solver.
-All three use `concentration_absolute_tolerance: 1e-11` to resolve trace concentrations
-through repeated reaction cycles; the band solver also uses the Newton refresh controls above.
+For native runtime changes, run the smoke check with a working compiler and
+runtime. On Linux, expose the staged runtime's `lib` directory through
+`LD_LIBRARY_PATH` if needed:
 
-A timeout stops that case. The batch continues with the other cases.
-
-The command-line values override `workers` and `case_timeout_s` in the batch file.
-Without these settings, the batch uses one worker and no timeout.
-The worker count cannot exceed the case count. It is not limited automatically by the CPU count.
-
-The batch validates every case before it creates case files or starts simulations.
-Nested patches merge mappings in axis order. Later axes take precedence; lists replace earlier lists.
-Program and geometry presets use the same case validation as a single run.
-Each case receives its own four YAML files and output directory.
-
-`summary.csv` records case selections, status, runtime, output paths, plot errors, and available balance errors.
-The batch updates this file after each case completes and on a handled interruption.
-A batch refuses to overwrite existing case directories or its summary.
-To run the batch again, select a new output directory. Automatic resume is not available.
-Use `python -m packed_bed batch --help` for the batch options.
-
-**Compare review changes.** Run `python tools/benchmark_review.py --output /tmp/review-run`
-from a Linux source checkout with DAETools and the compiled runtime installed.
-The benchmark retains case inputs, datasets, balance errors, convergence counters,
-peak process memory, and separate compilation/integration times. Use a fresh output
-directory for each source revision; repetition zero warms the kernel cache.
-Relative tolerance now defaults explicitly to `1e-5`; `--relative-tolerance`
-overrides it. Absolute tolerance stays as authored unless
-`--concentration-absolute-tolerance` is supplied. For example:
-
-```bash
-python tools/benchmark_review.py --output /tmp/review-rtol-1e5 \
-  --scenarios full_cycle --backends compiled band \
-  --relative-tolerance 1e-5 --concentration-absolute-tolerance 1e-11
+```sh
+python -m packed_bed.compiled.smoke
 ```
 
-**October review implementation (2026-10-08).** F03–F05, F07, F09–F11,
-I01–I04 and the applicable S01–S05 cleanups are implemented. F01/F02 were already
-present; F06/F08 were excluded. `e_p` and the plugin-visible solid-total closure
-remain. S06's generic autosave controller remains deferred.
+For packaging changes, build both application wheels with the configured build
+dependencies installed:
 
-[Original measurements](tools/review_results_2026_10_08.json) and the
-[`rtol=1e-5` follow-up](tools/review_rtol_1e5_results_2026_10_08.json) include individual
-timings, input/source hashes, convergence counters, balance errors and numerical
-differences for each successive engine change. The following are total run seconds,
-using the median of repetitions 1 and 2 in fresh serial processes on Linux, with
-warm compiled caches. **Every column uses relative tolerance `1e-5`.** Startup
-covers 60 seconds; dense reporting samples that interval every 0.01 seconds.
-Those runs retain concentration absolute tolerance `1e-5`. The long case covers
-1,520 seconds, with concentration absolute tolerances stated in the column labels.
-Inputs were pinned to the original example at `7c55428`, including the previous
-F01/F02 corrections. Working-tree example edits were preserved separately.
-
-| Successive source stage | Startup, compiled SuperLU | Dense reports, compiled SuperLU | Long, compiled SuperLU, atol `1e-5` | Long, compiled SuperLU, atol `1e-11` | Long, Standard SuperLU, atol `1e-5` |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Numerical baseline | 2.885 | 3.130 | failed 3/3 | 2.420 | 17.490 |
-| + F10 iterative graphs | 3.418 | 3.303 | failed 3/3 | 3.722 | — |
-| + I02 output histories | 3.123 | 3.569 | failed 3/3 | 3.675 | 13.422 |
-| + I01/S05 compact programs | 3.627 | 5.051 | failed 3/3 | 3.109 | 17.407 |
-| + S01/S02 pi/grid cleanup | 3.324 | 3.289 | failed 3/3 | 3.230 | 13.214 |
-| + S03/S04 explicit emission | 3.339 | 3.514 | failed 3/3 | 3.150 | 15.291 |
-
-**Failure diagnosis:** IDA status `-9` means repeated recoverable residual failures.
-The native callback returns this condition when a residual contains NaN or infinity.
-Captured trial states have negative gas concentrations and negative total gas
-density/pressure. Xu–Froment's fractional powers of inverse hydrogen pressure and
-Medrano's fractional powers of `P/(R*T)` then evaluate negative bases and produce
-NaNs. The final source fails near 91.775 seconds at `rtol=1e-5`, while the original
-source also fails, near 117.783 seconds. This is not evidence of a failed SuperLU
-factorization. See the [IDA return codes](https://sundials.readthedocs.io/en/develop/ida/Constants_link.html)
-and the captured states in the follow-up measurements.
-
-With concentration `atol=1e-11`, compiled SuperLU completes **3/3 at every stage**.
-Compiled band also completes 3/3 on the baseline and final source, with warm medians
-of 2.207 and 2.499 seconds respectively; it retains `step_growth_threshold: 1.25`
-and `nonlinear_refresh_interval: 4`. At concentration `atol=1e-5`, band fails at every
-measured stage. Giving SuperLU the band's refresh controls alone still fails; lowering
-the concentration absolute tolerance alone succeeds. Absolute tolerance controls
-errors near zero, where relative error control contributes little. These observations
-identify sensitivity to trace concentrations; they do not guarantee stability for
-other workloads. Application defaults and user inputs were not changed by this follow-up.
-
-Compact smoothing intentionally changes the boundary conditions: during the air
-hold, the old tails supply tiny hydrogen/methane fractions while the new program
-supplies exact zeros. This changes the numerical path through sensitive kinetics.
-The earlier `rtol=1e-3` completion regression remains recorded in the original results;
-it is not the outcome at `rtol=1e-5, atol=1e-11`. Overall runtime effects remain mixed.
-
-Other measured effects:
-
-- F10, I02 and S03/S04 preserve compared numerical outputs bit for bit. A 400-cell
-  inert reactor that failed with `RecursionError` now completes in 8.216 seconds
-  with a warm cache. A 2,500-deep exporter/gradient/emitter check also passes.
-- I02 reduces retained reporting arrays in the dense case from 29.14 MB to
-  2.06 MB. Whole-process warm peak memory fell from 226.8 MiB to 211.6 MiB at
-  that isolated stage. Reconstruction time is now included in `integration_s`.
-- I01 evaluates 200 samples of a 10,000-segment program in 0.000856 seconds,
-  compared with 0.913 seconds before; program compilation/evaluation is independent
-  of the run horizon. Standard symbolic equation assembly still expands the needed
-  cycles. In the historical `rtol=1e-3` band comparison, the trajectory differs by
-  up to 42.1 K after smoothing changes.
-- S01's `math.pi` changes area by about 0.0000845%, but also changes adaptive solver
-  paths: the measured startup temperature difference reaches 5.07 K. Treat this as
-  a numerical change, not bitwise-equivalent cleanup.
-- All six schemes complete the final 60-second reactive startup, versus three on
-  the baseline. The reversible pressure-pulse case completes on both sources;
-  final velocities span −0.644 to +0.641 m/s.
-- F09 source-only plugin loading takes 0.828 ms cold and 0.298 ms warm in the small
-  fixture, versus 0.640/0.326 ms before, and rejects stale-bytecode/source mismatch.
-  F07's 100-case progress refresh takes 0.086 ms with frozen inputs versus 890 ms
-  without the frozen cache in the measured setup.
-
-The focused checks also cover deletion recovery, mode-derived horizons, immutable
-inspection dialogs, study cancellation/atomic staging, bounded billion-value range
-previews, channel focus and the initial outlet report. The offscreen main window fits
-1280 × 720 at scale 1. Native diagnostic smoke checks pass for SuperLU, two-thread
-SuperLU, KLU and band. Windows packaging was not built here. Raw runs and source
-snapshots for this session are under `/tmp/multisolid-review`; small timing differences
-on this shared machine should not be interpreted as statistically significant.
-
-**Viscosity mixing benchmark (2026-10-08).** Switching from molar averaging to
-Wilke mixing gave the following timings for
-`examples/simulations/default_case/run.yaml`: 9 gases, 20 cells, 1,000 simulated
-seconds, reports every second, one numerical thread, relative tolerance `1e-3`,
-and concentration absolute tolerance `1e-5`. Values are medians of three serial
-repeats after one warm-up per variant; execution order alternates. Plotting is
-disabled. Compiled repeats use cached kernels. End-to-end time includes process
-startup, initialization, integration, and NetCDF/manifest output.
-
-| Solver | Molar average, end-to-end | Wilke, end-to-end | Change | Integration, molar → Wilke |
-| --- | ---: | ---: | ---: | ---: |
-| DAETools / SuperLU | 6.287 s | 8.148 s | +29.6% | 5.441 → 7.281 s |
-| Compiled / SuperLU | 1.868 s | 2.287 s | +22.4% | 0.336 → 0.432 s |
-| Compiled / band | 2.076 s | 2.580 s | +24.3% | 0.153 → 0.276 s |
-
-Measured on an Intel Core i7-1255U with Linux x86-64, Python 3.12.3,
-DAETools 2.6.0, and the managed
-Zig 0.16.0 / SUNDIALS 7.5.0 runtime. Band runs use `step_growth_threshold: 1.25`
-and `nonlinear_refresh_interval: 4`. The first compiled runs, including code
-generation and compilation, took 41.5 → 48.7 s for SuperLU and 41.9 → 49.6 s
-for band. These are case-specific measurements; the default desktop profile
-has tighter tolerances and may behave differently.
-
-All runs reached 1,000 s with finite reported values. Across these solvers, the
-largest before/after differences were 13.4 Pa in pressure drop, 0.88 K in cell
-temperature, and 0.00198 in outlet mole fraction. These include adaptive solver
-error at the stated tolerances. Evaluating both mixing rules at the same
-baseline temperature/composition samples changed viscosity by up to +28.3%.
-Wilke adds pairwise species interactions, so its expression cost grows
-quadratically with the number of gases.
-
-These historical viscosity measurements predate the internal-energy correction.
-The original measurement helper is no longer shipped; use the current benchmark
-above to compare source revisions with the same cases and solver settings.
-
-**Select reports and plots.** Reports determine the contents of `results.nc`.
-The [report registry](packed_bed/reports.py) defines the variables, dimensions, and units.
-
-Available reports are `temperature`, `pressure`, `velocity`, `gas_concentration`, `gas_mole_fraction`, `solid_concentration`, `solid_mole_fraction`,
-`gas_flux`, `reaction_rate`, `gas_enthalpy_flux`, `heat_balance`, and `mass_balance`.
-The reaction-rate report requires at least one selected reaction.
-An empty report list produces a dataset with the scheduled time coordinate and run metadata.
-
-| Plot | Required reports |
-| --- | --- |
-| `axial_profiles` | `temperature`, `pressure` |
-| `outlet_composition` | `gas_mole_fraction` |
-| `outlet_conditions` | `temperature`, `pressure`, `gas_flux` |
-
-Set `outputs.requested_plots: []` to disable automatic plots.
-Plots read the completed NetCDF file. Plot selection does not change the dataset.
-A plot failure does not discard a successful simulation result.
-
-Solid mole fraction is a derived output. It does not add a solver variable.
-The mass and heat balance reports add three and four accounting equations, respectively.
-The heat balance stores internal energy: `heat_bed_total` integrates
-`u_cell = sum(c_gas * h_gas) + sum(c_sol * h_sol) - gasfrac * P` over the bed.
-This accounts for changing pressure with fixed gas voidage, ideal gas, and negligible solid pV.
-Boundary flows carry enthalpy, including formation enthalpy; no separate reaction-heat source is added.
-The outlet composition uses the last-face species fluxes. At zero total flow, it uses the final cell's composition.
-Set `outputs.solver_incidence_matrix: true` for a labelled solver-incidence CSV and PNG.
-
-**Read the results.** Each run writes these files under `outputs.directory`.
-
-| File | Contents |
-| --- | --- |
-| `results.nc` | Selected variables with labelled time, species, cell, face, and reaction dimensions |
-| `manifest.json` | Input configuration, source hashes, code commit, package versions, output inventory, and status |
-
-File-based runs capture input hashes from the bytes parsed by the loader.
-The manifest preserves those hashes if the source files change later.
-An in-memory case has no source-file hashes.
-The code commit refers to the package repository, independently of the case directory.
-An installation without a Git checkout records no code commit.
-A failed run records its failure stage and traceback when it can write the manifest.
-
-```python
-from packed_bed.reports import load_dataset
-
-results = load_dataset("examples/simulations/default_case/output/results.nc")
-outlet = results.outlet_composition.sel(gas_species="H2")
+```sh
+python -m pip wheel --no-deps --no-build-isolation --wheel-dir build/wheels . ./desktop
 ```
 
-For a machine-learning table, select the variables explicitly.
+Use complete reactor runs, balance diagnostics, and grid/tolerance comparisons
+when changing numerical behaviour. Input validation and native smoke checks
+alone do not validate a scientific model. Update the relevant documentation with
+changes to interfaces, equations, or defaults.
 
-```python
-matrix = results[["outlet_temperature", "outlet_flow"]].to_stacked_array(
-    "feature", sample_dims=("time",)
-)
-matrix.to_pandas().to_csv("features.csv")
-```
+## Attribution and citation
 
-**Use the Python interface.** Load the case before you import the simulation runtime.
+A **Zenodo DOI is planned for the first release**. Until it is issued, cite the
+[repository](https://github.com/Griminir5/multisolid-CL) and record the version,
+Git commit, and access date used for your work. For example, replace the fields
+in this provisional citation:
 
-```python
-from packed_bed.config import load_case
+> MultiSolid-CL contributors. *MultiSolid-CL* [Computer software]. Version
+> VERSION, commit COMMIT. https://github.com/Griminir5/multisolid-CL
+> (accessed DATE).
 
-case = load_case("examples/simulations/default_case/run.yaml")
-from packed_bed.simulation import run_case
+Once the first release is archived, this section will provide its Zenodo citation
+and DOI. Cite the scientific sources for the kinetics and property data you use
+as well: see the [built-in kinetics references](packed_bed/kinetics/KINETICS_SOURCES.md)
+and the documentation shipped with each plugin. Run manifests record source and
+configuration provenance to help identify the implementation behind results.
 
-result = run_case(case)
-```
-
-Read the source in this order:
-
-| Source | Responsibility |
-| --- | --- |
-| [config/models.py](packed_bed/config/models.py), [config/load.py](packed_bed/config/load.py) | Parse, validate, and resolve one `Case` |
-| [programs.py](packed_bed/programs.py) | Compile operating channels |
-| [properties.py](packed_bed/properties.py), [reactions.py](packed_bed/reactions.py), [kinetics/](packed_bed/kinetics/) | Define properties, stoichiometry, and rate expressions |
-| [model.py](packed_bed/model.py) | Declare variables and equations |
-| [initialization.py](packed_bed/initialization.py) | Calculate and apply the initial state |
-| [simulation.py](packed_bed/simulation.py) | Configure the solver, execute the run, and finalize outputs |
-| [reports.py](packed_bed/reports.py), [plotting/](packed_bed/plotting/) | Extract results and render selected plots |
-| [batch.py](packed_bed/batch.py), [cli.py](packed_bed/cli.py) | Execute batches and process command-line arguments |
-
-**Add a species or reaction family.** Keep scientific definitions with their source references.
-
-1. Add a `SpeciesProperties` record to `PROPERTY_REGISTRY` in `properties.py`.
-2. Specify the phase, molecular weight in kg/mol, and enthalpy correlation in J/mol.
-3. For a gas species, also specify a viscosity correlation in Pa s.
-4. Add the species to the applicable chemistry, composition, or solid-profile maps.
-
-A property correlation supplies `value(temperature)` for numeric values and `dae_expression(temperature)` for symbolic values.
-`PolynomialHeatCapacity` coefficients use ascending powers of `T - t_ref`.
-`ShomateHeatCapacity` and `QuadraticViscosity` remain separate correlations.
-
-For a new family, create one module under `kinetics/`.
-Import `KineticsContext`, `ReactionDefinition`, and `ReactionFamily` from `packed_bed.reactions`.
-Define the reactions and their rate functions in that module. Export one `FAMILY` object.
-Add that object to `FAMILY_REGISTRY` in `kinetics/__init__.py`.
-
-Use negative stoichiometric coefficients for reactants and positive coefficients for products.
-List catalysts separately. Include all required species in the reaction and family declarations.
-
-Each rate function receives a context with the model, cell index, and gas/solid index methods.
-Return rates in mol/(m^3 s) per total bed volume.
-Keep DAETools imports lazy so that configuration validation can run without the solver.
-The [kinetics source notes](packed_bed/kinetics/KINETICS_SOURCES.md) describe the supplied families.
-
-Keep `DeclareEquations` contiguous. Preserve equation names, order, and solver incidence during mechanical changes.
-
-**Validate a source checkout.** Use `python -m packed_bed examples/simulations/default_case/run.yaml --validate-only`
-for input validation and `python -m packed_bed.compiled.smoke` for native runtime checks.
-With the desktop dependencies, DAETools, and a C++ compiler available, run
-`QT_QPA_PLATFORM=offscreen python tools/check_review.py` on Linux for the focused
-review checks. Set `LD_LIBRARY_PATH` to the managed bundle's `lib` directory if
-its Linux shared libraries are not already on the loader path.
-The review benchmark above exercises complete reactor runs. These checks do not
-establish the scientific validity of the supplied reaction mechanisms.
-
-**License.** This project uses GPL-3.0-only. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-Third-party dependencies retain their own licenses.
-
-The language reference for this README is [ASD-STE100, Issue 9](https://www.asd-ste100.org/).
-
-## Scientific plugins
-
-Projects support species, property and kinetics plugins, including parameter
-variants made in the app and implementations written in Python. Open a project
-and choose **Plugins** beside **Project** in the menu bar.
-
-**Receiving a project archive**
-
-1. Choose **Project → Import project archive…**, select the `.msproject` file,
-   and choose a name and location for the new project.
-2. Open **Plugins** to see the included plugins. All their files are already in
-   the imported project; no separate download, installation or pip command is needed.
-3. Follow the action for each plugin below, then run the cases normally. Existing
-   cases retain their plugin selections; there is no need to select them again.
-
-| Plugin status | What to do |
-| --- | --- |
-| Enabled data-only plugin | Nothing. It is ready to use. |
-| Enabled Python plugin showing **Needs local approval** | Select it, click **Allow code…**, and approve only if you trust its source. Wait for **Checks passed.** |
-| Disabled plugin | Select it and click **Enable** if you want to use it. Python plugins also request approval when their code has not already been approved locally. Wait for the check to finish. |
-
-**Adding or sharing a plugin separately**
-
-Choose **Plugins → Register plugin…** and select a `.msplugin` archive or the
-plugin folder's `manifest.yaml`. New data-only plugins are enabled after validation;
-new Python plugins start disabled. Select **Enable** and follow the approval/check
-flow above. In the case's **Chemistry** tab, select the plugin's species or reaction
-families as needed. Enabling a plugin makes its definitions available; it does not
-automatically change existing cases.
-
-To share one plugin, select it in **Plugins** and choose **Export…**. To share
-cases and their plugins together, use **Project → Export project…**. Project
-archives include registered plugins, including disabled ones, but exclude results
-and local code approvals.
-
-**Plugin safety**
-
-Importing a project archive and browsing plugin details do not execute its Python
-code. **Allow code…**, **Enable** and **Check** can execute plugin code after
-approval, even before a simulation starts. Only approve code from a source you
-trust. It runs with your user permissions and can access files and other resources
-available to the application. The separate check and simulation processes are
-**not a security sandbox**. A successful check verifies compatibility; it is not
-a security audit or proof that the scientific model is correct.
-
-Approval is stored locally for the plugin's code and resources. It does not
-travel with an archive or another user's project. Unchanged code already approved
-locally does not need approval again. Editing parameter values does not require
-new approval; changing Python code or included resources does. If you decline
-approval, you can still inspect the project, but cases needing that code cannot
-run. Failed checks show details in the Plugins window; use **Cancel check** to
-stop a check, or ask the plugin author to resolve the reported errors.
-
-See [the plugin guide](PLUGINS.md) for creating species and parameter variants,
-Python authoring examples, the package format and the engine API.
+MultiSolid-CL is licensed under [GPL-3.0-only](LICENSE). Dependency attribution
+and notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); bundled
+components retain their accompanying licence texts.

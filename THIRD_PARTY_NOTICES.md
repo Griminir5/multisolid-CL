@@ -7,8 +7,9 @@ those projects.
 
 ## Runtime Requirements
 
-- DAETools: GPLv3. Install separately from the DAETools project or a package
-  source you are licensed to use.
+- DAETools: GPLv3. Source installations obtain it separately from the DAETools
+  project or a package source you are licensed to use. The Windows desktop
+  distribution bundles its required runtime and notices.
 - PyQt6 and PyQt6-WebEngine: GPL-3.0-only unless used under Riverbank's
   commercial license.
 - OpenCS: LGPLv3. Install or obtain separately when needed by the DAETools
@@ -16,7 +17,7 @@ those projects.
 - NumPy: BSD-3-Clause and other permissive notices in the NumPy distribution.
 - xarray: Apache-2.0.
 - pandas: BSD-3-Clause and bundled permissive third-party notices. It is an
-  xarray dependency and is used by the optional ML matrix conversion tool.
+  xarray dependency and supports conversion of labelled results to tables.
 - SciPy: BSD-3-Clause and bundled permissive third-party notices.
 - matplotlib: matplotlib license and bundled third-party notices.
 - Maratype by Artyom Galinov: bundled desktop display font, freely
@@ -26,8 +27,10 @@ those projects.
 
 ## Optional Compiled Solver
 
-- scikit-sundae supplies the separately installed SUNDIALS runtime used by the
-  compiled backend. Its wheel and bundled libraries retain their own notices.
+- scikit-sundae supplies the SUNDIALS runtime for source Compiled execution
+  without a managed bundle. Its wheel and bundled libraries retain their own
+  notices. Managed desktop builds include a separate native runtime with its
+  own dependency notices under `compiled/licenses/`.
 - The native Newton helper adapts SUNDIALS control flow under BSD-3-Clause.
   The bundled [license](packed_bed/compiled/licenses/SUNDIALS-LICENSE.txt) and
   [notice](packed_bed/compiled/licenses/SUNDIALS-NOTICE.txt) accompany the source

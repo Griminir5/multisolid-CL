@@ -268,9 +268,9 @@ without Python, Graphviz, Visual Studio, MSYS2 or Zig, including upgrade/uninsta
 and preservation of a project stored outside the app. Include read-only and
 relocated installations, writable projects with spaces/Unicode, concurrent cases,
 compiler cancellation, cache reuse, reports, archive round trips and plugin
-expressions. Windows Sandbox was not available on this build host. Native CI
-builds and Linux development checks do not establish Windows desktop acceptance;
-this Windows work does not qualify a Linux release either.
+expressions. Record the qualification environment and results with each release.
+Native CI builds and Linux development checks do not establish Windows desktop
+acceptance; Windows qualification does not qualify a Linux release either.
 
 Keep the application source, dependency notices, exact build inputs, patches,
 upstream source provenance and validation records with each distributed build.

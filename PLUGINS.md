@@ -1,5 +1,8 @@
 # Scientific plugins
 
+This reference is retained while the new [plugin guide](docs/plugins.md) is
+prepared. It will be consolidated there when that guide is expanded.
+
 Open a project and choose **Plugins** beside **Project** in the menu bar. Built-in definitions are always available. **Register plugin** imports a `.msplugin` archive or a folder selected through its `manifest.yaml` into the project; **Export** shares one plugin independently. Copying the project folder carries its plugins with it.
 
 Enabling a plugin makes its definitions available in the Chemistry pickers. It does not change a case's component list. The pickers, graphs and recorded reports show each definition's source. Bed and Program labels, including their preview legends, show only the formula.

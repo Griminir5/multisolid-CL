@@ -1,4 +1,7 @@
-# MultiSolid desktop starter
+# MultiSolid desktop reference
+
+This reference is retained while the new [GUI guide](../docs/gui-guide.md) is
+prepared. See the [repository README](../README.md) for installation and development.
 
 A project contains simulation cases. Each case owns its inputs and **one latest
 run**. Running it again replaces its previous results. Editing inputs leaves
@@ -26,7 +29,7 @@ Use Python 3.11/3.12 and the DAETools setup in the [repository README](../README
 From the repository root:
 
 ```sh
-python -m pip install -e ".[dev]" -e ./desktop
+python -m pip install -e ".[compiled,plotter]" -e ./desktop
 packed-bed-ui
 ```
 
@@ -37,7 +40,7 @@ The Chemistry graph uses a separate Graphviz `neato` runtime. See
 [Graphviz setup and bundling](BUILD_WINDOWS.md#graphviz-runtime); source development
 can also use `neato` on `PATH` or the `MULTISOLID_GRAPHVIZ` executable override.
 
-## Use the starter
+## Use the application
 
 1. At launch, choose **Create new project**, **Open existing project**, **Import archived project**, or a recent
    project. Creation asks for a name and parent location and shows the resulting
@@ -350,7 +353,7 @@ Create desktop studies with **New Parameter Study** using a successful baseline
 case. **Run all cases** executes included independent and generated cases together,
 using the project's **Maximum workers** setting and each case's thread count.
 
-Engine `batch.yaml` files are used through the [CLI batch commands](../README.md),
+Engine `batch.yaml` files are used through the CLI (`python -m packed_bed batch --help`),
 and cannot be imported as desktop studies. The desktop still supports importing an
 individual case's `run.yaml` and importing complete project archives.
 
@@ -477,5 +480,5 @@ processes are **not a security sandbox**. Checks do not establish that a plugin 
 safe or scientifically correct. Approval stays on your computer. Changes to code
 or resources require approval again; parameter-only edits do not.
 
-See [plugin setup, sharing and safety](../README.md#scientific-plugins) for the
-full workflow and [the plugin guide](../PLUGINS.md) for authoring examples.
+See [the plugin reference](../PLUGINS.md) for workflows and authoring examples.
+Its content will be consolidated in the [new plugin guide](../docs/plugins.md).
