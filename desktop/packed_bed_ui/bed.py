@@ -265,7 +265,7 @@ class BedPage(QWidget):
             else:
                 start = ""
         zones.append({"x_start_m": start, "x_end_m": end, "e_b": "", "e_p": "", "d_p": "",
-                      "values": {key: "" for key in self.editor.get(("solids", "solid_species"), [])}})
+                      "values": {key: 0.0 for key in self.editor.get(("solids", "solid_species"), [])}})
         self.editor.put(("solids", "initial_profile", "zones"), zones)
         self.anchor_zones()
         self.load_zones()

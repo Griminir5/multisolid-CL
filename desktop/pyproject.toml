@@ -6,7 +6,16 @@ build-backend = "setuptools.build_meta"
 name = "multisolid-cl-ui"
 version = "0.2.0"
 description = "A small desktop application for MultiSolid packed-bed simulations"
-readme = "README.md"
+readme = {content-type = "text/markdown", text = """
+# MultiSolid desktop
+
+Desktop application for MultiSolid-CL packed-bed simulations, with project and
+case editors, parameter studies, plots, and Excel reports.
+
+See the [GUI guide](https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/docs/GUI-GUIDE.md)
+for usage and the [repository README](https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/README.md)
+for installation and development.
+"""}
 requires-python = ">=3.11,<3.13"
 license = "GPL-3.0-only"
 dependencies = ["multisolid-cl[compiled]==0.2.0", "PyQt6", "matplotlib", "openpyxl>=3.1,<4"]

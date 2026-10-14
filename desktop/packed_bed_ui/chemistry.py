@@ -134,7 +134,7 @@ class ChemistryPage(QWidget):
                 root.setToolTip(0, definition_details(catalogue, 'mechanisms', family.reference))
                 self.families.setItemWidget(root, 2, action_button('Bindings…', lambda _, name=name: self.bind_roles(name), inspection=True))
                 self.families.setItemWidget(root, 1, action_button("+ Species", lambda _, family=family: self.add_requirements(family),
-                                                                  tooltip="Add required species; compositions and loadings remain unfinished"))
+                                                                  tooltip="Add required species with gas fractions and solid loadings set to 0"))
                 for reaction in family.reactions:
                     child = QTreeWidgetItem(root, [reaction.name])
                     child.setData(0, Qt.ItemDataRole.UserRole, reaction.id)

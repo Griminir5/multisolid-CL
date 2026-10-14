@@ -325,7 +325,7 @@ class InputEditor(QWidget):
             for key in removed:
                 composition.pop(key, None)
             for key in added:
-                composition[key] = ""
+                composition[key] = 0.0
         if phase == "solid":
             for zone in self.get(("solids", "initial_profile", "zones"), []):
                 update_composition(zone.setdefault("values", {}))

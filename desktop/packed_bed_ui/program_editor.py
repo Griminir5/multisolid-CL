@@ -170,7 +170,7 @@ class ChannelTable(CollapsibleSection):
             step.pop("target", None)
         else:
             step["target"] = ({} if self.key == "feed_stream" else
-                              {key: "" for key in self.editor.get(("chemistry", "gas_species"), [])}
+                              {key: 0.0 for key in self.editor.get(("chemistry", "gas_species"), [])}
                               if self.key == "inlet_composition" else "")
         self.write(channel)
 
@@ -241,7 +241,7 @@ class ChannelTable(CollapsibleSection):
 
         composition_enabled.toggled.connect(update_total)
         for key in species:
-            field = numeric(QLineEdit(display(composition.get(key))))
+            field = numeric(QLineEdit(display(composition.get(key, 0.0))))
             field.setObjectName(key)
             field.setEnabled(composition_enabled.isChecked())
             composition_enabled.toggled.connect(field.setEnabled)

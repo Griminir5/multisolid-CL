@@ -8,14 +8,14 @@ SUNDIALS backend. Run data are saved as NetCDF with a JSON provenance manifest.
 
 ## Documentation
 
-The plugin and model-equations guides are available. The GUI and CLI guides
-remain outlines; use the desktop reference for current application workflows.
+The plugin, model-equations, and GUI guides are available. The CLI guide remains
+an outline, with command help and complete simulation examples linked from it.
 
 | Document | Contents | Status |
 | --- | --- | --- |
 | [Plugin guide](docs/PLUGINS.md) | Creating, using, checking, and sharing plugins; manifest and Python API reference | Available |
 | [Model equations](docs/EQUATIONS.md) | Governing equations, assumptions, boundary conditions, source terms, and numerical treatment | Available |
-| [GUI guide](docs/GUI-GUIDE.md) | Projects, cases, studies, plots, and Excel reports | Outline; links to the existing guide |
+| [GUI guide](docs/GUI-GUIDE.md) | First run, case editing, projects, studies, plots, and Excel reports | Available |
 | [CLI guide](docs/CLI-GUIDE.md) | YAML inputs, single runs, batches, solver options, and outputs | Outline |
 | [Windows build guide](desktop/BUILD_WINDOWS.md) | Building, validating, and packaging the desktop distribution | Available |
 | [Plugin examples](examples/plugins/README.md) | Step-by-step creation of a species, custom property equation, and reaction | Available |
@@ -46,7 +46,7 @@ Create projects in a writable folder outside the application directory. The firs
 Compiled run may take several minutes to build its model; compatible later runs
 reuse the project's cache. To update a portable installation, extract the new
 version into a new folder and open your existing project. The
-[current desktop reference](desktop/README.md) explains the project workflow.
+[GUI guide](docs/GUI-GUIDE.md) explains the project workflow.
 
 ## Install the full repository from source
 
@@ -153,7 +153,7 @@ use a separate directory to retain earlier results.
 | [`docs/`](docs/) | Model equations and the plugin, GUI, and CLI guides |
 | [`examples/simulations/`](examples/simulations/) | Complete single-case and batch YAML inputs |
 | [`examples/plugins/`](examples/plugins/) | Illustrative plugin packages |
-| [`plugins/`](plugins/) | Additional scientific plugins, including waste iron |
+| [`plugins/`](plugins/) | Additional scientific plugins |
 | [`tools/`](tools/) | Runtime staging, wheel builds, desktop freezing, and release checks |
 | [`.github/workflows/`](.github/workflows/) | Native runtime CI |
 
