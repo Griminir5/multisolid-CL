@@ -6,6 +6,7 @@ from pathlib import Path
 import platform
 import shutil
 import sys
+import sysconfig
 
 
 def sha256(path):
@@ -14,12 +15,38 @@ def sha256(path):
 
 
 def remove_duplicate_dae_libraries(destination):
-    """PyInstaller's dependency walk can also copy our root DLLs into solibs."""
+    """PyInstaller can also copy our root native libraries into solibs."""
     internal = Path(destination).resolve() / "_internal"
-    for path in (internal / "daetools/solibs").rglob("*.dll"):
+    for path in (internal / "daetools/solibs").rglob("*"):
+        if not path.is_file() or not (path.suffix.lower() == ".dll" or ".so" in path.suffixes):
+            continue
         canonical = internal / path.name
+        # On Linux PyInstaller often puts a symlink at the root pointing to
+        # this exact nested file. That is already deduplicated; keep its target.
+        if canonical.is_symlink():
+            continue
         if canonical.is_file() and sha256(path) == sha256(canonical):
             path.unlink()
+
+
+def python_license():
+    candidates = [Path(sys.base_prefix) / "LICENSE.txt",
+                  Path(sysconfig.get_path("stdlib")) / "LICENSE.txt"]
+    for path in candidates:
+        if path.is_file():
+            return path
+    raise FileNotFoundError("Python licence not found; checked: " + ", ".join(map(str, candidates)))
+
+
+def content_identity(destination):
+    """Hash every shipped file, including ELF executables and versioned .so files."""
+    identity = hashlib.sha256()
+    for path in sorted(destination.rglob("*")):
+        if path.is_file() and path.name not in {"release.json", "bundle-files.json"}:
+            identity.update(path.relative_to(destination).as_posix().encode())
+            identity.update(b"\0")
+            identity.update(bytes.fromhex(sha256(path)))
+    return identity.hexdigest()[:12]
 
 
 def write_metadata(destination, root):
@@ -27,7 +54,7 @@ def write_metadata(destination, root):
     license_dir.mkdir(exist_ok=True)
     shutil.copy2(root / "LICENSE", destination / "LICENSE.txt")
     shutil.copy2(root / "THIRD_PARTY_NOTICES.md", license_dir / "PROJECT-NOTICES.md")
-    shutil.copy2(Path(sys.base_prefix) / "LICENSE.txt", license_dir / "Python-LICENSE.txt")
+    shutil.copy2(python_license(), license_dir / "Python-LICENSE.txt")
     packages = []
     for distribution in sorted(metadata.distributions(), key=lambda d: d.metadata["Name"].lower()):
         name = distribution.metadata["Name"]
@@ -36,7 +63,7 @@ def write_metadata(destination, root):
             if not any(token in relative.name.lower() for token in ("license", "licence", "copying", "copyright", "notice")):
                 continue
             source = Path(distribution.locate_file(relative))
-            if not source.is_file() or source.suffix.lower() in {".py", ".pyc", ".pyd", ".dll"}:
+            if not source.is_file() or source.suffix.lower() in {".py", ".pyc", ".pyd", ".dll"} or ".so" in source.suffixes:
                 continue
             if ".." in relative.parts:
                 continue
@@ -62,14 +89,11 @@ def write_metadata(destination, root):
         "signing": "unsigned", "qualification": "See the accompanying validation report; clean VM qualification is separate."
     }, indent=2) + "\n", encoding="utf-8")
     version = metadata.version("multisolid-cl-ui")
-    identity = hashlib.sha256()
-    for native_manifest in ("compiled/manifest.json", "graphviz/bundle.json"):
-        identity.update(bytes.fromhex(sha256(destination / native_manifest)))
-    for path in sorted(destination.rglob("*")):
-        if path.is_file() and path.suffix in {".exe", ".py", ".pyc", ".pyd", ".dll", ".svg", ".html", ".css", ".js"}:
-            identity.update(path.relative_to(destination).as_posix().encode())
-            identity.update(bytes.fromhex(sha256(path)))
-    release = {"version": version, "build_id": identity.hexdigest()[:12], "architecture": "x64"}
+    release = {"version": version, "build_id": content_identity(destination), "architecture": "x64",
+               "platform": platform.system().lower()}
+    if sys.platform.startswith("linux"):
+        from linux_bundle import glibc_requirement
+        release["minimum_glibc"] = glibc_requirement(destination)
     (destination / "release.json").write_text(json.dumps(release, indent=2) + "\n")
     files = {p.relative_to(destination).as_posix(): sha256(p) for p in sorted(destination.rglob("*"))
              if p.is_file() and p.name != "bundle-files.json"}

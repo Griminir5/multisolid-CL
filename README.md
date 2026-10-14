@@ -17,6 +17,8 @@ command-line workflows.
 | [Model equations](docs/EQUATIONS.md) | Governing equations, assumptions, boundary conditions, source terms, and numerical treatment |
 | [GUI guide](docs/GUI-GUIDE.md) | Case editing, first run, projects, studies, plots, and Excel reports |
 | [CLI guide](docs/CLI-GUIDE.md) | Complete first case, YAML inputs, single runs, batches, outputs, and Python API |
+| [Build from a checkout](desktop/BUILDING.md) | Prerequisites and one-command Linux/Windows desktop builds |
+| [Linux build guide](desktop/BUILD_LINUX.md) | Linux packaging, native portability, and release checks |
 | [Windows build guide](desktop/BUILD_WINDOWS.md) | Building, validating, and packaging the desktop distribution |
 | [Plugin examples](examples/plugins/README.md) | Step-by-step creation of a species, custom property equation, and reaction |
 | [Waste iron plugin](plugins/waste_iron/README.md) | Installation, kinetics, property definitions, and provenance |
@@ -27,8 +29,12 @@ command-line workflows.
 
 The first public desktop release is pending. Once published, download it from
 [GitHub Releases](https://github.com/Griminir5/multisolid-CL/releases). Until then,
-use the source installation below, or follow the
-[Windows build guide](desktop/BUILD_WINDOWS.md) to build a distribution.
+use the source installation below, or follow
+[Build MultiSolid from a checkout](desktop/BUILDING.md) to create a Linux or
+Windows distribution. After the documented system prerequisites, run
+`python3.12 tools/build_desktop.py --headless` on Ubuntu 24.04, or
+`py -3.11 tools/build_desktop.py` in Windows PowerShell. Each creates an isolated
+build environment and a validated portable archive.
 
 The Windows distribution targets **Windows 11 x64**. Choose one release asset:
 
@@ -109,6 +115,10 @@ root after installation.
 
 ### 4. Install the external tools
 
+- **Linux desktop libraries:** install the GUI prerequisites listed in the
+  [Linux build instructions](desktop/BUILDING.md#linux), including
+  `libxcb-cursor0` on Ubuntu. Python's Qt wheel still needs these native libraries
+  for X11 startup.
 - **Graphviz:** install the native Graphviz distribution with `neato` on `PATH`,
   or set `MULTISOLID_GRAPHVIZ` to the full path of its executable. This supplies
   the chemistry graph and CLI system diagram; no Python Graphviz binding is needed.
@@ -192,8 +202,8 @@ python -m packed_bed batch examples/simulations/default_batch_case/batch.yaml --
 
 For native runtime changes, run the smoke check with a working compiler and a
 managed runtime including KLU. It checks all three Compiled solvers; the
-scikit-SUNDAE wheel alone cannot pass its KLU check. On Linux, expose the staged
-runtime's `lib` directory through `LD_LIBRARY_PATH` if needed:
+scikit-SUNDAE wheel alone cannot pass its KLU check. Linux bundles must work
+without `LD_LIBRARY_PATH`; rebuild old bundles with the current staging tools:
 
 ```sh
 python -m packed_bed.compiled.smoke

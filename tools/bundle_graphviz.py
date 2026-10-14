@@ -108,7 +108,7 @@ def _dependencies(path):
     output = _run("ldd", str(path))
     if "not found" in output:
         raise RuntimeError(f"Missing native dependencies for {path}:\n{output}")
-    return {Path(match) for match in re.findall(r"=>\s+(/\S+)", output)}
+    return {Path(match) for match in re.findall(r"=>\s+(/.*?)\s+\(0x[0-9a-fA-F]+\)", output)}
 
 
 def stage(destination, *, source=None, source_url=None):

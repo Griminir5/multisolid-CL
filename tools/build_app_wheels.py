@@ -6,14 +6,14 @@ import sys
 import tempfile
 
 
-def build():
+def build(wheels=None):
     root = Path(__file__).resolve().parents[1]
     from build_help import build as build_help
     build_help(check=True)
     work = root / "build/release"
     work.mkdir(parents=True, exist_ok=True)
-    wheels = work / "wheels"
-    wheels.mkdir(exist_ok=True)
+    wheels = Path(wheels).resolve() if wheels is not None else work / "wheels"
+    wheels.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="application-wheels-", dir=work) as temporary:
         sources = []
         for name, base, package in (("engine", root, "packed_bed"), ("ui", root / "desktop", "packed_bed_ui")):
@@ -30,4 +30,7 @@ def build():
 
 
 if __name__ == "__main__":
-    build()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path)
+    build(parser.parse_args().output)

@@ -1,5 +1,9 @@
 # Building the Windows distribution
 
+For a checkout-to-portable-ZIP build, use the prerequisites and single command
+in [Build MultiSolid from a checkout](BUILDING.md). The instructions below are
+the manual release procedure and remain available for separately staged inputs.
+
 The release uses CPython **3.11.9 x64**, DAE Tools **2.6.0** with its `py311`
 extensions, PyInstaller **6.22.0**, Graphviz **12.2.1**, Zig **0.16.0** and
 Inno Setup **6.7.3**. Build on Windows x64; this is not a cross-compilation recipe.

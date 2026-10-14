@@ -1,0 +1,10 @@
+{
+  "daetools_linux": {
+    "url": "https://downloads.sourceforge.net/project/daetools/daetools/2.6.0/daetools-2.6.0-gnu_linux-x86_64.zip",
+    "sha256": "3fca2da3451f69b19a02fa72d9ad648b8babf2eb0e30f886322213c84e478acd"
+  },
+  "daetools_windows": {
+    "url": "https://downloads.sourceforge.net/project/daetools/daetools/2.6.0/daetools-2.6.0-win64.zip",
+    "sha256": "11d2be9d36af8d162a2967c0e4b27f12fa1efb5ef6dea1d67867c1175101879e"
+  }
+}

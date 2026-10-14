@@ -56,6 +56,8 @@ def stage(compiler, runtime, destination):
         shutil.copytree(compiler, root / "compiler", ignore=compiler_files)
         shutil.copytree(runtime / "licenses", root / "licenses")
         shutil.copy2(runtime / "sources.json", root / "sources.json")
+        if (runtime / "build-patches.txt").is_file():
+            shutil.copy2(runtime / "build-patches.txt", root / "build-patches.txt")
         lib = root / "lib"
         lib.mkdir()
         for directory in (runtime / "lib", runtime / "bin"):
@@ -68,7 +70,7 @@ def stage(compiler, runtime, destination):
                                         env={**os.environ, "LD_LIBRARY_PATH": str(lib)}, check=True)
                 if "not found" in result.stdout:
                     raise RuntimeError(result.stdout)
-                for dependency in re.findall(r"=>\s+(/\S+)", result.stdout):
+                for dependency in re.findall(r"=>\s+(/.*?)\s+\(0x[0-9a-fA-F]+\)", result.stdout):
                     dependency = Path(dependency)
                     if not baseline.fullmatch(dependency.name) and not (lib / dependency.name).exists():
                         shutil.copy2(dependency, lib / dependency.name)
@@ -82,6 +84,8 @@ def stage(compiler, runtime, destination):
                 notice = folder / "copyright"
                 if notice.is_file():
                     shutil.copy2(notice, root / "licenses" / (folder.name + ".copyright"))
+            from linux_bundle import check_runtime
+            check_runtime(lib)
         else:
             # Runtime DLLs supplied by the release toolchain travel with the bundle.
             import pefile
@@ -132,6 +136,8 @@ def stage(compiler, runtime, destination):
                 "bundle_sha256": hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()}
         (root / "manifest.json").write_text(json.dumps(data, indent=2) + "\n")
         environment = {**os.environ, "MULTISOLID_COMPILED_BUNDLE": str(root), "PATH": str(root / "compiler")}
+        environment.pop("LD_LIBRARY_PATH", None)
+        environment.pop("LD_PRELOAD", None)
         subprocess.run([sys.executable, "-m", "packed_bed.compiled.smoke", "--cache", str(Path(temporary) / "smoke")],
                        env=environment, check=True)
         root.rename(destination)

@@ -28,6 +28,8 @@ GUIDES = {
     'plugins/waste_iron/README.md': 'waste-iron.html',
     'README.md': 'installation.html',
     'desktop/BUILD_WINDOWS.md': 'windows-build.html',
+    'desktop/BUILDING.md': 'building.html',
+    'desktop/BUILD_LINUX.md': 'linux-build.html',
     'THIRD_PARTY_NOTICES.md': 'notices.html',
 }
 SOURCES = {

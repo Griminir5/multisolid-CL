@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import subprocess
 import tarfile
 from urllib.request import urlopen
@@ -43,6 +44,19 @@ def fetch(name, work):
 
 def build(work, prefix, jobs):
     sources = {name: fetch(name, work) for name in ("openblas", "suitesparse", "superlu_mt", "sundials")}
+    if platform.system() == "Linux":
+        # SUNDIALS overrides the command-line CMAKE_INSTALL_RPATH. Patch the
+        # pinned source rather than leaving references to this build machine.
+        path = sources["sundials"] / "cmake/SundialsSetupCompilers.cmake"
+        original = path.read_text()
+        before = 'set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_FULL_LIBDIR}")'
+        after = 'set(CMAKE_INSTALL_RPATH "$ORIGIN")'
+        if original.count(before) == 2:
+            path.write_text(original.replace(before, after).replace(
+                "set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)",
+                "set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)"))
+        elif original.count(after) != 2:
+            raise ValueError("Unrecognized SUNDIALS RPATH settings; review the pinned source patch.")
     common = [f"-DCMAKE_INSTALL_PREFIX={prefix}", f"-DCMAKE_PREFIX_PATH={prefix}",
               "-DCMAKE_INSTALL_LIBDIR=lib", "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_SHARED_LIBS=ON",
               "-DCMAKE_POSITION_INDEPENDENT_CODE=ON", "-DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON",
@@ -75,6 +89,10 @@ def build(work, prefix, jobs):
                        f"-DSUPERLUMT_INCLUDE_DIR={prefix / 'include/superlu_mt'}",
                        f"-DSUPERLUMT_LIBRARY_DIR={prefix / 'lib'}"])
     (prefix / "sources.json").write_text(json.dumps(SOURCES, indent=2))
+    if platform.system() == "Linux":
+        (prefix / "build-patches.txt").write_text(
+            "SUNDIALS cmake/SundialsSetupCompilers.cmake: use $ORIGIN for both\n"
+            "CMAKE_INSTALL_RPATH assignments; disable CMAKE_INSTALL_RPATH_USE_LINK_PATH.\n")
     return sources
 
 

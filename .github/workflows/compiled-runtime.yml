@@ -38,8 +38,6 @@ jobs:
           "$(cygpath -u "$pythonLocation")/python.exe" -c "from pathlib import Path; from tools.build_compiled_runtime import fetch; print(fetch('zig_windows', Path('build/native')))"
           "$(cygpath -u "$pythonLocation")/python.exe" tools/bundle_compiled.py --compiler build/native/zig_windows-source/zig-x86_64-windows-0.16.0 --runtime build/native-prefix --destination desktop/vendor/compiled
       - run: python -m packed_bed.compiled.smoke
-        env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/desktop/vendor/compiled/lib
       - uses: actions/upload-artifact@v4
         with:
           name: compiled-runtime-${{ runner.os }}

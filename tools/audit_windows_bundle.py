@@ -35,8 +35,9 @@ def audit(bundle, analysis):
             raise ValueError("Sample plugin directory in release")
         if relative.parts[0] == "tools" or relative.parts[:2] == ("_internal", "tools"):
             raise ValueError("Repository build tools in release")
-        if path.suffix.lower() in {".dll", ".pyd"} and any(
-                token in path.name.lower() for token in ("pardiso", "pysuperlu_mt", "umfpack")):
+        native = path.suffix.lower() in {".dll", ".pyd"} or ".so" in path.suffixes
+        if native and any(token in path.name.lower() for token in (
+                "pardiso", "pysuperlu_mt", "cdaesuperlu_mt", "umfpack")):
             raise ValueError(f"Removed solver in release: {relative}")
     data = {"policy": "Runtime application and dependency files only; no examples, sample plugins, tests, Property_Estimation or build tools.",
             "python_modules": sorted(set(modules))}
