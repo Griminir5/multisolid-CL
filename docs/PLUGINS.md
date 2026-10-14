@@ -8,7 +8,7 @@ writing a new equation does.
 | --- | --- |
 | Change an existing species or reaction parameter | [Create a variant in the application](#create-a-variant-in-the-application) |
 | Define a new species using the existing property equations | [Create a species plugin](#create-a-species-plugin) |
-| Write a new property equation or reaction rate | [Develop-a-plugin walkthrough](../examples/plugins/README.md#lesson-2-write-a-new-property-equation) |
+| Write a new property equation or reaction rate | [Plugin authoring walkthrough](../examples/plugins/README.md#before-you-start) |
 | Understand the files and Python API | [Authoring reference](#authoring-reference) |
 | Use a plugin someone sent you | [Install and use a plugin](#install-and-use-a-plugin) |
 | Send your plugin to someone else | [Share and update plugins](#share-and-update-plugins) |
@@ -107,6 +107,10 @@ or metadata-generation step for that example.
 
 Temperatures are in K, molecular weights in kg/mol, molar enthalpies in J/mol,
 heat capacities in J/(mol·K), and viscosities in Pa·s.
+
+The declared `temperature_range` documents the intended range. It does not clamp
+temperatures or stop a simulation outside that range. Check your case's results
+against the validity ranges of its selected definitions.
 
 | Built-in equation | Manifest model | Parameters |
 | --- | --- | --- |
@@ -291,10 +295,11 @@ generate their manifest copies. You do not need to maintain both by hand.
 
 The [tutorial build script](../examples/plugins/README.md#prepare-the-python-authoring-tools)
 performs metadata generation, checking, and packaging with one command.
-Generation executes your local factories and rewrites `manifest.yaml`; use it
-on your own authoring files. It is not needed for a species plugin that uses only
-built-in property equations. Changing Python parameter declarations or reaction
-metadata requires regeneration; changing a species' parameter values does not.
+Generation imports your Python modules, executes reaction factories, and rewrites
+`manifest.yaml`; use it on your own authoring files. It is not needed for a
+species plugin that uses only built-in property equations. Changing Python
+parameter declarations or reaction metadata requires regeneration; changing a
+species' parameter values does not.
 
 ### Parameters and factories
 

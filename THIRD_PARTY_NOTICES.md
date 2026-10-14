@@ -20,6 +20,8 @@ those projects.
   xarray dependency and supports conversion of labelled results to tables.
 - SciPy: BSD-3-Clause and bundled permissive third-party notices.
 - matplotlib: matplotlib license and bundled third-party notices.
+- openpyxl and its et_xmlfile dependency: MIT. The desktop uses them to write
+  Excel workbooks.
 - Maratype by Artyom Galinov: bundled desktop display font, freely
   redistributable with no commercial restrictions.
 - pydantic: MIT.
@@ -27,6 +29,11 @@ those projects.
 
 ## Optional Compiled Solver
 
+Compiled execution is included in the Windows desktop distribution. Source
+installations use the `compiled` extra for Python dependencies; a staged native
+bundle can supply the compiler and solver libraries.
+
+- filelock 3.20.0: Unlicense. Used to coordinate access to compilation caches.
 - scikit-sundae supplies the SUNDIALS runtime for source Compiled execution
   without a managed bundle. Its wheel and bundled libraries retain their own
   notices. Managed desktop builds include a separate native runtime with its

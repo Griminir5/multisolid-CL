@@ -138,7 +138,8 @@ clear the highlight. Scroll or use **+ / −** to zoom, drag to pan, and choose
 
 The graph uses Graphviz `neato`. Source installations can use it on `PATH` or
 set `MULTISOLID_GRAPHVIZ` to its executable. See the
-[Graphviz setup](../desktop/BUILD_WINDOWS.md#graphviz-runtime) if it is missing.
+[source installation instructions](../README.md#4-install-the-external-tools)
+if it is missing. The packaged desktop application includes Graphviz.
 
 ### Bed: geometry and material zones
 
@@ -184,19 +185,25 @@ mole fractions for the gases present so the total is one.
 **Normalize** scales a positive total to one while preserving ratios. It becomes
 available once all entries are valid and their total is positive.
 
-**Repeat program** makes the schedule cyclic, with an editable overall horizon
-in **General**. For a non-repeating program, the longest channel sets the horizon,
-and every non-empty channel must have the same duration. A non-repeating program
-with no timed steps needs at least a hold or ramp to define its horizon.
+**Repeat program** repeats each channel's step list, with an editable overall
+horizon in **General**. Each cycle carries forward the previous cycle's final
+values; add a ramp back to the starting state if the cycle should return there.
+For a non-repeating program, the longest channel sets the horizon, and every
+non-empty channel must have the same duration. A non-repeating program with no
+timed steps needs at least a hold or ramp to define its horizon. Hand-authored
+[CLI inputs](CLI-GUIDE.md#holds-ramps-and-repetition) can instead specify an
+explicit horizon with all channels constant.
 
 **Flow basis** switches between mol/s and GHSV (h⁻¹). This conversion uses the
 bed geometry and reference conditions of **273.15 K and 100,000 Pa**. Set a
 positive radius and length before converting existing numeric flows.
 
-The preview shows the engine's smoothed schedules, feed mixing, repetition, and
-GHSV conversion. Use a channel's arrow to collapse it, or **Focus** to give it
-more room; **Show all** restores the channels. Preview toolbars support zoom,
-pan, and image saving.
+The preview shows the engine's smoothed schedules, repetition, and GHSV
+conversion. Feed transitions interpolate molar flow, species molar flows, and
+flow × temperature; see [Operating programs](EQUATIONS.md#operating-programs).
+Use a channel's arrow to collapse it, or **Focus** to give it more room;
+**Show all** restores the channels. Preview toolbars support zoom, pan, and image
+saving.
 
 ### First run
 
@@ -400,6 +407,8 @@ successful snapshot still matches those inputs. The study copies those inputs as
 a fixed baseline, records the successful attempt, and does not copy results.
 **Inspect baseline** is read-only; **Replace baseline** selects another successful
 case. Subsequent changes to the source case do not change the saved baseline.
+Selected plugins still use the project's current contents for future runs; see
+[Project plugins](#project-plugins).
 The baseline also retains a copy of its report configuration. Every generation
 or rebuild copies that layout independently into each fresh case, with All axes
 resolved against that case's inputs. Older studies without a saved report layout
@@ -663,10 +672,11 @@ snapshots. See the [plugin guide](PLUGINS.md) for workflows and the API.
 ### Source setup and packaging checks
 
 Use the [repository installation and development instructions](../README.md#development).
-Opening projects and generating numerical previews do not require DAETools;
-execution does. From an activated source environment, `packed-bed-ui` and
-`python -m packed_bed_ui` launch the same application. An optional argument may
-be a project folder or its `project.json`.
+Opening projects and generating numerical previews with built-in definitions do
+not require DAETools. Python plugins may require it when their implementations
+load; both execution backends require it. From an activated source environment,
+`packed-bed-ui` and `python -m packed_bed_ui` launch the same application.
+An optional argument may be a project folder or its `project.json`.
 
 For relevant engine or packaging changes, run these from the repository root:
 
@@ -676,7 +686,8 @@ python -m packed_bed.compiled.smoke
 python -m pip wheel --no-deps --no-build-isolation --wheel-dir build/wheels ./desktop
 ```
 
-The compiled smoke check requires a working compiler and native runtime.
+The compiled smoke check requires a working compiler and a managed native runtime
+including KLU; the scikit-SUNDAE wheel alone does not supply KLU.
 Wheel building checks desktop packaging separately. See
 [Building the Windows distribution](../desktop/BUILD_WINDOWS.md) for release
 isolation, runtime staging, and installer/portable builds.

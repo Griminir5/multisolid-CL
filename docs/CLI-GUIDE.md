@@ -306,7 +306,9 @@ exact time interpolation.
 With `repeat_program: false`, every channel that has steps must total the
 explicit horizon within `1e-9` seconds. A channel with no steps stays constant.
 With `repeat_program: true`, schedules repeat and the horizon can span part
-of a cycle or several cycles.
+of a cycle or several cycles. Each channel repeats its own step list, carrying
+its final value into the next cycle. It does not reset to `initial`: add a ramp
+back to the starting value when that is part of the intended cycle.
 
 `inlet_flow.basis` is `mol_per_s` or `ghsv_per_h`. GHSV uses the total bed
 volume and reference conditions **273.15 K and 100,000 Pa**. Editing the basis
@@ -338,11 +340,13 @@ outlet_pressure:
 ```
 
 A feed ramp may change flow, temperature, composition, or a combination.
-Unspecified target fields carry forward their preceding values. Feed mixing
-uses species molar flows and enthalpy; it is not generally equivalent to
-independently interpolating mole fractions and temperature. Outlet pressure
-remains separate. Do not mix `feed_stream` with the independent inlet-channel
-keys in one program file.
+Unspecified target fields carry forward their preceding values. The engine
+interpolates and smooths total molar flow `F`, species molar flows `F*y`, and
+`F*T`, then divides the latter two by `F` to obtain composition and temperature.
+This gives molar-flow-weighted temperature, without a feed enthalpy balance;
+see [Operating programs](EQUATIONS.md#operating-programs). Outlet pressure remains
+separate. Do not mix `feed_stream` with the independent inlet-channel keys in one
+program file.
 
 ## Solver settings
 
@@ -382,7 +386,7 @@ is using it.
 for DAETools and the applicable numerical libraries; `0` keeps environment
 limits and uses DAETools' default. KLU factorization is serial.
 
-Other solver fields include `concentration_absolute_tolerance` in mol/m³,
+Other solver fields include `concentration_absolute_tolerance` in mol/m³ bed,
 `suppress_algebraic_errors`, `max_nonlinear_iterations`,
 `nonlinear_convergence_coefficient`, and `maximum_order` (1–5).
 `scale_residuals`, non-default `step_growth_threshold`,

@@ -28,8 +28,10 @@ repository root, the folder containing `pyproject.toml`. The supplied factories
 keep DAETools imports inside symbolic methods, so generating metadata and running
 their numerical checks does not require loading the solver. Simulations do.
 
-Create a workspace folder called `build/plugin-workshop` inside the repository.
-Use your file manager or editor to create folders and files as instructed.
+The paths below use a workspace called `build/plugin-workshop`. For Lesson 1,
+you can use any writable folder instead; no source checkout is needed. For
+Lessons 2 and 3, create that workspace inside the repository so the terminal
+commands match. Use your file manager or editor to create the folders and files.
 `build/` is ignored by Git, so keep a separate copy of work you want to retain
 or share. Save files as UTF-8 plain text with their exact extensions:
 `manifest.yaml`, not `manifest.yaml.txt`.

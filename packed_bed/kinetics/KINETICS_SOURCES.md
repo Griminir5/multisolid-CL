@@ -2,8 +2,10 @@
 
 Each module owns one swappable family: its reaction definitions, symbolic
 DAETools hooks, component requirements, and local regularization constants.
-The family name and Git commit recorded in a run manifest identify the selected
-implementation; there is no separate kinetics version system.
+Run manifests record selected definitions, their parameter values, and the
+built-in definition fingerprint. They also record the source Git commit when
+available; packaged installations may have no Git checkout. There is no separate
+kinetics version system. See [run provenance](../../docs/CLI-GUIDE.md#outputs-and-analysis).
 
 These references document provenance. They do not assert that a family is
 appropriate for a particular material or experiment.
@@ -56,3 +58,5 @@ These are alternative published mechanisms, not compatibility aliases.
 `iron_he` (`iron_he.py`) contains the He et al. reduction and oxidation family
 from *Energy Conversion and Management* 293 (2023), 117525. Its symbolic
 runtime expressions and local constants are the canonical implementation.
+
+[Model equations](../../docs/EQUATIONS.md) · [Documentation index](../../README.md#documentation)

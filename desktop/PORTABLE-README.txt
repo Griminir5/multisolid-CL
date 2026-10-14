@@ -18,6 +18,9 @@ edition, use the new installer to update and Windows Settings to uninstall.
 The first Compiled run may take several minutes while the included compiler
 builds the model. Later compatible runs reuse the project cache.
 
+The GUI guide covers cases, studies, reports and project sharing:
+https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/docs/GUI-GUIDE.md
+
 These initial builds are unsigned. See release.json for the exact version and
 build ID, LICENSE.txt and licenses for notices, and the accompanying validation
 report for what was tested. Source code and build instructions are maintained

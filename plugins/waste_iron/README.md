@@ -9,8 +9,9 @@ definitions. It uses only the application and its bundled libraries.
 1. Choose **Plugins → Register plugin** and select this `manifest.yaml` or
    `waste_iron.msplugin`. Enable **Waste iron** and approve its Python code.
 2. Add **Waste iron redox** from this plugin in Chemistry. Select oxidation,
-   reduction, or both. Both reactions need built-in Fe and Fe2O3. Oxidation needs
-   O2; reduction needs H2 and H2O. Set their bed loadings and feed composition.
+   reduction, or both. Both reactions need Fe and Fe2O3, available as built-in
+   species. Oxidation needs O2; reduction needs H2 and H2O. Set their bed loadings
+   and feed composition.
 3. Add plugin SiO2 and/or Al2O3 when required for the support. To update existing
    alumina selections, select this plugin's **Aluminium Oxide (alpha)** and choose
    **Use this as replacement…**, then choose the existing Al2O3 definition.
@@ -93,24 +94,33 @@ The manifests retain the branch's coefficients. Original fit data are under
 `Property_Estimation/enth_hcap_data/{sio2,al2o3-alpha}` on that branch. Their
 temperature spans are recorded in the manifest; no new property fit was made.
 
-The branch's **axial heat dispersion** option and solver changes are excluded
-from this transfer. They are independent engine functionality, not a kinetics
-requirement. Accordingly this plugin reproduces the rate laws and properties,
-not reactor results that depended on nonzero axial heat dispersion.
+This plugin supplies the branch's rate laws and properties. Axial heat dispersion
+and solver settings belong to the engine and are not configured by registering
+the plugin. The current engine supports axial heat dispersion through
+`model.axial_heat_dispersion_w_per_m_k`, or **Bed → Heat dispersion (W/m/K)** in
+the desktop. See the [energy balance](../../docs/EQUATIONS.md#energy-balance).
+Reproducing a branch reactor result also requires matching its case inputs and
+numerical settings.
 
 ## Edit and share
 
-Edit declared values in the app, or species/parameter overrides in the manifest.
-After changing Python declarations, regenerate metadata in the application’s
-Python environment, then package the folder:
+Edit declared values in the app, or species/parameter overrides in your source
+manifest. For source edits, use the
+[source Python environment](../../README.md#install-the-full-repository-from-source)
+and save the [tutorial build helper](../../examples/plugins/README.md#prepare-the-python-authoring-tools)
+as `build/plugin-workshop/build_plugin.py`. From the repository root, run:
 
-```python
-from packed_bed.plugins.check import generate_metadata
-from packed_bed.plugins.storage import pack_plugin
-
-generate_metadata("plugins/waste_iron")  # Executes the local factory.
-pack_plugin("plugins/waste_iron", "dist/plugins/waste_iron.msplugin")
+```sh
+python build/plugin-workshop/build_plugin.py plugins/waste_iron dist/plugins/waste_iron.msplugin
 ```
 
-The app's **Export** action can share an edited project copy. The archive includes
-this documentation, implementation and manifest; it has no plugin dependencies.
+This regenerates metadata, checks the package, and creates the archive. Unlike
+the tutorial's lazy imports, this plugin imports DAETools when its kinetics module
+loads, so authoring checks also need DAETools installed. Re-register the updated
+manifest or archive to update a project's copy.
+
+Use the app's **Export…** action to share edits made to the project copy instead.
+The archive includes this documentation, implementation and manifest; it has no
+dependencies on other plugins.
+
+[Plugin guide](../../docs/PLUGINS.md) · [Documentation index](../../README.md#documentation)

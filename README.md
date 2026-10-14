@@ -11,17 +11,17 @@ SUNDIALS backend. Run data are saved as NetCDF with a JSON provenance manifest.
 The guides below cover model equations and the plugin, desktop, and
 command-line workflows.
 
-| Document | Contents | Status |
-| --- | --- | --- |
-| [Plugin guide](docs/PLUGINS.md) | Creating, using, checking, and sharing plugins; manifest and Python API reference | Available |
-| [Model equations](docs/EQUATIONS.md) | Governing equations, assumptions, boundary conditions, source terms, and numerical treatment | Available |
-| [GUI guide](docs/GUI-GUIDE.md) | First run, case editing, projects, studies, plots, and Excel reports | Available |
-| [CLI guide](docs/CLI-GUIDE.md) | Complete first case, YAML inputs, single runs, batches, outputs, and Python API | Available |
-| [Windows build guide](desktop/BUILD_WINDOWS.md) | Building, validating, and packaging the desktop distribution | Available |
-| [Plugin examples](examples/plugins/README.md) | Step-by-step creation of a species, custom property equation, and reaction | Available |
-| [Waste iron plugin](plugins/waste_iron/README.md) | Installation, kinetics, property definitions, and provenance | Available |
-| [Kinetics sources](packed_bed/kinetics/KINETICS_SOURCES.md) | References for the built-in reaction families | Available |
-| [Third-party notices](THIRD_PARTY_NOTICES.md) | Dependency attribution and accompanying licences | Available |
+| Document | Contents |
+| --- | --- |
+| [Plugin guide](docs/PLUGINS.md) | Creating, using, checking, and sharing plugins; manifest and Python API reference |
+| [Model equations](docs/EQUATIONS.md) | Governing equations, assumptions, boundary conditions, source terms, and numerical treatment |
+| [GUI guide](docs/GUI-GUIDE.md) | Case editing, first run, projects, studies, plots, and Excel reports |
+| [CLI guide](docs/CLI-GUIDE.md) | Complete first case, YAML inputs, single runs, batches, outputs, and Python API |
+| [Windows build guide](desktop/BUILD_WINDOWS.md) | Building, validating, and packaging the desktop distribution |
+| [Plugin examples](examples/plugins/README.md) | Step-by-step creation of a species, custom property equation, and reaction |
+| [Waste iron plugin](plugins/waste_iron/README.md) | Installation, kinetics, property definitions, and provenance |
+| [Kinetics sources](packed_bed/kinetics/KINETICS_SOURCES.md) | References for the built-in reaction families |
+| [Third-party notices](THIRD_PARTY_NOTICES.md) | Dependency attribution and accompanying licences |
 
 ## Install the desktop application
 
@@ -57,8 +57,8 @@ its native dependencies.
 
 ### 1. Get the source and create an environment
 
-The desktop application currently lives on the `application-and-ui` branch;
-the repository's default branch does not contain this layout.
+These instructions use the `application-and-ui` branch, which contains the
+engine and desktop layout described here.
 
 ```sh
 git clone --branch application-and-ui https://github.com/Griminir5/multisolid-CL.git
@@ -138,9 +138,11 @@ supplied case from the terminal:
 python -m packed_bed examples/simulations/default_case/run.yaml
 ```
 
-Input validation does not need DAETools. Execution requires the selected solver
-and its dependencies. Each case run can replace files in its output directory;
-use a separate directory to retain earlier results.
+Validation of built-in definitions does not need DAETools. Python plugins may
+load their own dependencies during validation; see the
+[CLI validation notes](docs/CLI-GUIDE.md#what-validation-checks). Execution requires
+the selected solver and its dependencies. Each case run can replace files in its
+output directories; use separate directories to retain earlier results.
 
 ## Repository structure
 
@@ -188,9 +190,10 @@ python -m packed_bed examples/simulations/default_case/run.yaml --validate-only
 python -m packed_bed batch examples/simulations/default_batch_case/batch.yaml --validate-only
 ```
 
-For native runtime changes, run the smoke check with a working compiler and
-runtime. On Linux, expose the staged runtime's `lib` directory through
-`LD_LIBRARY_PATH` if needed:
+For native runtime changes, run the smoke check with a working compiler and a
+managed runtime including KLU. It checks all three Compiled solvers; the
+scikit-SUNDAE wheel alone cannot pass its KLU check. On Linux, expose the staged
+runtime's `lib` directory through `LD_LIBRARY_PATH` if needed:
 
 ```sh
 python -m packed_bed.compiled.smoke

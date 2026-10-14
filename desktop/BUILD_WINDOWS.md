@@ -17,8 +17,10 @@ under `build/release/`. They are generated data, not Git source files.
 [`tools/windows-release-inputs.json`](../tools/windows-release-inputs.json) records
 upstream download URLs and SHA-256 hashes.
 [`tools/compiled_sources.json`](../tools/compiled_sources.json) pins the native runtime.
-`tools/windows-requirements.lock` pins the exact Windows/Python wheels, including
-build tools; `windows-requirements.txt` is the readable version list.
+[`tools/windows-requirements.lock`](../tools/windows-requirements.lock) pins the
+exact Windows/Python wheels, including build tools;
+[`tools/windows-requirements.txt`](../tools/windows-requirements.txt) is the readable
+version list.
 
 Use a fresh, ordinary venv **without** `--system-site-packages`. Do not use the
 developer `.venv`, editable installs, or the user's global packages:
@@ -244,9 +246,12 @@ Unicode characters and run the external checker against that extracted folder:
 Also check per-user installation, same-version reinstallation and the installed
 executable. In the release environment, run `check_windows_release.py` against
 the installed application folder, then uninstall and verify that a project
-stored outside the application survives. Record the final artifact hashes and
-validation results together; `dist/releases/VALIDATION.json` accompanies the
-current build. Clean-machine qualification is described below.
+stored outside the application survives. Each checker invocation writes
+`validation.json` under its chosen output directory: the build script defaults to
+`build/release/acceptance/`, and the portable check above uses
+`build/release/portable-check/`. Archive these records and their logs alongside
+the final artifacts and `SHA256SUMS.txt`; packaging does not copy the validation
+reports into `dist/releases/`. Clean-machine qualification is described below.
 
 The installer uses a stable application ID and version/build-specific application
 directories so upgrades cannot mix DLL versions. Shortcuts point to the current

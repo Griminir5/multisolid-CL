@@ -132,9 +132,10 @@ concentrations, and energy storage. Ergun resistance always uses $e_b$.
 
 Solids are specified in contiguous zones covering the bed. Zone voidages and
 initial solid values are sampled at cell centres; a narrow zone containing no
-cell centre does not contribute a cell inventory, and it is the responsibility of the user to choose a suitable resolution. Particle diameters are sampled
-at faces. A face exactly on a zone boundary uses the arithmetic mean of the two
-adjacent zone diameters. These rules are implemented in
+cell centre does not contribute a cell inventory. Choose a resolution that
+represents the intended zones. Particle diameters are sampled at faces. A face
+exactly on a zone boundary uses the arithmetic mean of the two adjacent zone
+diameters. These rules are implemented in
 [solid_profiles.py](../packed_bed/solid_profiles.py).
 
 Let $v_a$ be an entered solid value and $M_a$ its molecular weight in kg/mol.
@@ -401,8 +402,9 @@ E_j=\sum_i c_{i,j}\bigl[h_i^g(T_j)-RT_j\bigr]
 $$
 
 Temperature is recovered through this algebraic relation and the species
-enthalpy closures. It is shared by gas and solids. Holding the gas and solid concentrations fixed,
-the derivative of this stored energy with respect to temperature is
+enthalpy closures. It is shared by gas and solids. Holding the gas and solid
+concentrations fixed, the derivative of this stored energy with respect to
+temperature is
 $\sum_i c_i(C_{p,i}^g-R)+\sum_a s_aC_{p,a}^s$.
 
 ### Enthalpy transport and axial heat dispersion
