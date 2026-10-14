@@ -8,18 +8,17 @@ SUNDIALS backend. Run data are saved as NetCDF with a JSON provenance manifest.
 
 ## Documentation
 
-The four guides under `docs/` are outlines for the planned documentation. The
-existing plugin and desktop references remain available while their content is
-migrated.
+The plugin and model-equations guides are available. The GUI and CLI guides
+remain outlines; use the desktop reference for current application workflows.
 
 | Document | Contents | Status |
 | --- | --- | --- |
-| [Plugin guide](docs/plugins.md) | Installing, using, developing, checking, and sharing plugins | Outline; links to the existing guide |
-| [Model equations](docs/equations.md) | Governing equations, assumptions, boundary conditions, and source terms | Outline |
-| [GUI guide](docs/gui-guide.md) | Projects, cases, studies, plots, and Excel reports | Outline; links to the existing guide |
-| [CLI guide](docs/cli-guide.md) | YAML inputs, single runs, batches, solver options, and outputs | Outline |
+| [Plugin guide](docs/PLUGINS.md) | Creating, using, checking, and sharing plugins; manifest and Python API reference | Available |
+| [Model equations](docs/EQUATIONS.md) | Governing equations, assumptions, boundary conditions, source terms, and numerical treatment | Available |
+| [GUI guide](docs/GUI-GUIDE.md) | Projects, cases, studies, plots, and Excel reports | Outline; links to the existing guide |
+| [CLI guide](docs/CLI-GUIDE.md) | YAML inputs, single runs, batches, solver options, and outputs | Outline |
 | [Windows build guide](desktop/BUILD_WINDOWS.md) | Building, validating, and packaging the desktop distribution | Available |
-| [Plugin examples](examples/plugins/README.md) | Worked species, property, and kinetics examples | Available |
+| [Plugin examples](examples/plugins/README.md) | Step-by-step creation of a species, custom property equation, and reaction | Available |
 | [Waste iron plugin](plugins/waste_iron/README.md) | Installation, kinetics, property definitions, and provenance | Available |
 | [Kinetics sources](packed_bed/kinetics/KINETICS_SOURCES.md) | References for the built-in reaction families | Available |
 | [Third-party notices](THIRD_PARTY_NOTICES.md) | Dependency attribution and accompanying licences | Available |
@@ -151,7 +150,7 @@ use a separate directory to retain earlier results.
 | [`packed_bed/compiled/`](packed_bed/compiled/) | Native code generation, compiler integration, and SUNDIALS runtime support |
 | [`desktop/`](desktop/) | Desktop package metadata, Windows build instructions, and installer definition |
 | [`desktop/packed_bed_ui/`](desktop/packed_bed_ui/) | PyQt6 application, project storage, editors, studies, and Excel export |
-| [`docs/`](docs/) | Plugin, equation, GUI, and CLI guide outlines |
+| [`docs/`](docs/) | Model equations and the plugin, GUI, and CLI guides |
 | [`examples/simulations/`](examples/simulations/) | Complete single-case and batch YAML inputs |
 | [`examples/plugins/`](examples/plugins/) | Illustrative plugin packages |
 | [`plugins/`](plugins/) | Additional scientific plugins, including waste iron |
@@ -175,7 +174,7 @@ and [reports](packed_bed/reports.py). Desktop navigation starts in
 [window.py](desktop/packed_bed_ui/window.py); project persistence is in
 [project.py](desktop/packed_bed_ui/project.py).
 
-Use [scientific plugins](docs/plugins.md) for new species, property correlations,
+Use [scientific plugins](docs/PLUGINS.md) for new species, property correlations,
 or reaction families that can be distributed independently. Changes to built-in
 definitions should retain their scientific references, units, and concentration
 bases. Keep DAETools imports lazy where possible so input validation remains

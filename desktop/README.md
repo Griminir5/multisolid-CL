@@ -1,6 +1,6 @@
 # MultiSolid desktop reference
 
-This reference is retained while the new [GUI guide](../docs/gui-guide.md) is
+This reference is retained while the new [GUI guide](../docs/GUI-GUIDE.md) is
 prepared. See the [repository README](../README.md) for installation and development.
 
 A project contains simulation cases. Each case owns its inputs and **one latest
@@ -447,7 +447,7 @@ worker cleanup. The CLI retains its in-process path for one worker with no timeo
 
 Each project stores one current copy of each plugin; Save replaces that copy.
 Code/resource approval belongs to the local computer and survives parameter edits.
-Workers reconstruct authoritative definitions from plugin copies in their input snapshots. See [PLUGINS.md](../PLUGINS.md) for the plugin workflow and API.
+Workers reconstruct authoritative definitions from plugin copies in their input snapshots. See the [plugin guide](../docs/PLUGINS.md) for workflows and the API.
 
 ## Checks
 
@@ -480,5 +480,5 @@ processes are **not a security sandbox**. Checks do not establish that a plugin 
 safe or scientifically correct. Approval stays on your computer. Changes to code
 or resources require approval again; parameter-only edits do not.
 
-See [the plugin reference](../PLUGINS.md) for workflows and authoring examples.
-Its content will be consolidated in the [new plugin guide](../docs/plugins.md).
+See the [plugin guide](../docs/PLUGINS.md) for workflows and the
+[example walkthrough](../examples/plugins/README.md) to create your own plugin.

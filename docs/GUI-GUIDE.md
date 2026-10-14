@@ -12,6 +12,6 @@ Planned coverage:
 - Parameter studies and reusable definitions.
 - Plot windows, case reports, project Results, and Excel export.
 
-Plugin workflows will be covered in the [plugin guide](plugins.md).
+Plugin workflows are covered in the [plugin guide](PLUGINS.md).
 
 [Documentation index](../README.md#documentation)
