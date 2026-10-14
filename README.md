@@ -8,15 +8,15 @@ SUNDIALS backend. Run data are saved as NetCDF with a JSON provenance manifest.
 
 ## Documentation
 
-The plugin, model-equations, and GUI guides are available. The CLI guide remains
-an outline, with command help and complete simulation examples linked from it.
+The guides below cover model equations and the plugin, desktop, and
+command-line workflows.
 
 | Document | Contents | Status |
 | --- | --- | --- |
 | [Plugin guide](docs/PLUGINS.md) | Creating, using, checking, and sharing plugins; manifest and Python API reference | Available |
 | [Model equations](docs/EQUATIONS.md) | Governing equations, assumptions, boundary conditions, source terms, and numerical treatment | Available |
 | [GUI guide](docs/GUI-GUIDE.md) | First run, case editing, projects, studies, plots, and Excel reports | Available |
-| [CLI guide](docs/CLI-GUIDE.md) | YAML inputs, single runs, batches, solver options, and outputs | Outline |
+| [CLI guide](docs/CLI-GUIDE.md) | Complete first case, YAML inputs, single runs, batches, outputs, and Python API | Available |
 | [Windows build guide](desktop/BUILD_WINDOWS.md) | Building, validating, and packaging the desktop distribution | Available |
 | [Plugin examples](examples/plugins/README.md) | Step-by-step creation of a species, custom property equation, and reaction | Available |
 | [Waste iron plugin](plugins/waste_iron/README.md) | Installation, kinetics, property definitions, and provenance | Available |

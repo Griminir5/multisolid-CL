@@ -66,7 +66,8 @@ def build_parser(*, batch: bool = False) -> argparse.ArgumentParser:
     parser.add_argument("--debug", action="store_true", help="Show a traceback for unexpected errors.")
     if batch:
         parser.add_argument("--case-timeout-s", type=_positive_float, help="Stop a case after this many seconds.")
-        parser.add_argument("--workers", type=_positive_int, help="Number of single-threaded worker processes.")
+        parser.add_argument("--workers", type=_positive_int,
+                            help="Maximum concurrent case processes; each case keeps its solver.threads setting.")
     else:
         parser.add_argument("--artifacts", action="store_true", help="Create input diagrams before the run.")
         parser.add_argument("--dae-plotter", action="store_true", help="Open the DAETools plotter after the run.")
