@@ -39,7 +39,16 @@ archives can be transferred to synced storage when you want to share inputs.
 
 The **Project** menu provides creation, opening, saving, closing, folder access,
 archives, recent projects, and reusable definitions. **Plugins** opens the
-project's scientific definitions. **Help → Licences and notices** shows the
+project's scientific definitions. The **Help** menu opens bundled HTML in your
+browser, including Getting started, the User guide, reference guides, and
+Troubleshooting. **Help for this screen** (**F1**) opens a dedicated short page
+for the welcome screen, project screen, each case tab, Project Results, or
+parameter studies. **Search help…** opens the help home with search across the
+bundled pages. Help works offline, including the equations; links marked
+**online** require an internet connection.
+
+**About MultiSolid** shows application and component versions and lets you
+preview and copy diagnostic information. **Licences and notices** shows the
 application's notices.
 
 Each case row shows input readiness and the latest run status separately:

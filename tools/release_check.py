@@ -68,6 +68,14 @@ def check(destination):
             window.close()
             passed("Qt window and application assets")
             passed('launch splash and bundled Maratype font')
+            from packed_bed_ui.help import HELP_ROOT, help_url
+            help_manifest = json.loads((HELP_ROOT / 'manifest.json').read_text(encoding='utf-8'))
+            for filename in help_manifest['pages']:
+                assert Path(help_url(Path(filename).stem).toLocalFile()).is_file()
+            for filename in ('help.css', 'help.js', 'search-data.js'):
+                assert (HELP_ROOT / filename).is_file()
+            assert '<math ' in (HELP_ROOT / 'equations.html').read_text(encoding='utf-8')
+            passed('offline help pages, search assets, and rendered equations')
             from packed_bed.reaction_graph import build_reaction_graph, render_svg, find_graphviz
             command = find_graphviz()
             if getattr(sys, "frozen", False):

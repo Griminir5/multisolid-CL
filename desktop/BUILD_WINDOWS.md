@@ -32,6 +32,21 @@ $py = (Resolve-Path build/release/venv/Scripts/python.exe).Path
 & $py -m pip install --no-index --find-links build/release/wheels --require-hashes -r tools/windows-requirements.lock
 ```
 
+Offline-help build dependencies are pinned separately. Download and install
+them into the release environment too:
+
+```powershell
+& $py -m pip download --only-binary=:all: --require-hashes -r tools/help-requirements.txt --dest build/release/wheels
+& $py -m pip install --no-index --find-links build/release/wheels --require-hashes -r tools/help-requirements.txt
+& $py tools/build_help.py --check
+```
+
+If documentation has changed, run `tools/build_help.py` and retain the generated
+`desktop/packed_bed_ui/assets/help/` files with the source changes. Release wheel
+builds reject stale help. The UI wheel and frozen application include the HTML,
+search index, styles, and pre-rendered MathML equations; these build dependencies
+are not needed to read help.
+
 Prepare an extracted DAE Tools Windows distribution. Its upstream `setup.py`
 creates shortcuts even during wheel builds, so the helper copies the tree and
 removes that final block. It records the patch and input hashes and leaves the

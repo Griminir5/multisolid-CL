@@ -206,6 +206,22 @@ dependencies installed:
 python -m pip wheel --no-deps --no-build-isolation --wheel-dir build/wheels . ./desktop
 ```
 
+The desktop's offline help is generated from the guides and the short screen
+pages in `docs/help/`. Generated HTML is checked in so source installations and
+ordinary wheels can open help without documentation build dependencies. After
+editing documentation, the help template, or the application version, rebuild
+and check it:
+
+```sh
+python -m pip install --require-hashes -r tools/help-requirements.txt
+python tools/build_help.py
+python tools/build_help.py --check
+```
+
+The build validates internal page links and anchors and renders equations into
+MathML. Search and styling are local assets. Release wheel builds reject stale
+help; the frozen application collects the same files from the UI wheel.
+
 Use complete reactor runs, balance diagnostics, and grid/tolerance comparisons
 when changing numerical behaviour. Input validation and native smoke checks
 alone do not validate a scientific model. Update the relevant documentation with

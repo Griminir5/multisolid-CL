@@ -28,4 +28,4 @@ include = ["packed_bed_ui*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-packed_bed_ui = ["assets/*.svg", "assets/fonts/*"]
+packed_bed_ui = ["assets/*.svg", "assets/fonts/*", "assets/help/*"]

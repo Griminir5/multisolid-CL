@@ -17,6 +17,13 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("dist/desktop"))
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
+    # Reject an installed UI wheel with stale or incomplete help before freezing it.
+    from build_help import build_pages
+    from packed_bed_ui.help import HELP_ROOT
+    for filename, content in build_pages().items():
+        path = HELP_ROOT / filename
+        if not path.is_file() or path.read_bytes() != content.encode('utf-8'):
+            raise ValueError('Rebuild and reinstall the UI wheel: bundled help is stale: ' + filename)
     for package in ("packed_bed", "packed_bed_ui", "daetools"):
         from importlib.util import find_spec
         location = Path(find_spec(package).origin).resolve()

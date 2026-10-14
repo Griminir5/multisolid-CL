@@ -8,6 +8,8 @@ import tempfile
 
 def build():
     root = Path(__file__).resolve().parents[1]
+    from build_help import build as build_help
+    build_help(check=True)
     work = root / "build/release"
     work.mkdir(parents=True, exist_ok=True)
     wheels = work / "wheels"

@@ -66,7 +66,7 @@ def write_metadata(destination, root):
     for native_manifest in ("compiled/manifest.json", "graphviz/bundle.json"):
         identity.update(bytes.fromhex(sha256(destination / native_manifest)))
     for path in sorted(destination.rglob("*")):
-        if path.is_file() and path.suffix in {".exe", ".py", ".pyc", ".pyd", ".dll", ".svg"}:
+        if path.is_file() and path.suffix in {".exe", ".py", ".pyc", ".pyd", ".dll", ".svg", ".html", ".css", ".js"}:
             identity.update(path.relative_to(destination).as_posix().encode())
             identity.update(bytes.fromhex(sha256(path)))
     release = {"version": version, "build_id": identity.hexdigest()[:12], "architecture": "x64"}

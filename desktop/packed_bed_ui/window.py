@@ -106,8 +106,8 @@ class MainWindow(QMainWindow):
         self.recent_menu = menu.addMenu("Recent projects")
         self.plugins_action = self.masthead.menus.addAction('Plugins', self._plugins)
         self.plugins_action.setEnabled(False)
-        help_menu = self.masthead.menus.addMenu("Help")
-        help_menu.addAction("Licences and notices", self._show_licenses)
+        from .help import install_help_menu
+        install_help_menu(self)
         self.recent_menu.aboutToShow.connect(self.locations.refresh)
         self.case_count = NumberLabel()
         layout.addWidget(self.case_count)
@@ -199,6 +199,10 @@ class MainWindow(QMainWindow):
             path = Path(sys.executable).parent / "licenses" / "README.txt"
         else:
             path = Path(__file__).resolve().parents[2] / "THIRD_PARTY_NOTICES.md"
+            if not path.is_file():
+                from .help import open_help
+                open_help(self, 'notices')
+                return
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
             QMessageBox.information(self, "Licences and notices", f"Open the notices at:\n{path}")
 
