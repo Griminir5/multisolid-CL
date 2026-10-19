@@ -68,8 +68,20 @@ def check(destination):
             window.close()
             passed("Qt window and application assets")
             passed('launch splash and bundled Maratype font')
-            from packed_bed_ui.help import HELP_ROOT, help_url
+            from packed_bed_ui.help import HELP_ROOT, help_url, diagnostic_information
+            from packed_bed.release import application_identity, MANIFEST_SCHEMA_VERSION
+            identity = application_identity()
+            assert identity['engine_version'] and identity['ui_version']
+            if getattr(sys, 'frozen', False):
+                release = json.loads((Path(sys.executable).parent / 'release.json').read_text(encoding='utf-8'))
+                assert identity == {key: release[key] for key in identity}
+                assert identity['build_id']
+                assert identity['build_id'] in diagnostic_information()
+                if identity['source_commit']:
+                    assert identity['source_commit'] in diagnostic_information()
+            passed('application identity and About diagnostics')
             help_manifest = json.loads((HELP_ROOT / 'manifest.json').read_text(encoding='utf-8'))
+            assert help_manifest['version'] == identity['ui_version']
             for filename in help_manifest['pages']:
                 assert Path(help_url(Path(filename).stem).toLocalFile()).is_file()
             for filename in ('help.css', 'help.js', 'search-data.js'):
@@ -114,6 +126,12 @@ def check(destination):
                     assert np.allclose(data.gas_mole_fraction, 1., rtol=0, atol=1e-8)
                     manifest = read_json(case.run_folder / "output/manifest.json")
                     assert manifest["status"] == "success"
+                    assert manifest['schema_version'] == MANIFEST_SCHEMA_VERSION
+                    assert manifest['application'] == identity
+                    assert read_json(case.run_folder / 'snapshot.json')['application'] == identity
+                    assert manifest['environment']['git']['commit'] == identity['source_commit']
+                    for package, key in (('multisolid-cl', 'engine_version'), ('multisolid-cl-ui', 'ui_version')):
+                        assert manifest['environment']['packages'][package] == identity[key]
                     if attempt and case.documents["run"]["solver"]["backend"] == "compiled":
                         assert manifest["solver_stats"]["cache_hit"]
                 passed("concurrent standard/compiled cases" if attempt == 0 else "repeat runs and project cache reuse")
@@ -124,6 +142,9 @@ def check(destination):
             from openpyxl import load_workbook
             book = load_workbook(destination / "report.xlsx")
             assert book["Temperature"].max_row >= 3
+            information = list(book.worksheets[0].values)
+            for key, value in identity.items():
+                assert any(row[:3] == ('Manifest', f'application.{key}', value) for row in information)
             book.close()
             passed("NetCDF read and Excel workbook export")
             from packed_bed.plotting import PLOT_REGISTRY

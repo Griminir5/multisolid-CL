@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multisolid-cl"
-version = "0.2.0"
+version = "1.0.0"
 description = "DAETools packed-bed reactor simulation"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -24,6 +24,7 @@ namespaces = false
 
 [tool.setuptools.package-data]
 packed_bed = [
+    "_build_identity.json",
     "compiled/*.cpp",
     "compiled/*.hpp",
     "compiled/licenses/*",

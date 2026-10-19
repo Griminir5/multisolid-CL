@@ -1,7 +1,6 @@
 """Offline documentation entry points and application information."""
 
 from importlib import metadata
-import json
 from pathlib import Path
 import platform
 import sys
@@ -9,6 +8,8 @@ import sys
 from PyQt6.QtCore import PYQT_VERSION_STR, QUrl, qVersion
 from PyQt6.QtGui import QDesktopServices, QKeySequence
 from PyQt6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QLabel, QMessageBox, QPlainTextEdit, QVBoxLayout
+
+from packed_bed.release import application_identity
 
 
 HELP_ROOT = Path(__file__).resolve().parent / 'assets/help'
@@ -54,20 +55,19 @@ def package_version(name):
 
 
 def application_version():
-    version = package_version('multisolid-cl-ui')
-    if version != 'Version unavailable':
-        return version
-    try:
-        return json.loads((HELP_ROOT / 'manifest.json').read_text(encoding='utf-8'))['version']
-    except (OSError, ValueError, KeyError):
-        return 'Unknown'
+    return application_identity()['ui_version'] or 'Unknown'
 
 
 def diagnostic_information():
     """An inspectable version summary, without project data or machine paths."""
+    identity = application_identity()
+    dirty = {True: 'yes', False: 'no', None: 'unknown'}[identity['source_dirty']]
     return '\n'.join((
-        f'MultiSolid: {application_version()}',
-        f'Engine: {package_version("multisolid-cl")}',
+        f'MultiSolid: {identity["ui_version"] or "Unknown"}',
+        f'Engine: {identity["engine_version"] or "Unknown"}',
+        f'Source commit: {identity["source_commit"] or "Unknown"}',
+        f'Source modified: {dirty}',
+        f'Build identifier: {identity["build_id"] or "Unavailable"}',
         f'Operating system: {platform.system()} {platform.release()} ({platform.machine()})',
         f'Python: {platform.python_version()}',
         f'Qt: {qVersion()}',

@@ -9,7 +9,6 @@ from importlib.metadata import PackageNotFoundError, version
 import json
 from pathlib import Path
 import platform
-import subprocess
 from types import MappingProxyType
 from typing import Any, Callable, Mapping
 
@@ -17,6 +16,7 @@ import numpy as np
 
 from .config import Case
 from .file_io import atomic_output, write_text
+from .release import MANIFEST_SCHEMA_VERSION, application_identity
 
 
 RESULTS_FILENAME = "results.nc"
@@ -268,7 +268,11 @@ class RunResult:
     plot_errors: dict[str, str] = field(default_factory=dict)
     reporter: Any | None = None
     solver_stats: dict[str, Any] = field(default_factory=dict)
-    code_git: dict[str, Any] = field(default_factory=lambda: _git_state())
+    application: dict[str, Any] = field(default_factory=application_identity)
+
+    @property
+    def code_git(self) -> dict[str, Any]:
+        return {"commit": self.application["source_commit"], "dirty": self.application["source_dirty"]}
 
     @property
     def plot_status(self) -> str:
@@ -535,30 +539,15 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _git_state() -> dict[str, Any]:
-    source = str(Path(__file__).resolve().parent)
-    try:
-        commit = subprocess.run(
-            ["git", "-C", source, "rev-parse", "HEAD"],
-            check=True, capture_output=True, text=True,
-        ).stdout.strip()
-        dirty = bool(subprocess.run(
-            ["git", "-C", source, "status", "--porcelain"],
-            check=True, capture_output=True, text=True,
-        ).stdout.strip())
-        return {"commit": commit, "dirty": dirty}
-    except (OSError, subprocess.SubprocessError):
-        return {"commit": None, "dirty": None}
-
-
-def _package_versions() -> dict[str, str | None]:
+def _package_versions(application) -> dict[str, str | None]:
     versions = {}
     for name in ("numpy", "xarray", "scipy", "matplotlib", "pydantic", "daetools", "scikit-sundae"):
         try:
             versions[name] = version(name)
         except PackageNotFoundError:
             versions[name] = None
-    return versions
+    return {"multisolid-cl": application["engine_version"],
+            "multisolid-cl-ui": application["ui_version"], **versions}
 
 
 def _dataset_inventory(path: Path | None) -> dict[str, Any]:
@@ -612,13 +601,15 @@ def write_run_manifest(
         {name: {"status": "failed", "error": error} for name, error in result.plot_errors.items()}
     )
     manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "application": result.application,
         "status": result.status,
         "runtime_s": result.runtime_s,
         "solver_stats": result.solver_stats,
         "environment": {
             "python": platform.python_version(),
             "platform": platform.platform(),
-            "packages": _package_versions(),
+            "packages": _package_versions(result.application),
             "git": result.code_git,
         },
         "configuration": {

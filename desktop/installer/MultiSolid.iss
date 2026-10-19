@@ -4,6 +4,9 @@
 #ifndef AppVersion
   #error Supply /DAppVersion
 #endif
+#ifndef WindowsVersion
+  #error Supply /DWindowsVersion
+#endif
 #ifndef BuildId
   #error Supply /DBuildId
 #endif
@@ -29,7 +32,7 @@ WizardStyle=modern
 UninstallDisplayIcon={app}\app\{#VersionFolder}\MultiSolid.exe
 CloseApplications=yes
 RestartApplications=no
-VersionInfoVersion={#AppVersion}.0
+VersionInfoVersion={#WindowsVersion}
 
 [Files]
 ; Versioned application directories keep upgrades from mixing old and new DLLs.

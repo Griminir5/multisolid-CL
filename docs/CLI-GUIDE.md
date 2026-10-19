@@ -617,6 +617,15 @@ my-case/output/
 `manifest.json` records resolved configuration and scientific definitions,
 input/output hashes, software/environment information, runtime and solver
 statistics, dataset variables/dimensions, balance errors, and plot status.
+Its `schema_version` identifies the manifest format (currently `1`). The
+`application` record contains engine and desktop versions, the source commit,
+whether the source had local changes, and the packaged build identifier. It has
+its own `schema_version` for the identity record. A portable desktop reads this
+identity from its bundled `release.json`; Git is not needed on the user's machine.
+Release wheels retain their build-time source commit. Source runs use the loaded
+checkout's version and Git state. Unknown values are `null`; a Python installation
+has no packaged build identifier, and an engine-only installation has no UI version.
+
 A simulation failure normally attempts to write a failure manifest with a stage
 and traceback. Early import failures, forced termination, or failures writing
 the manifest itself may leave none.

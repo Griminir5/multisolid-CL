@@ -19,6 +19,7 @@ from packed_bed.config import Case, CaseInputs
 from packed_bed.config.load import read_yaml_mapping, inspect_case, inspect_case_file
 from packed_bed.file_io import retry_file_operation, write_text
 from packed_bed.parameters import plain
+from packed_bed.release import application_identity
 
 from .inputs import scientific_documents
 
@@ -178,6 +179,7 @@ class ProjectCase:
             write_json(folder / 'inputs' / 'definitions.json', {'root': '..', 'lock': plain(resolved.selection.lock)})
             write_json(folder / "snapshot.json", {
                 "format_version": SNAPSHOT_VERSION,
+                "application": application_identity(),
                 "case_id": self.id,
                 "case_name": self.name,
                 "attempt_id": attempt_id,

@@ -50,6 +50,15 @@ def content_identity(destination):
 
 
 def write_metadata(destination, root):
+    from packed_bed.release import BUILD_IDENTITY_FILE, application_identity, source_identity
+    identity = application_identity()
+    expected = source_identity(root)
+    for name, package in (("multisolid-cl", "packed_bed"), ("multisolid-cl-ui", "packed_bed_ui")):
+        stamp = Path(metadata.distribution(name).locate_file(f"{package}/{BUILD_IDENTITY_FILE}"))
+        if not stamp.is_file() or json.loads(stamp.read_text(encoding="utf-8")) != expected:
+            raise ValueError(f"Rebuild and reinstall {name}: its source identity does not match this checkout.")
+    if identity != expected:
+        raise ValueError("The installed application versions do not match the release inputs.")
     license_dir = destination / "licenses"
     license_dir.mkdir(exist_ok=True)
     shutil.copy2(root / "LICENSE", destination / "LICENSE.txt")
@@ -85,16 +94,17 @@ def write_metadata(destination, root):
         "distributions of this build. See ../BUILD-INFO.json for versions and\n"
         "release validation details.\n", encoding="utf-8")
     (destination / "BUILD-INFO.json").write_text(json.dumps({
+        "application": identity,
         "python": sys.version, "platform": platform.platform(), "packages": packages,
         "signing": "unsigned", "qualification": "See the accompanying validation report; clean VM qualification is separate."
     }, indent=2) + "\n", encoding="utf-8")
-    version = metadata.version("multisolid-cl-ui")
-    release = {"version": version, "build_id": content_identity(destination), "architecture": "x64",
+    release = {**identity, "version": identity["ui_version"],
+               "build_id": content_identity(destination), "architecture": "x64",
                "platform": platform.system().lower()}
     if sys.platform.startswith("linux"):
         from linux_bundle import glibc_requirement
         release["minimum_glibc"] = glibc_requirement(destination)
-    (destination / "release.json").write_text(json.dumps(release, indent=2) + "\n")
+    (destination / "release.json").write_text(json.dumps(release, indent=2) + "\n", encoding="utf-8")
     files = {p.relative_to(destination).as_posix(): sha256(p) for p in sorted(destination.rglob("*"))
              if p.is_file() and p.name != "bundle-files.json"}
     (destination / "bundle-files.json").write_text(json.dumps(files, indent=2) + "\n")

@@ -11,7 +11,7 @@
 </head>
 <body>
   <a class="skip" href="#content">Skip to content</a>
-  <header><a class="brand" href="index.html">MultiSolid <span>Help</span></a><span class="version">Version 0.2.0 · Offline edition</span></header>
+  <header><a class="brand" href="index.html">MultiSolid <span>Help</span></a><span class="version">Version 1.0.0 · Offline edition</span></header>
   <div class="layout">
     <aside>
       <form role="search" id="search-form">
@@ -636,7 +636,15 @@ update the original batch summary.</p>
 <p><code>manifest.json</code> records resolved configuration and scientific definitions,
 input/output hashes, software/environment information, runtime and solver
 statistics, dataset variables/dimensions, balance errors, and plot status.
-A simulation failure normally attempts to write a failure manifest with a stage
+Its <code>schema_version</code> identifies the manifest format (currently <code>1</code>). The
+<code>application</code> record contains engine and desktop versions, the source commit,
+whether the source had local changes, and the packaged build identifier. It has
+its own <code>schema_version</code> for the identity record. A portable desktop reads this
+identity from its bundled <code>release.json</code>; Git is not needed on the user's machine.
+Release wheels retain their build-time source commit. Source runs use the loaded
+checkout's version and Git state. Unknown values are <code>null</code>; a Python installation
+has no packaged build identifier, and an engine-only installation has no UI version.</p>
+<p>A simulation failure normally attempts to write a failure manifest with a stage
 and traceback. Early import failures, forced termination, or failures writing
 the manifest itself may leave none.</p>
 <p>A failed run may leave samples recorded before failure. Those are reporting-time
@@ -927,7 +935,7 @@ create the desktop's <code>worker.log</code>.</p>
 <a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/packed_bed/reports.py" title="Online resource; internet connection required">reports and provenance <span class="online">(online)</span></a>.</p>
 <p><a href="index.html">Documentation index</a></p>
 </article>
-      <footer>MultiSolid 0.2.0 · Bundled documentation · <a href="index.html">Help home</a></footer>
+      <footer>MultiSolid 1.0.0 · Bundled documentation · <a href="index.html">Help home</a></footer>
     </main>
   </div>
 </body>

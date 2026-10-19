@@ -313,6 +313,12 @@ case list to compare successful runs. A stale result still describes its retaine
 run's inputs, not your current draft. Reports include those retained inputs and
 provenance.
 
+Run snapshots and output manifests retain the MultiSolid engine/UI versions,
+source commit, and packaged build identifier. Excel information sheets include
+this retained identity even when exported with a newer application. To identify
+the application currently open, use **Help → About MultiSolid → Copy diagnostic
+information**, which includes the source commit and build identifier.
+
 ## Export a case to Excel
 
 **Report** opens on the first user worksheet, starting with a blank sheet for a new

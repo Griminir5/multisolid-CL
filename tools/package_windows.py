@@ -22,7 +22,10 @@ def package(bundle, output, iscc, validation):
     version = release["version"]
     root = Path(__file__).resolve().parents[1]
     if iscc:
+        from windows_resources import numeric_version
+        windows_version = ".".join(map(str, numeric_version(version)))
         subprocess.run([str(iscc), f"/DBundleDir={bundle}", f"/DAppVersion={version}",
+                        f"/DWindowsVersion={windows_version}",
                         f"/DBuildId={release['build_id']}", f"/O{output}",
                         str(root / "desktop/installer/MultiSolid.iss")], check=True)
     archive = output / f"MultiSolid-{version}-windows-x64-portable.zip"

@@ -20,7 +20,7 @@ On Ubuntu 24.04, install the build and GUI dependencies:
 
 ```sh
 sudo apt update
-sudo apt install -y python3.12 python3.12-venv build-essential gfortran cmake binutils \
+sudo apt install -y python3.12 python3.12-venv git build-essential gfortran cmake binutils \
   graphviz fonts-dejavu-core libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 \
   libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-randr0 \
   libxcb-shape0 libxcb-xfixes0 libxcb-sync1 libxcb-xkb1 libgl1 libegl1 \
@@ -130,3 +130,21 @@ identify the artifacts. Retain the sources, downloaded inputs and validation
 logs when distributing a build. Always qualify the final extracted archive on
 a clean target machine; a passing build-host check does not establish support
 for every Linux distribution or Windows configuration.
+
+## Release version and source identity
+
+Update the engine version in `pyproject.toml`, the UI version in
+`desktop/pyproject.toml`, and its exact `multisolid-cl[compiled]` dependency
+together. Run `python tools/build_help.py`, then `python tools/build_help.py --check`.
+A Git tag alone does not change the application version. Use `1.0.0rc1` while
+qualifying a release candidate; change all three inputs to `1.0.0` for the final
+release and rebuild. Windows resources and the installer keep the full display
+version and use its numeric release components separately.
+
+`tools/build_app_wheels.py` stamps both wheels with the source commit and dirty
+state before copying the source. The freezer requires these stamps to match the
+release inputs, then writes the shared application identity into `release.json`.
+The content-derived build identifier includes the shipped source stamps. Run
+manifests, desktop snapshots, and About diagnostics retain this identity without
+requiring Git. Build distributable releases from a clean committed checkout;
+local changes are recorded as `source_dirty: true`, not as a new commit.

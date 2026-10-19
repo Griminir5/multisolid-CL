@@ -36,6 +36,7 @@ def main():
     if system == "linux" and not args.headless and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         parser.error("No graphical session detected. Install xvfb/xauth and use --headless.")
     required = ["cmake", "gcc", "g++"] if not args.compiled_bundle else []
+    required.append("git")
     if system == "windows" and not args.compiled_bundle:
         required.append("ninja")
     if args.headless:
@@ -92,6 +93,7 @@ def main():
     py(ROOT / "tools/build_app_wheels.py", "--output", wheels)
     py("-m", "pip", "install", "--no-deps", "--force-reinstall", *sorted(wheels.glob("*.whl")))
     py("-m", "pip", "check")
+    py("-m", "unittest", "discover", "-s", ROOT / "tests", "-v")
     # Fail on incompatible upstream binaries before spending time building solvers.
     py("-c", "from importlib.metadata import version; assert version('daetools') == '2.6.0'; "
        "from packed_bed.simulation import create_linear_solver; "
