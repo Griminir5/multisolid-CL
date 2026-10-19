@@ -1,0 +1,139 @@
+{
+  "qualification_date": "2026-10-19",
+  "scope": "Local Windows 11 compatibility of downloaded CI artifacts; not clean-machine or offline qualification.",
+  "local_checks_passed": true,
+  "full_release_qualification_complete": false,
+  "github_run_url": "https://github.com/Griminir5/multisolid-CL/actions/runs/39256795766",
+  "github_run": 39256795766,
+  "artifact_id": 12191817072,
+  "artifact_sha256": "1839e0e445373ec13c127b51dc3cfc7d30c9a4552bee36e35102d332bfd9fc3d",
+  "release": {
+    "schema_version": 1,
+    "engine_version": "1.0.0",
+    "ui_version": "1.0.0",
+    "source_commit": "b466626d4da867ccbdd753d7bc80cc7730dd1fd2",
+    "source_dirty": true,
+    "build_id": "dcccae1ab589",
+    "version": "1.0.0",
+    "architecture": "x64",
+    "platform": "windows"
+  },
+  "download_sha256": {
+    "MultiSolid-1.0.0-windows-x64-setup.exe": "cd8f3742af3efc399dec307edfd3fd213fda87ea63bb57c271bcbc5fbde681a7",
+    "MultiSolid-1.0.0-windows-x64-portable.zip": "2c60f3c7b944bdcbaf4e2f3c34c29aa1e5873a2c7351297cd0ca550db51924d6"
+  },
+  "inventory_verified": true,
+  "executable_sha256": "eedf9e1a9f283290057b0d67a2b8bc59c23cf5dd132d11ee1058414fb7127bed",
+  "host": {
+    "os": "Microsoft Windows 11 Home",
+    "version": "10.0.26200",
+    "build": "26200",
+    "update_build_revision": 9457,
+    "display_version": "25H2",
+    "architecture": "64-bit",
+    "user_code_signing_certificates": 0,
+    "machine_code_signing_certificates": 0,
+    "clean_vm": false,
+    "network_disabled": false,
+    "developer_tools_present": [
+      "Python",
+      "Git",
+      "Graphviz"
+    ],
+    "windows_sandbox_executable_present": false
+  },
+  "signing": {
+    "application": "NotSigned",
+    "installer": "NotSigned",
+    "usable_certificate_found": false
+  },
+  "checks": {
+    "portable": [
+      "relocated application and unchanged inventory",
+      "all standard solver adapters",
+      "Qt window and application assets",
+      "launch splash and bundled Maratype font",
+      "application identity and About diagnostics",
+      "offline help pages, search assets, and rendered equations",
+      "bundled Graphviz SVG rendering",
+      "both program modes without example files",
+      "concurrent standard/compiled cases",
+      "repeat runs and project cache reuse",
+      "NetCDF read and Excel workbook export",
+      "pre-made SVG plots from retained results",
+      "project archive round trip",
+      "worker cancellation",
+      "external Python plugin in a separate process"
+    ],
+    "installer": [
+      "portable archive inventory, release identity and launcher",
+      "install and same-version reinstall",
+      "installed desktop acceptance",
+      "uninstall and shortcut removal",
+      "external simulation project preserved"
+    ],
+    "installed_application": [
+      "installed application and unchanged inventory",
+      "all standard solver adapters",
+      "Qt window and application assets",
+      "launch splash and bundled Maratype font",
+      "application identity and About diagnostics",
+      "offline help pages, search assets, and rendered equations",
+      "bundled Graphviz SVG rendering",
+      "both program modes without example files",
+      "concurrent standard/compiled cases",
+      "repeat runs and project cache reuse",
+      "NetCDF read and Excel workbook export",
+      "pre-made SVG plots from retained results",
+      "project archive round trip",
+      "worker cancellation",
+      "external Python plugin in a separate process"
+    ],
+    "readonly_application": [
+      "installed application and unchanged inventory",
+      "all standard solver adapters",
+      "Qt window and application assets",
+      "launch splash and bundled Maratype font",
+      "application identity and About diagnostics",
+      "offline help pages, search assets, and rendered equations",
+      "bundled Graphviz SVG rendering",
+      "both program modes without example files",
+      "concurrent standard/compiled cases",
+      "repeat runs and project cache reuse",
+      "NetCDF read and Excel workbook export",
+      "pre-made SVG plots from retained results",
+      "project archive round trip",
+      "worker cancellation",
+      "external Python plugin in a separate process"
+    ]
+  },
+  "readonly_access": {
+    "write_probe_denied": true,
+    "passed": true,
+    "acl_restored": true
+  },
+  "test_environment": {
+    "path": "Windows system directories only",
+    "application_data_and_temp": "Isolated per test",
+    "project_paths": "Outside application folder; spaces and Unicode included",
+    "network_disabled": false,
+    "clean_vm": false
+  },
+  "limitations": [
+    "No Authenticode certificate is available; the application and installer remain unsigned.",
+    "The host has development tools installed. Windows Sandbox is unavailable on this Windows 11 Home host; no clean offline VM was tested.",
+    "The CI artifact records source_dirty=true. Its cause is not established by these runtime tests and should be resolved before final release.",
+    "Same-version reinstallation was tested; upgrade from a different application version was not tested.",
+    "Results apply only to the recorded artifact hashes. Signing or rebuilding requires renewed validation."
+  ],
+  "local_evidence": {
+    "portable": "build/win11-qa/portable/validation.json",
+    "installer": "build/win11-qa/installer/validation.json",
+    "installed_application": "build/win11-qa/installer/installed-check/validation.json",
+    "readonly_application": "build/win11-qa/readonly/validation.json",
+    "readonly_access": "build/win11-qa/readonly-access.json",
+    "artifact_verification": "build/win11-qa/artifact-verification.json",
+    "host": "build/windows-qualification/ci-39256795766/host-info.json",
+    "signatures": "build/windows-qualification/ci-39256795766/signatures.json"
+  }
+}

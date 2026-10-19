@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: >-
+  If you use MultiSolid-CL in your research, please cite the software and
+  record the version used. Also cite the scientific sources for the kinetics
+  and property data used in your simulations.
+type: software
+title: MultiSolid-CL
+authors:
+  - name: MultiSolid-CL contributors
+version: 1.0.0
+repository-code: https://github.com/Griminir5/multisolid-CL
+url: https://github.com/Griminir5/multisolid-CL
+license: GPL-3.0-only
+abstract: >-
+  MultiSolid-CL simulates reactive packed beds, coupling gas flow, heat
+  transfer, and chemical reactions. It provides a desktop application and
+  command-line interface for individual simulations, parameter studies,
+  and comparison of results. Chemistry plugins extend species, properties,
+  and reaction kinetics, with a focus on chemical looping processes.
+keywords:
+  - reactive packed beds
+  - chemical looping
+  - reactor simulation
+  - heat and mass transfer
+  - reaction kinetics

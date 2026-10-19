@@ -292,6 +292,12 @@ not target them. Save projects outside the installation/extracted folder.
 
 ## Release qualification
 
+The [Windows 11 qualification record for the 1.0.0 CI build at b466626](qualification/windows-1.0.0-b466626.json)
+records passing portable, installed, and read-only-folder checks on 19 October
+2026, including reinstallation, uninstall, and preservation of external projects.
+It identifies the exact download hashes and the remaining signing, clean-machine,
+and source-provenance limitations; it is not a full release sign-off.
+
 These scripts create **unsigned** builds. Public releases still need an
 Authenticode certificate and signing of the application before validation, then
 the completed installer. Regenerate the bundle inventory after signing and run

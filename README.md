@@ -313,6 +313,11 @@ changes to interfaces, equations, or defaults.
 
 ## Attribution and citation
 
+Machine-readable software citation metadata is available in
+[`CITATION.cff`](CITATION.cff). The author list will be finalized before the
+first public release; the current file retains the collective contributor
+credit used below.
+
 A **Zenodo DOI is planned for the first release**. Until it is issued, cite the
 [repository](https://github.com/Griminir5/multisolid-CL) and record the version,
 Git commit, and access date used for your work. For example, replace the fields
