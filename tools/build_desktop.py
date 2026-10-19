@@ -105,6 +105,9 @@ def main():
         if compiled.exists():
             shutil.rmtree(compiled)
         py(ROOT / "tools/bundle_compiled.py", "--compiler", compiler, "--runtime", work / "native-prefix", "--destination", compiled)
+    # Exercise the installed engine with the shipped reacting example before
+    # freezing or publishing any application archive. Keep each run's evidence.
+    py(ROOT / "tools/check_example.py", "--output", work / "example-check", "--compiled-bundle", compiled)
     graphviz = args.graphviz_bundle.resolve() if args.graphviz_bundle else work / "vendor/graphviz"
     if not args.graphviz_bundle:
         if graphviz.exists():

@@ -1,10 +1,13 @@
-name: Compiled runtime
+name: Native runtime only (manual)
+# The automatic application workflow already builds and tests this runtime.
+# Keep this separate entry point for diagnosing native build changes.
 on:
   workflow_dispatch:
-  pull_request:
-    paths: ['packed_bed/compiled/**', 'packed_bed/processes.py', 'tools/*compiled*', 'tools/build_compiled_runtime.py', '.github/workflows/compiled-runtime.yml']
+permissions:
+  contents: read
 jobs:
   native:
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

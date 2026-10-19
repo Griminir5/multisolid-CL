@@ -117,6 +117,10 @@ isolation, runtime staging, and installer/portable builds.
   A failure leaves logs beside that file and prevents packaging. The acceptance
   test covers simulations, concurrent workers, caches, reports, project archives,
   cancellation, external plugins, and paths with spaces/Unicode.
+- `example-check/run-*/result.json` records the full reacting example check,
+  including complete reporting times, finite results, solid conversion, plots,
+  and mass/heat balance limits. Its `simulation.log` and copied case outputs are
+  retained even when the check fails. A failure prevents packaging.
 - Release checks remove developer compiler, Python, Graphviz and library paths.
   Linux runs must not need an `LD_LIBRARY_PATH` workaround. A missing SUNDIALS
   library usually means an old native bundle needs rebuilding/restaging.
