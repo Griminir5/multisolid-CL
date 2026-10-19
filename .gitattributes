@@ -1,0 +1,3 @@
+# Generated help is checked byte-for-byte by tools/build_help.py.
+# Keep its LF line endings on Windows as well as Linux.
+/desktop/packed_bed_ui/assets/help/** text eol=lf
