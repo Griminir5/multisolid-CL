@@ -71,7 +71,7 @@ mechanisms:
       - Fe
       - O2
       - Fe2O3
-      source_reference: Waste iron branch 9660e5d; Aya data; Solid-State kinetic modelling
+      source_reference: Waste iron branch 9660e5d; Solid-State kinetic modelling
         (iron waste based catalyst).pdf
       notes: One-step Fe to Fe2O3 random-pore oxidation with saturating O2 availability.
     - id: fe_waste_reduction
@@ -87,7 +87,7 @@ mechanisms:
       - H2
       - Fe2O3
       - H2O
-      source_reference: Waste iron branch 9660e5d; Aya data; Solid-State kinetic modelling
+      source_reference: Waste iron branch 9660e5d; Solid-State kinetic modelling
         (iron waste based catalyst).pdf
       notes: One-step Fe2O3 to Fe reduction with fitted rational/Padé solid terms
         and a mass-transfer rate limit.
@@ -122,7 +122,7 @@ mechanisms:
         unit: dimensionless
         description: Oxidation random-pore parameter
         minimum: 0.0
-    source: Aya iron waste data; implementation from waste_iron_kinetics at 9660e5d.
+    source: Implementation from waste_iron_kinetics at 9660e5d.
     notes: Gas concentrations use gas volume; rates and solid inventories use total
       bed volume. Select either or both reactions. This family is distinct from built-in
       iron_he.

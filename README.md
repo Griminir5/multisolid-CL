@@ -17,13 +17,21 @@ command-line workflows.
 | [Model equations](docs/EQUATIONS.md) | Governing equations, assumptions, boundary conditions, source terms, and numerical treatment |
 | [GUI guide](docs/GUI-GUIDE.md) | Case editing, first run, projects, studies, plots, and Excel reports |
 | [CLI guide](docs/CLI-GUIDE.md) | Complete first case, YAML inputs, single runs, batches, outputs, and Python API |
+| [Desktop installation](docs/help/installation.md) | Installing and updating the desktop application |
 | [Build from a checkout](desktop/BUILDING.md) | Prerequisites and one-command Linux/Windows desktop builds |
 | [Linux build guide](desktop/BUILD_LINUX.md) | Linux packaging, native portability, and release checks |
 | [Windows build guide](desktop/BUILD_WINDOWS.md) | Building, validating, and packaging the desktop distribution |
 | [Plugin examples](examples/plugins/README.md) | Step-by-step creation of a species, custom property equation, and reaction |
-| [Waste iron plugin](plugins/waste_iron/README.md) | Installation, kinetics, property definitions, and provenance |
 | [Kinetics sources](packed_bed/kinetics/KINETICS_SOURCES.md) | References for the built-in reaction families |
 | [Third-party notices](THIRD_PARTY_NOTICES.md) | Dependency attribution and accompanying licences |
+
+### Plugins
+
+Documentation for official scientific plugins:
+
+| Plugin | Contents |
+| --- | --- |
+| [Waste iron](plugins/waste_iron/README.md) | Installation, kinetics, property definitions, and provenance |
 
 ## Install the desktop application
 
@@ -216,8 +224,10 @@ dependencies installed:
 python -m pip wheel --no-deps --no-build-isolation --wheel-dir build/wheels . ./desktop
 ```
 
-The desktop's offline help is generated from the guides and the short screen
-pages in `docs/help/`. Generated HTML is checked in so source installations and
+The desktop's offline help is generated from the user guides, plugin documentation,
+and short pages in `docs/help/`. Source installation and application build
+instructions remain in the repository's Markdown files and are not bundled as
+HTML. Generated HTML is checked in so source installations and
 ordinary wheels can open help without documentation build dependencies. After
 editing documentation, the help template, or the application version, rebuild
 and check it:

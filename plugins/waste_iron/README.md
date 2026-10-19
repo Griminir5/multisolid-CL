@@ -47,9 +47,9 @@ are retained:
 - `fe_waste_oxidation`: **Fe + 0.75 O2 → 0.5 Fe2O3**.
 - `fe_waste_reduction`: **Fe2O3 + 3 H2 → 2 Fe + 3 H2O**.
 
-The branch attributes the kinetics to Aya's iron-waste measurements and
-`Solid-State kinetic modelling (iron waste based catalyst).pdf`. This port
-preserves the implementation through `9660e5d`, including its later fitted and
+The branch references
+`Solid-State kinetic modelling (iron waste based catalyst).pdf` for the kinetics.
+This port preserves the implementation through `9660e5d`, including its later fitted and
 numerical changes; it is not a fresh transcription or validation of that PDF.
 
 Let `F` and `H` be Fe and Fe2O3 concentrations in mol/m³ **bed**. Gas

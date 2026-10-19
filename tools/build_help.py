@@ -25,17 +25,17 @@ GUIDES = {
     'docs/CLI-GUIDE.md': 'cli-guide.html',
     'examples/plugins/README.md': 'plugin-examples.html',
     'packed_bed/kinetics/KINETICS_SOURCES.md': 'kinetics.html',
-    'plugins/waste_iron/README.md': 'waste-iron.html',
-    'README.md': 'installation.html',
-    'desktop/BUILD_WINDOWS.md': 'windows-build.html',
-    'desktop/BUILDING.md': 'building.html',
-    'desktop/BUILD_LINUX.md': 'linux-build.html',
+    'docs/help/installation.md': 'installation.html',
     'THIRD_PARTY_NOTICES.md': 'notices.html',
+}
+PLUGINS = {
+    'plugins/waste_iron/README.md': 'waste-iron.html',
 }
 SOURCES = {
     'docs/help/getting-started.md': 'getting-started.html',
     **{f'docs/help/{name}.md': f'{name}.html' for name in SCREENS},
     **GUIDES,
+    **PLUGINS,
 }
 
 
@@ -99,7 +99,9 @@ class HelpRenderer(mistune.HTMLRenderer):
         external = bool(parts.scheme or parts.netloc)
         if not external and parts.path:
             source = posixpath.normpath(posixpath.join(posixpath.dirname(self.source), unquote(parts.path)))
-            if source in SOURCES:
+            if source == 'README.md' and parts.fragment == 'documentation':
+                url = 'index.html'
+            elif source in SOURCES:
                 url = SOURCES[source] + (f'#{parts.fragment}' if parts.fragment else '')
             else:
                 # Source listings and downloadable examples stay explicit online links.
@@ -131,6 +133,7 @@ def navigation(titles, current):
     for label, filenames in (
         ('Screen help', [f'{name}.html' for name in SCREENS]),
         ('Guides and reference', list(GUIDES.values())),
+        ('Plugins', list(PLUGINS.values())),
     ):
         opened = ' open' if current in filenames else ''
         result += f'<details{opened}><summary>{label}</summary>'
@@ -150,6 +153,8 @@ def build_pages():
         titles[filename] = renderer.headings[0][1]
 
     cards = ''.join(f'<li><a href="{name}.html">{escape(titles[name + ".html"])}</a></li>' for name in SCREENS)
+    plugins = ''.join(f'<li><a href="{filename}">{escape(titles[filename])}</a></li>'
+                      for filename in PLUGINS.values())
     pages['index.html'] = (
         '<h1 id="multisolid-help">MultiSolid help</h1>'
         '<p>Find your next step, understand the screen you are using, or explore the model and reference guides.</p>'
@@ -158,15 +163,20 @@ def build_pages():
         '<p>Press F1 in MultiSolid to open the page for the active screen or case tab.</p>'
         f'<ul class="cards">{cards}</ul>'
         '<h2 id="guides">Guides and reference</h2>'
-        '<ul><li><a href="gui-guide.html">User guide</a> — projects, cases, runs, reports, and studies.</li>'
+        '<ul><li><a href="installation.html">Install the desktop application</a> — downloads and portable installations.</li>'
+        '<li><a href="gui-guide.html">User guide</a> — projects, cases, runs, reports, and studies.</li>'
         '<li><a href="equations.html">Model equations</a> — assumptions, balances, and numerical treatment.</li>'
         '<li><a href="plugins.html">Plugin guide</a> and <a href="plugin-examples.html">authoring examples</a>.</li>'
         '<li><a href="cli-guide.html">CLI guide</a> — YAML inputs, commands, and Python API.</li>'
         '<li><a href="kinetics.html">Kinetics sources</a> — scientific references for built-in models.</li>'
         '<li><a href="gui-guide.html#troubleshooting">Troubleshooting</a> — common problems and checks.</li></ul>'
+        '<h2 id="plugins">Plugins</h2>'
+        '<p>Documentation for official scientific plugins.</p>'
+        f'<ul>{plugins}</ul>'
         '<p>These pages and their equations work offline. Links marked “online” open external resources.</p>'
     )
-    headings['index.html'] = [(2, 'Help for your screen', 'screen-help'), (2, 'Guides and reference', 'guides')]
+    headings['index.html'] = [(2, 'Help for your screen', 'screen-help'), (2, 'Guides and reference', 'guides'),
+                              (2, 'Plugins', 'plugins')]
     parsed = {name: PageParser(body) for name, body in pages.items()}
     for name, page in parsed.items():
         for link in page.links:

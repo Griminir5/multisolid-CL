@@ -72,6 +72,29 @@ The existing [Windows release guide](BUILD_WINDOWS.md) describes manual staging,
 installer qualification, and release records. Its PowerShell release wrapper
 continues to work for environments staged by hand.
 
+## Source setup and packaging checks
+
+Use the [repository installation and development instructions](../README.md#development).
+Opening projects and generating numerical previews with built-in definitions do
+not require DAETools. Python plugins may require it when their implementations
+load; both execution backends require it. From an activated source environment,
+`packed-bed-ui` and `python -m packed_bed_ui` launch the same application.
+An optional argument may be a project folder or its `project.json`.
+
+For relevant engine or packaging changes, run these from the repository root:
+
+```sh
+python -m packed_bed examples/simulations/default_case/run.yaml --validate-only
+python -m packed_bed.compiled.smoke
+python -m pip wheel --no-deps --no-build-isolation --wheel-dir build/wheels ./desktop
+```
+
+The compiled smoke check requires a working compiler and a managed native runtime
+including KLU; the scikit-SUNDAE wheel alone does not supply KLU.
+Wheel building checks desktop packaging separately. See
+[Building the Windows distribution](BUILD_WINDOWS.md) for release
+isolation, runtime staging, and installer/portable builds.
+
 ## Caches, inputs and troubleshooting
 
 - Work files and logs are under `build/release-linux/` or `build/release-windows/`.

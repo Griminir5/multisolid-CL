@@ -72,7 +72,7 @@ def reduction(context):
 
 
 def create(parameters):
-    source = 'Waste iron branch 9660e5d; Aya data; Solid-State kinetic modelling (iron waste based catalyst).pdf'
+    source = 'Waste iron branch 9660e5d; Solid-State kinetic modelling (iron waste based catalyst).pdf'
     reactions = (
         ReactionDefinition(
             id='fe_waste_oxidation', name='Waste iron oxidation by O2', phase='gas_solid',

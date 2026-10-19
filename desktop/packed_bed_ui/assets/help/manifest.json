@@ -18,11 +18,8 @@
     "cli-guide.html": "CLI guide",
     "plugin-examples.html": "Create your first plugin",
     "kinetics.html": "Bundled kinetics families",
-    "waste-iron.html": "Waste iron plugin",
-    "installation.html": "MultiSolid-CL",
-    "windows-build.html": "Building the Windows distribution",
-    "building.html": "Build MultiSolid from a checkout",
-    "linux-build.html": "Building the Linux distribution",
-    "notices.html": "Third-Party Notices"
+    "installation.html": "Install the desktop application",
+    "notices.html": "Third-Party Notices",
+    "waste-iron.html": "Waste iron plugin"
   }
 }

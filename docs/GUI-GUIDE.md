@@ -1,8 +1,9 @@
 # GUI guide
 
 This guide covers the MultiSolid desktop application: creating cases, running
-simulations, comparing results, and managing parameter studies. Installation and
-development setup are in the [repository README](../README.md). For scientific
+simulations, comparing results, and managing parameter studies. Desktop installation
+is covered in the [installation guide](help/installation.md); source setup is in
+the [repository README](../README.md). For scientific
 definitions, see the [model equations](EQUATIONS.md) and [plugin guide](PLUGINS.md).
 
 A **project** contains cases, studies, reusable definitions, and plugins. A
@@ -678,28 +679,7 @@ Code/resource approval belongs to the local computer and survives parameter edit
 Workers reconstruct authoritative definitions from plugin copies in their input
 snapshots. See the [plugin guide](PLUGINS.md) for workflows and the API.
 
-### Source setup and packaging checks
-
-Use the [repository installation and development instructions](../README.md#development).
-Opening projects and generating numerical previews with built-in definitions do
-not require DAETools. Python plugins may require it when their implementations
-load; both execution backends require it. From an activated source environment,
-`packed-bed-ui` and `python -m packed_bed_ui` launch the same application.
-An optional argument may be a project folder or its `project.json`.
-
-For relevant engine or packaging changes, run these from the repository root:
-
-```sh
-python -m packed_bed examples/simulations/default_case/run.yaml --validate-only
-python -m packed_bed.compiled.smoke
-python -m pip wheel --no-deps --no-build-isolation --wheel-dir build/wheels ./desktop
-```
-
-The compiled smoke check requires a working compiler and a managed native runtime
-including KLU; the scikit-SUNDAE wheel alone does not supply KLU.
-Wheel building checks desktop packaging separately. See
-[Building the Windows distribution](../desktop/BUILD_WINDOWS.md) for release
-isolation, runtime staging, and installer/portable builds.
+### Interface assets
 
 The interface follows system light/dark appearance and uses a shared numeric
 font. Maratype supplies the wordmark, project title, and M/S ribbon; its
