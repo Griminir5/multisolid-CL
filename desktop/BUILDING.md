@@ -10,7 +10,7 @@ from the repository root. You do not need to activate a virtual environment.
 The builder creates its own environment, installs hash-pinned Python packages,
 downloads verified DAETools and native inputs, builds the compiler/solver bundle,
 stages Graphviz, builds application wheels, freezes the desktop, tests a relocated
-copy, and packages it. Allow several GB of disk space and time for downloads and
+copy, and creates an installer and portable archive. Allow several GB of disk space and time for downloads and
 the first native build. No administrator privileges are needed after installing
 the system prerequisites.
 
@@ -34,9 +34,12 @@ required Qt library is missing; `libxcb-cursor0` is required even for headless
 X11 validation. Other distributions need equivalent packages and their own
 qualification. The automatic Graphviz collector currently supports Debian/Ubuntu.
 
-The finished download is under `dist/linux/releases/`. Extract the entire
-`MultiSolid-<version>-linux-x64-portable.tar.gz`, then run `MultiSolid/MultiSolid`.
-The archive includes Python, DAETools, Qt, Graphviz, the compiler and solver
+The finished downloads are under `dist/linux/releases/`: a
+`MultiSolid-<version>-linux-x64-setup.deb` installer and a
+`MultiSolid-<version>-linux-x64-portable.tar.gz` archive, with `SHA256SUMS.txt`.
+The installer adds `/opt/multisolid`, an applications-menu entry, and the
+`multisolid` command. Building it uses `dpkg-deb` without root privileges.
+Both downloads include Python, DAETools, Qt, Graphviz, the compiler and solver
 libraries. See [Linux details](BUILD_LINUX.md) for compatibility and manual steps.
 
 ## Windows
@@ -60,9 +63,12 @@ not MSYS2 Python. Keep MSYS2's package licence files installed: staging includes
 them with the native runtime. DAETools, Zig, and the pinned Windows Graphviz
 archives are downloaded automatically.
 
-The finished download is `dist/windows/releases/MultiSolid-<version>-windows-x64-portable.zip`.
-Extract it completely, then run `MultiSolid/MultiSolid.exe`. To also create the
-per-user installer, install Inno Setup 6.7.3 and add its compiler:
+The finished downloads under `dist/windows/releases/` are
+`MultiSolid-<version>-windows-x64-setup.exe` and
+`MultiSolid-<version>-windows-x64-portable.zip`, with `SHA256SUMS.txt`.
+The builder downloads and verifies Inno Setup 6.7.3 and prepares its compiler
+in portable mode inside the build workspace. Installer generation is automatic.
+To use an existing compiler instead, supply its path:
 
 ```powershell
 py -3.11 tools/build_desktop.py --iscc 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
@@ -71,6 +77,22 @@ py -3.11 tools/build_desktop.py --iscc 'C:\Program Files (x86)\Inno Setup 6\ISCC
 The existing [Windows release guide](BUILD_WINDOWS.md) describes manual staging,
 installer qualification, and release records. Its PowerShell release wrapper
 continues to work for environments staged by hand.
+
+## GitHub downloads and releases
+
+Every push runs **Check application** on Linux and Windows. Each platform's
+artifact contains its installer, portable archive, and checksums. The workflow
+also installs, reinstalls, launches, and uninstalls each installer on a fresh
+runner, checking that the external simulation project survives removal. The
+Windows job uses Server 2025 so the installer can enforce its Windows 11-era
+minimum kernel version; this still requires separate Windows 11 qualification.
+
+Pushing a version tag such as `v1.0.0` runs the same checks, then prepares a
+**draft GitHub Release** with all four application downloads and one combined
+`SHA256SUMS.txt`. The tag must match the package version. Open **Releases**,
+review the draft, and publish it when ready. A failed build or installer check
+prevents draft creation. Rerunning a tag can refresh a draft; published releases
+are never overwritten by this workflow.
 
 ## Source setup and packaging checks
 
@@ -121,6 +143,9 @@ isolation, runtime staging, and installer/portable builds.
   including complete reporting times, finite results, solid conversion, plots,
   and mass/heat balance limits. Its `simulation.log` and copied case outputs are
   retained even when the check fails. A failure prevents packaging.
+- CI's `installer-check/validation.json` records the exact download hashes,
+  portable extraction, installed desktop checks, reinstall, and uninstall.
+  Its logs are retained in the check-results artifact even after failure.
 - Release checks remove developer compiler, Python, Graphviz and library paths.
   Linux runs must not need an `LD_LIBRARY_PATH` workaround. A missing SUNDIALS
   library usually means an old native bundle needs rebuilding/restaging.

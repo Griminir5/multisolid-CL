@@ -50,9 +50,28 @@
 </tbody>
 </table>
 <h2 id="linux">Linux</h2>
-<p>The Linux distribution targets <strong>Ubuntu 24.04 x86_64</strong>. Extract the entire
-<code>MultiSolid-&lt;version&gt;-linux-x64-portable.tar.gz</code> into a new folder, then run
-<code>MultiSolid/MultiSolid</code>. Keep its files and subfolders together.</p>
+<p>The Linux distribution targets <strong>Ubuntu 24.04 x86_64</strong>. Choose one release asset:</p>
+<table>
+<thead>
+<tr>
+  <th>Asset</th>
+  <th>Installation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>MultiSolid-&lt;version&gt;-linux-x64-setup.deb</code></td>
+  <td>Run <code>sudo apt install ./MultiSolid-&lt;version&gt;-linux-x64-setup.deb</code>, then open MultiSolid from the applications menu.</td>
+</tr>
+<tr>
+  <td><code>MultiSolid-&lt;version&gt;-linux-x64-portable.tar.gz</code></td>
+  <td>Extract the entire archive, then run <code>./MultiSolid/MultiSolid</code>. Keep its files and subfolders together.</td>
+</tr>
+</tbody>
+</table>
+<p>The installer adds the <code>multisolid</code> command and installs under <code>/opt/multisolid</code>.
+Remove it with <code>sudo apt remove multisolid</code>. Other Linux distributions are not
+qualified by the Ubuntu build.</p>
 <h2 id="projects-and-updates">Projects and updates</h2>
 <p>The desktop distributions include Python, DAETools, Graphviz, and the compiler
 and libraries needed for Compiled execution. You do not need to install these

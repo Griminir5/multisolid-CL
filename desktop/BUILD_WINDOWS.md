@@ -1,6 +1,6 @@
 # Building the Windows distribution
 
-For a checkout-to-portable-ZIP build, use the prerequisites and single command
+For a checkout-to-installer-and-portable-ZIP build, use the prerequisites and single command
 in [Build MultiSolid from a checkout](BUILDING.md). The instructions below are
 the manual release procedure and remain available for separately staged inputs.
 
@@ -271,6 +271,18 @@ stored outside the application survives. Each checker invocation writes
 `build/release/portable-check/`. Archive these records and their logs alongside
 the final artifacts and `SHA256SUMS.txt`; packaging does not copy the validation
 reports into `dist/releases/`. Clean-machine qualification is described below.
+
+The automatic workflow performs these download/installer checks with:
+
+```powershell
+& $py tools/check_installers.py --downloads dist/windows/releases --bundle dist/windows/MultiSolid --output build/release/installer-check
+```
+
+Run this only in a clean Windows test account. It refuses an existing MultiSolid
+installation, uses a temporary installation directory and distinct Start menu
+group, verifies the installed executable in place, and uninstalls afterwards.
+It also checks the portable ZIP's inventory and launcher. Retained logs and
+download hashes are in `installer-check/validation.json` and the adjacent logs.
 
 The installer uses a stable application ID and version/build-specific application
 directories so upgrades cannot mix DLL versions. Shortcuts point to the current

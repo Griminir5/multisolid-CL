@@ -14,9 +14,16 @@ The Windows distribution targets **Windows 11 x64**. Choose one release asset:
 
 ## Linux
 
-The Linux distribution targets **Ubuntu 24.04 x86_64**. Extract the entire
-`MultiSolid-<version>-linux-x64-portable.tar.gz` into a new folder, then run
-`MultiSolid/MultiSolid`. Keep its files and subfolders together.
+The Linux distribution targets **Ubuntu 24.04 x86_64**. Choose one release asset:
+
+| Asset | Installation |
+| --- | --- |
+| `MultiSolid-<version>-linux-x64-setup.deb` | Run `sudo apt install ./MultiSolid-<version>-linux-x64-setup.deb`, then open MultiSolid from the applications menu. |
+| `MultiSolid-<version>-linux-x64-portable.tar.gz` | Extract the entire archive, then run `./MultiSolid/MultiSolid`. Keep its files and subfolders together. |
+
+The installer adds the `multisolid` command and installs under `/opt/multisolid`.
+Remove it with `sudo apt remove multisolid`. Other Linux distributions are not
+qualified by the Ubuntu build.
 
 ## Projects and updates
 

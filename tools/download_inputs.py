@@ -8,7 +8,8 @@ from urllib.request import urlopen
 import zipfile
 
 
-def fetch(name, spec, directory):
+def download(name, spec, directory):
+    """Return a verified input, including non-archive tools such as installers."""
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     archive = directory / name
@@ -22,6 +23,13 @@ def fetch(name, spec, directory):
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     if digest != spec["sha256"]:
         raise ValueError(f"Checksum mismatch: {archive}. Remove it and download the pinned input again.")
+    return archive
+
+
+def fetch(name, spec, directory):
+    archive = download(name, spec, directory)
+    directory = archive.parent
+    digest = spec["sha256"]
     destination = directory / (name + ".extracted")
     marker = destination / ".archive-sha256"
     if marker.is_file() and marker.read_text() == digest:

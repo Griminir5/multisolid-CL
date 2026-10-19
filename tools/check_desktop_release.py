@@ -25,7 +25,7 @@ def verify_inventory(bundle):
             raise ValueError(f"Bundle inventory mismatch: {name}")
 
 
-def check(bundle, destination, *, qt_platform=None):
+def check(bundle, destination, *, qt_platform=None, relocate=True):
     bundle, destination = Path(bundle).resolve(), Path(destination).resolve()
     verify_inventory(bundle)
     destination.mkdir(parents=True, exist_ok=False)
@@ -54,11 +54,13 @@ def check(bundle, destination, *, qt_platform=None):
     environment["MULTISOLID_PLUGIN_APPROVALS"] = str(destination / "approvals.json")
     record = {"bundle": str(bundle), "executable_sha256": sha256(bundle / name),
               "inventory_sha256": sha256(bundle / "bundle-files.json"),
-              "environment": "Relocated; no developer compiler, Python, Graphviz or library search paths",
+              "environment": ("Relocated" if relocate else "Installed in place") +
+                             "; no developer compiler, Python, Graphviz or library search paths",
               "qt_platform": qt_platform or "desktop default", "clean_vm": False, "passed": False}
-    relocated = destination / "Relocated application α" / "MultiSolid"
+    relocated = destination / "Relocated application α" / "MultiSolid" if relocate else bundle
     try:
-        shutil.copytree(bundle, relocated, symlinks=True)
+        if relocate:
+            shutil.copytree(bundle, relocated, symlinks=True)
         executable = relocated / name
         diagnostic_script = destination / "diagnostics.py"
         shutil.copy2(Path(__file__).with_name("release_check.py"), diagnostic_script)
@@ -76,7 +78,8 @@ def check(bundle, destination, *, qt_platform=None):
                            env=environment, stdout=log, stderr=log, timeout=120, check=True)
         verify_inventory(relocated)
         verify_inventory(bundle)
-        record.update(passed=True, checks=["relocated application and unchanged inventory", *result["checks"],
+        record.update(passed=True, checks=[("relocated" if relocate else "installed") +
+                                          " application and unchanged inventory", *result["checks"],
                                           "external Python plugin in a separate process"])
     finally:
         (destination / "validation.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -87,10 +90,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--in-place", action="store_true", help="Validate the actual installed location without copying it")
     parser.add_argument("--qt-platform", choices=("xcb", "wayland", "offscreen"),
                         help="Use xcb under xvfb-run for headless Linux GUI validation")
     args = parser.parse_args()
-    print(check(args.bundle, args.output, qt_platform=args.qt_platform))
+    print(check(args.bundle, args.output, qt_platform=args.qt_platform, relocate=not args.in_place))
 
 
 if __name__ == "__main__":

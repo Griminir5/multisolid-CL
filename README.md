@@ -1,10 +1,70 @@
 # MultiSolid-CL
 
-MultiSolid-CL simulates gas flow, heat transfer, as well as gas-gas and gas-solid reactions in packed-bed
-reactors. It provides a Python simulation engine, a command-line interface for
-YAML-defined cases and batches, and a desktop application for projects, parameter studies,
-plots, and Excel reports. Simulations use DAETools, with an optional compiled
-SUNDIALS backend. Run data are saved as NetCDF with a JSON provenance manifest.
+**MultiSolid-CL simulates the behaviour of reactive packed beds, coupling gas
+flow, heat transfer, and chemical reactions.** Run simulations (cases) through
+the desktop application or command line, and compare the effects of solid
+loadings, gas feeds, and operating conditions with parameter studies. Add your
+own species and reactions to extend the chemistry. Share collections of
+simulations (projects) with their case configurations and chemistry extensions
+intact.
+
+| [I want to simulate a reactor](#i-want-to-simulate-a-reactor) | [I want to develop or extend the software](#i-want-to-develop-or-extend-the-software) |
+| --- | --- |
+| Download the app, open the example, run it, change a parameter, and compare results. | Install from source, author plugins, and explore the equations and implementation. |
+
+![MultiSolid desktop application showing a nickel-bed operating program in Feed mode with flow, temperature, composition, and pressure previews](docs/images/reactor-workflow.png)
+
+*Program a nickel-based reactive bed in Feed mode and preview how conditions
+change over time. This view combines the example's inlet channels into feed steps,
+shown after a Compiled/Band run with a warm cache.*
+
+## I want to simulate a reactor
+
+1. **Download and launch MultiSolid.** Follow the
+   [desktop installation instructions](#install-the-desktop-application).
+   The first public desktop release is pending; until then, use the source
+   installation or build instructions linked there.
+2. **Open the supplied project.** Download
+   [first-reactor.msproject](examples/projects/first-reactor.msproject)
+   using GitHub's **Download raw file** button. On the welcome screen, choose
+   **Import archived project**, select the file, and choose a local project
+   folder outside the application directory. It contains a ready-to-run
+   **Baseline** case, using the supplied nickel chemistry and gas-feed program.
+3. **Run it.** Choose **Run** beside **Baseline**. The first Compiled run may
+   take several minutes to build its model. After **Succeeded**, open the case
+   and choose **General → Requested plots → Outlet composition → Show** to see
+   the inlet and outlet gas compositions over time.
+4. **Change one operating parameter.** Return to the project, **Duplicate**
+   Baseline, and name the copy **Lower flow**. In the copy's **Program** tab,
+   change the **Inlet flow** first ramp target (step **0**) from **76.2568** to
+   **60 mol/s**. Return to the project and run the copy. Duplicating preserves
+   the baseline's results; rerunning the original would replace them.
+5. **Compare the results.** Open the **Outlet composition** plot for each case
+   and compare the curves. For a table or Excel export, choose **Results…** on
+   the project screen and select both cases; the
+   [comparison guide](docs/GUI-GUIDE.md#compare-cases-in-project-results)
+   explains how to arrange the recorded quantities side by side.
+
+Continue with the [GUI guide](docs/GUI-GUIDE.md) or set up a
+[parameter study](docs/GUI-GUIDE.md#parameter-studies) to vary several inputs.
+For terminal workflows, use the [CLI guide](docs/CLI-GUIDE.md).
+
+## I want to develop or extend the software
+
+- **Install from source:** follow the
+  [source installation](#install-the-full-repository-from-source) for the engine,
+  CLI, and desktop application in one editable environment.
+- **Add chemistry:** work through the [plugin tutorials](examples/plugins/README.md)
+  to add species, property equations, and reaction rates, then use the
+  [plugin reference](docs/PLUGINS.md) to package and share them.
+- **Understand the model:** read the [equations and assumptions](docs/EQUATIONS.md),
+  including the [equation-to-code map](docs/EQUATIONS.md#configuration-and-implementation-map)
+  and [kinetics sources](packed_bed/kinetics/KINETICS_SOURCES.md).
+- **Change the implementation:** use the [repository map](#repository-structure)
+  and [development guide](#development) for code entry points and validation,
+  or [build a desktop distribution](desktop/BUILDING.md).
+
+---
 
 ## Documentation
 
@@ -172,6 +232,7 @@ output directories; use separate directories to retain earlier results.
 | [`desktop/packed_bed_ui/`](desktop/packed_bed_ui/) | PyQt6 application, project storage, editors, studies, and Excel export |
 | [`docs/`](docs/) | Model equations and the plugin, GUI, and CLI guides |
 | [`examples/simulations/`](examples/simulations/) | Complete single-case and batch YAML inputs |
+| [`examples/projects/`](examples/projects/) | Importable desktop project for the first-reactor walkthrough |
 | [`examples/plugins/`](examples/plugins/) | Illustrative plugin packages |
 | [`plugins/`](plugins/) | Additional scientific plugins |
 | [`tools/`](tools/) | Runtime staging, wheel builds, desktop freezing, and release checks |
@@ -193,6 +254,10 @@ Useful starting points are [configuration and validation](packed_bed/config/),
 and [reports](packed_bed/reports.py). Desktop navigation starts in
 [window.py](desktop/packed_bed_ui/window.py); project persistence is in
 [project.py](desktop/packed_bed_ui/project.py).
+
+Regenerate the README's example project from the supplied single-case inputs
+with `python tools/create_example_project.py`. The archive contains inputs only;
+the script also checks that it can be imported and resolved.
 
 Use [scientific plugins](docs/PLUGINS.md) for new species, property correlations,
 or reaction families that can be distributed independently. Changes to built-in

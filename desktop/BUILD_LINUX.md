@@ -65,3 +65,29 @@ that no bundled files changed. Packaging requires this passing record and checks
 the inventory again. The tar archive preserves permissions and symlinks. Test
 the extracted archive with the same validator before publishing, including a
 clean Linux machine or VM and a real graphical desktop.
+
+## Installer and portable downloads
+
+Packaging produces `MultiSolid-<version>-linux-x64-setup.deb` and
+`MultiSolid-<version>-linux-x64-portable.tar.gz`, with checksums for both. The
+`.deb` declares its measured minimum glibc requirement, installs the application
+under `/opt/multisolid`, and adds `/usr/bin/multisolid`, its icon, and an
+applications-menu entry. It contains the same runtime as the portable archive.
+
+Install or update it with `sudo apt install ./MultiSolid-<version>-linux-x64-setup.deb`.
+Remove it with `sudo apt remove multisolid`. Save projects outside the application
+directory; neither installation nor removal owns those project folders.
+
+The GitHub workflow tests the real package manager on its disposable Ubuntu
+runner. To repeat this on a **clean test machine** with passwordless sudo:
+
+```sh
+xvfb-run -a python tools/check_installers.py --downloads dist/linux/releases --bundle dist/linux/MultiSolid --output build/linux-installer-check --system --qt-platform xcb
+```
+
+Install `desktop-file-utils` for the desktop-entry check. This command refuses
+an existing MultiSolid installation, installs and reinstalls the `.deb`, runs
+the desktop acceptance checks from its actual system location, then removes it
+and verifies that the external simulation project survives. It also extracts
+and checks the portable archive. Logs and download hashes are retained under
+the output directory. Building packages itself needs no sudo.

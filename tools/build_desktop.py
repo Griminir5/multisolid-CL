@@ -19,7 +19,7 @@ def main():
     parser.add_argument("--daetools", type=Path, help="Use a local DAETools 2.6.0 wheel or extracted release instead of downloading")
     parser.add_argument("--compiled-bundle", type=Path, help="Use an existing validated native bundle")
     parser.add_argument("--graphviz-bundle", type=Path, help="Use an existing staged Graphviz bundle")
-    parser.add_argument("--iscc", type=Path, help="Windows: also create an installer using this Inno Setup compiler")
+    parser.add_argument("--iscc", type=Path, help="Windows: use this Inno Setup compiler instead of preparing the pinned version")
     parser.add_argument("--headless", action="store_true", help="Linux: validate the real X11 backend under xvfb-run")
     parser.add_argument("--jobs", type=int, default=4)
     args = parser.parse_args()
@@ -42,13 +42,22 @@ def main():
     if args.headless:
         required.append("xauth")
     if system == "linux":
-        required += ["readelf", "ldd"] + ([] if args.graphviz_bundle else ["neato", "dpkg-query"])
+        required += ["readelf", "ldd", "dpkg-deb"] + ([] if args.graphviz_bundle else ["neato", "dpkg-query"])
     missing = [name for name in required if not shutil.which(name)]
     if missing:
         parser.error("Missing build tools: " + ", ".join(missing) + ". See desktop/BUILDING.md for prerequisites.")
     work = (args.work or ROOT / f"build/release-{system}").resolve()
     output = (args.output or ROOT / f"dist/{system}").resolve()
     work.mkdir(parents=True, exist_ok=True)
+    iscc = None
+    if system == "windows":
+        if args.iscc:
+            iscc = args.iscc.resolve()
+            if not iscc.is_file():
+                parser.error(f"Inno Setup compiler not found: {iscc}")
+        else:
+            from prepare_inno_setup import prepare
+            iscc = prepare(work)
     environment = os.environ.copy()
     for key in ("PYTHONPATH", "PYTHONHOME", "MULTISOLID_COMPILED_BUNDLE", "MULTISOLID_GRAPHVIZ"):
         environment.pop(key, None)
@@ -138,8 +147,8 @@ def main():
     run(*command)
     packaging = [ROOT / f"tools/package_{system}.py", "--bundle", output / "MultiSolid", "--output", output / "releases",
                  "--validation", validation / "validation.json"]
-    if system == "windows" and args.iscc:
-        packaging += ["--iscc", args.iscc.resolve()]
+    if system == "windows":
+        packaging += ["--iscc", iscc]
     py(*packaging)
     print(f"Finished. Downloads: {output / 'releases'}\nValidation: {validation / 'validation.json'}")
 

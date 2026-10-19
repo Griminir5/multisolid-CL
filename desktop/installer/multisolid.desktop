@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=MultiSolid
+Comment=Packed-bed reactor simulations
+Exec=/usr/bin/multisolid %f
+Icon=multisolid
+Terminal=false
+Categories=Science;
+StartupWMClass=MultiSolid
