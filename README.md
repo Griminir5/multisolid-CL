@@ -116,10 +116,10 @@ python -m pip install .
 ```
 
 Follow the DAETools installation instructions for its native dependencies. The
-distribution must include the solver adapters you intend to use; the supplied
-single-case example uses SuperLU. Compiled execution also uses DAETools to build
-the model and solve its initial conditions. Return to the MultiSolid repository
-root after installation.
+distribution must include the solver adapters you intend to use. The supplied
+single-case example uses the desktop's Compiled/Band preset, which requires
+DAETools with SuperLU to build the model and solve its initial conditions.
+Return to the MultiSolid repository root after installation.
 
 ### 4. Install the external tools
 

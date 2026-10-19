@@ -20,13 +20,20 @@ model:
   ambient_temperature_k: 873.15
   heat_transfer_coefficient_w_per_m2_k: 0.0
 solver:
-  backend: daetools
-  name: superlu
+  backend: compiled
+  name: band
   threads: 1
-  relative_tolerance: 1.0e-5
-  suppress_algebraic_errors: true
-  max_nonlinear_iterations: 12
-  nonlinear_convergence_coefficient: 1.0
+  relative_tolerance: 1.0e-7
+  concentration_absolute_tolerance: 1.0e-11
+  suppress_algebraic_errors: false
+  max_nonlinear_iterations: 20
+  nonlinear_convergence_coefficient: 0.1
+  maximum_order: 3
+  scale_residuals: true
+  step_growth_threshold: 1.25
+  nonlinear_refresh_interval: 4
+  vector_exponentials: false
+  band_reciprocals: false
 outputs:
   directory: output
   artifacts_directory: output/artifacts
