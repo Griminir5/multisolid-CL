@@ -17,7 +17,9 @@ def main():
     parser.add_argument("--work", type=Path, help="Build cache and isolated environment (default: build/release-PLATFORM)")
     parser.add_argument("--output", type=Path, help="Distribution folder (default: dist/PLATFORM)")
     parser.add_argument("--daetools", type=Path, help="Use a local DAETools 2.6.0 wheel or extracted release instead of downloading")
-    parser.add_argument("--compiled-bundle", type=Path, help="Use an existing validated native bundle")
+    native = parser.add_mutually_exclusive_group()
+    native.add_argument("--compiled-bundle", type=Path, help="Use an existing validated native bundle")
+    native.add_argument("--native-runtime", type=Path, help="Restage an existing native install prefix with the current engine and rerun its smoke tests")
     parser.add_argument("--graphviz-bundle", type=Path, help="Use an existing staged Graphviz bundle")
     parser.add_argument("--iscc", type=Path, help="Windows: use this Inno Setup compiler instead of preparing the pinned version")
     parser.add_argument("--headless", action="store_true", help="Linux: validate the real X11 backend under xvfb-run")
@@ -35,9 +37,10 @@ def main():
         parser.error("--headless requires Linux with xvfb and xauth installed.")
     if system == "linux" and not args.headless and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         parser.error("No graphical session detected. Install xvfb/xauth and use --headless.")
-    required = ["cmake", "gcc", "g++"] if not args.compiled_bundle else []
+    build_native = not (args.compiled_bundle or args.native_runtime)
+    required = ["cmake", "gcc", "g++"] if build_native else []
     required.append("git")
-    if system == "windows" and not args.compiled_bundle:
+    if system == "windows" and build_native:
         required.append("ninja")
     if args.headless:
         required.append("xauth")
@@ -110,12 +113,19 @@ def main():
        "[create_linear_solver(name) for name in DESKTOP_SOLVERS['daetools']]")
     compiled = args.compiled_bundle.resolve() if args.compiled_bundle else work / "vendor/compiled"
     if not args.compiled_bundle:
-        py(ROOT / "tools/build_compiled_runtime.py", "--work", work / "native", "--prefix", work / "native-prefix", "--jobs", args.jobs)
-        from build_compiled_runtime import fetch as fetch_native
+        runtime = args.native_runtime.resolve() if args.native_runtime else work / "native-prefix"
+        from build_compiled_runtime import SOURCES, fetch as fetch_native
+        if args.native_runtime:
+            if json.loads((runtime / "sources.json").read_text()) != SOURCES:
+                raise ValueError("The cached native runtime does not match the pinned sources; rebuild it.")
+            print(f"Reusing native libraries: {runtime}; restaging and testing the current engine.", flush=True)
+        else:
+            py(ROOT / "tools/build_compiled_runtime.py", "--work", work / "native", "--prefix", runtime, "--jobs", args.jobs)
+        (work / "native").mkdir(parents=True, exist_ok=True)
         compiler = fetch_native("zig_" + system, work / "native")
         if compiled.exists():
             shutil.rmtree(compiled)
-        py(ROOT / "tools/bundle_compiled.py", "--compiler", compiler, "--runtime", work / "native-prefix", "--destination", compiled)
+        py(ROOT / "tools/bundle_compiled.py", "--compiler", compiler, "--runtime", runtime, "--destination", compiled)
     # Exercise the installed engine with the shipped reacting example before
     # freezing or publishing any application archive. Keep each run's evidence.
     py(ROOT / "tools/check_example.py", "--output", work / "example-check", "--compiled-bundle", compiled)

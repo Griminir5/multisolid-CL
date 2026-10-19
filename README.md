@@ -15,8 +15,7 @@ intact.
 ![MultiSolid desktop application showing a nickel-bed operating program in Feed mode with flow, temperature, composition, and pressure previews](docs/images/reactor-workflow.png)
 
 *Program a nickel-based reactive bed in Feed mode and preview how conditions
-change over time. This view combines the example's inlet channels into feed steps,
-shown after a Compiled/Band run with a warm cache.*
+change over time. This view combines the example's inlet channels into feed steps.*
 
 ## I want to simulate a reactor
 

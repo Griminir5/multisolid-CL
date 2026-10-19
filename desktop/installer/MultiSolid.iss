@@ -43,7 +43,7 @@ Source: "{#BundleDir}\*"; DestDir: "{app}\app\{#VersionFolder}"; Flags: ignoreve
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
 [Icons]
-Name: "{autoprograms}\MultiSolid"; Filename: "{app}\app\{#VersionFolder}\MultiSolid.exe"; WorkingDir: "{app}\app\{#VersionFolder}"
+Name: "{group}\MultiSolid"; Filename: "{app}\app\{#VersionFolder}\MultiSolid.exe"; WorkingDir: "{app}\app\{#VersionFolder}"
 Name: "{autodesktop}\MultiSolid"; Filename: "{app}\app\{#VersionFolder}\MultiSolid.exe"; Tasks: desktopicon
 
 [Run]

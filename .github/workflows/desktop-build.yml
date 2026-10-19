@@ -42,6 +42,31 @@ jobs:
         run: python -m unittest discover -s tests -p test_help_build.py -v
       - name: Check offline help is up to date
         run: python tools/build_help.py --check
+      - name: Restore downloaded build inputs
+        id: inputs-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/release-${{ matrix.platform }}/pip-cache
+            build/release-${{ matrix.platform }}/downloads
+            build/release-${{ matrix.platform }}/native/*.tar
+            build/release-${{ matrix.platform }}/native/*.zip
+          key: inputs-v1-${{ matrix.os }}-${{ matrix.python }}-${{ hashFiles(format('tools/{0}-requirements.lock', matrix.platform), 'tools/help-requirements.txt', 'tools/desktop-inputs.json', 'tools/windows-release-inputs.json', 'tools/compiled_sources.json', 'tools/download_inputs.py') }}
+      - name: Check Windows installer recipe before building the application
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import sys
+          import unittest
+          sys.path.insert(0, 'tools')
+          from prepare_inno_setup import prepare
+          os.environ['MULTISOLID_TEST_ISCC'] = str(prepare(Path('build/release-windows')))
+          os.environ['MULTISOLID_INSTALLER_TEST_OUTPUT'] = 'build/release-windows/installer-smoke'
+          suite = unittest.defaultTestLoader.discover('tests', pattern='test_windows_installer.py')
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(not result.wasSuccessful())
       - name: Install Linux build tools
         if: runner.os == 'Linux'
         run: |
@@ -53,13 +78,61 @@ jobs:
         with:
           msystem: UCRT64
           install: git mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libgomp mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
+      - name: Identify the Windows native toolchain
+        if: runner.os == 'Windows'
+        id: windows-toolchain
+        shell: msys2 {0}
+        run: |
+          "$(cygpath -u "$pythonLocation")/python.exe" - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import subprocess
+          packages = subprocess.check_output(['pacman', '-Q'])
+          Path('build/release-windows/toolchain-packages.txt').write_bytes(packages)
+          identity = os.environ['ImageOS'].encode() + os.environ['ImageVersion'].encode() + packages
+          with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+              output.write('fingerprint=' + hashlib.sha256(identity).hexdigest() + '\n')
+          PY
+      - name: Restore Windows native libraries
+        if: runner.os == 'Windows'
+        id: native-cache
+        uses: actions/cache/restore@v4
+        with:
+          # Cache only the dependency install prefix. Restage and smoke-test it
+          # with the current engine on every run; never cache application wheels.
+          path: build/release-windows/native-prefix
+          key: native-v1-${{ matrix.os }}-${{ runner.arch }}-${{ steps.windows-toolchain.outputs.fingerprint }}-${{ hashFiles('tools/compiled_sources.json', 'tools/build_compiled_runtime.py') }}
       - name: Build Linux, run the example, and check the desktop
         if: runner.os == 'Linux'
         run: python -u tools/build_desktop.py --headless
       - name: Build Windows, run the example, and check the desktop
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: '"$(cygpath -u "$pythonLocation")/python.exe" -u tools/build_desktop.py'
+        env:
+          NATIVE_CACHE_HIT: ${{ steps.native-cache.outputs.cache-hit }}
+        run: |
+          args=()
+          if [ "$NATIVE_CACHE_HIT" = true ]; then
+            args+=(--native-runtime build/release-windows/native-prefix)
+          fi
+          "$(cygpath -u "$pythonLocation")/python.exe" -u tools/build_desktop.py "${args[@]}"
+      - name: Save Windows native libraries
+        if: runner.os == 'Windows' && steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/release-windows/native-prefix
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
+      - name: Save downloaded build inputs
+        if: steps.inputs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/release-${{ matrix.platform }}/pip-cache
+            build/release-${{ matrix.platform }}/downloads
+            build/release-${{ matrix.platform }}/native/*.tar
+            build/release-${{ matrix.platform }}/native/*.zip
+          key: ${{ steps.inputs-cache.outputs.cache-primary-key }}
       - name: Check Linux installer, portable archive, and uninstall
         if: runner.os == 'Linux'
         run: xvfb-run -a build/release-linux/venv/bin/python tools/check_installers.py --downloads dist/linux/releases --bundle dist/linux/MultiSolid --output build/release-linux/installer-check --system --qt-platform xcb
@@ -90,6 +163,8 @@ jobs:
             build/release-${{ matrix.platform }}/installer-check/*.log
             build/release-${{ matrix.platform }}/installer-check/installed-check/**/*.json
             build/release-${{ matrix.platform }}/installer-check/installed-check/**/*.log
+            build/release-${{ matrix.platform }}/installer-smoke/*.log
+            build/release-${{ matrix.platform }}/toolchain-packages.txt
             build/release-${{ matrix.platform }}/inno-setup.log
           retention-days: 14
       - name: Explain the result

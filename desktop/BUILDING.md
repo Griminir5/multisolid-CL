@@ -87,6 +87,21 @@ runner, checking that the external simulation project survives removal. The
 Windows job uses Server 2025 so the installer can enforce its Windows 11-era
 minimum kernel version; this still requires separate Windows 11 qualification.
 
+CI reuses hash-checked downloads and pip's package cache. Windows also caches
+the native library install prefix, keyed by the runner image, installed MSYS2
+package versions, pinned native sources, and native build script. A matching
+cache skips rebuilding those libraries; the current application is still built,
+the runtime is restaged, and all smoke, simulation, desktop and installer checks
+run again. Caches are saved before the final installer checks so a failure there
+does not discard the expensive dependency build. The first run after an input
+or toolchain change still needs a full native build.
+
+A small Windows installer test runs before the application build. It compiles
+the actual Inno Setup recipe with a tiny payload and checks installation,
+reinstallation, the custom Start menu folder, and removal. It catches installer
+registration errors early; the final downloads still receive full acceptance
+checks. Its logs are under `installer-smoke/` in the check-results artifact.
+
 Pushing a version tag such as `v1.0.0` runs the same checks, then prepares a
 **draft GitHub Release** with all four application downloads and one combined
 `SHA256SUMS.txt`. The tag must match the package version. Open **Releases**,
@@ -129,6 +144,11 @@ isolation, runtime staging, and installer/portable builds.
   [DAETools downloads](https://daetools.sourceforge.io/downloads.html).
 - `--compiled-bundle PATH` and `--graphviz-bundle PATH` reuse prepared bundles.
   The freezer still checks Linux runtime relocation and GUI dependencies.
+- `--native-runtime PATH` reuses the install prefix from
+  `tools/build_compiled_runtime.py`, then restages it with the current engine
+  and reruns the native smoke tests. Use the matching build toolchain and pinned
+  sources. This is an alternative to `--compiled-bundle`, used by Windows CI
+  when its native library cache matches exactly.
 - Downloads are cached and hash checked. For a checksum mismatch, remove the
   named archive and retry; do not bypass verification. A failed or interrupted
   build can be rerun. Application wheels are rebuilt each time.

@@ -64,8 +64,12 @@ def check_windows(installer, destination, release):
                  f"/DIR={installation}", f"/GROUP={group}", "/TASKS=",
                  f"/LOG={destination / (attempt + '.log')}"], destination / "installer-process.log")
             verify_inventory(bundle)
-            if not shortcut.is_file() or not windows_installed():
-                raise ValueError("The installer did not register its Start menu shortcut and uninstaller.")
+            if not shortcut.is_file():
+                raise ValueError(f"The installer did not create its Start menu shortcut: {shortcut}")
+            if not windows_installed():
+                raise ValueError("The installer did not register its uninstaller for the current user.")
+            if not uninstaller.is_file():
+                raise ValueError(f"The installer did not create its uninstaller: {uninstaller}")
             if json.loads((bundle / "release.json").read_text(encoding="utf-8")) != release:
                 raise ValueError("The installer contains another application build.")
         check_desktop(bundle, destination / "installed-check", relocate=False)
