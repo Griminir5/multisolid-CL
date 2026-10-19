@@ -23,7 +23,9 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
 MinVersion=10.0.22000
-DisableProgramGroupPage=yes
+; Keep /GROUP effective for installation and reinstallation. Setting this to
+; yes ignores /GROUP; /VERYSILENT already hides the wizard during CI checks.
+DisableProgramGroupPage=no
 LicenseFile={#BundleDir}\LICENSE.txt
 OutputBaseFilename=MultiSolid-{#AppVersion}-windows-x64-setup
 Compression=lzma2/normal
