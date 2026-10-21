@@ -1,25 +1,40 @@
 cff-version: 1.2.0
-message: >-
-  If you use MultiSolid-CL in your research, please cite the software and
-  record the version used. Also cite the scientific sources for the kinetics
-  and property data used in your simulations.
-type: software
 title: MultiSolid-CL
+message: >-
+  If you used MultiSolid-CL simulations in your research,
+  please cite the software and record the version used.
+  Please also cite the sources for the kinetics and property
+  data used in your simulations.
+type: software
 authors:
-  - name: MultiSolid-CL contributors
-version: 1.0.0
-repository-code: https://github.com/Griminir5/multisolid-CL
-url: https://github.com/Griminir5/multisolid-CL
-license: GPL-3.0-only
+  - given-names: Vladislav
+    family-names: Zurba
+    email: vladislav.zurba@postgrad.manchester.ac.uk
+    affiliation: >-
+      Department of Chemical Engineering, School of
+      Engineering, University of Manchester
+    orcid: 'https://orcid.org/0009-0009-3192-6475'
+  - given-names: Tara
+    family-names: Torabi
+    email: tara.torabi@postgrad.manchester.ac.uk
+    affiliation: >-
+      Department of Chemical Engineering, School of
+      Engineering, University of Manchester
+    orcid: 'https://orcid.org/0009-0000-3707-1521'
+repository-code: 'https://github.com/Griminir5/multisolid-CL'
+url: 'https://github.com/Griminir5/multisolid-CL'
 abstract: >-
-  MultiSolid-CL simulates reactive packed beds, coupling gas flow, heat
-  transfer, and chemical reactions. It provides a desktop application and
-  command-line interface for individual simulations, parameter studies,
-  and comparison of results. Chemistry plugins extend species, properties,
-  and reaction kinetics, with a focus on chemical looping processes.
+  MultiSolid-CL is a tool for simulating reactive packed
+  beds, with a focus on chemical looping processes. It
+  couples gas flow, heat transfer, and gas-gas as well as
+  gas-solid reactions. The tool provides a desktop
+  application and command-line interface for individual
+  simulations, parameter studies, and comparison of results.
+  Available species, properties, and reaction kinetics are
+  customizable and extendable via the plugin interface.
 keywords:
-  - reactive packed beds
+  - packed bed
   - chemical looping
   - reactor simulation
-  - heat and mass transfer
-  - reaction kinetics
+license: GPL-3.0-only
+version: 1.0.0
