@@ -62,6 +62,18 @@ in Andrew Wright, <em>Chemical Looping Reactor Modelling – 2D</em>, with conte
 <a href="https://doi.org/10.1016/j.apenergy.2015.08.078" title="Online resource; internet connection required">doi:10.1016/j.apenergy.2015.08.078 <span class="online">(online)</span></a>.
 The rational, solver-oriented implementation is canonical; the older duplicate
 form is not retained.</p>
+<p>The chemical rate constant includes the total-pressure correction used by
+Argyris et al., <em>Sustainable Energy &amp; Fuels</em> <strong>6</strong> (2022), 2755–2770,
+<a href="https://doi.org/10.1039/D2SE00351A" title="Online resource; internet connection required">doi:10.1039/D2SE00351A <span class="online">(online)</span></a>,
+Eq. (14) and Table 2:</p>
+<div class="equation"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>k</mi><mi>j</mi></msub><mo stretchy="false">&#x00028;</mo><mi>T</mi><mo>&#x0002C;</mo><mi>P</mi><mo stretchy="false">&#x00029;</mo><mo>&#x0003D;</mo><msub><mi>k</mi><mrow><mn>0</mn><mo>&#x0002C;</mo><mi>j</mi></mrow></msub><mi>exp</mi><mrow><mo stretchy="true" fence="true" form="prefix">&#x00028;</mo><mo>&#x02212;</mo><mfrac><mrow><msub><mi>E</mi><mrow><mi>a</mi><mo>&#x0002C;</mo><mi>j</mi></mrow></msub></mrow><mrow><mi>R</mi><mi>T</mi></mrow></mfrac><mo stretchy="true" fence="true" form="postfix">&#x00029;</mo></mrow><msup><mrow><mo stretchy="true" fence="true" form="prefix">&#x00028;</mo><mfrac><mrow><mi>P</mi></mrow><mrow><msub><mi>P</mi><mrow><mrow><mi mathvariant="normal">r</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">f</mi></mrow></mrow></msub></mrow></mfrac><mo stretchy="true" fence="true" form="postfix">&#x00029;</mo></mrow><mrow><mo>&#x02212;</mo><msub><mi>q</mi><mi>j</mi></msub></mrow></msup><mo>&#x0002C;</mo><mspace width="2em" /><msub><mi>P</mi><mrow><mrow><mi mathvariant="normal">r</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">f</mi></mrow></mrow></msub><mo>&#x0003D;</mo><mn>1</mn><mtext>&#x000A0;</mtext><mrow><mi mathvariant="normal">b</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">r</mi></mrow><mo>&#x0003D;</mo><msup><mn>10</mn><mn>5</mn></msup><mtext>&#x000A0;</mtext><mrow><mi mathvariant="normal">P</mi><mi mathvariant="normal">a</mi></mrow><mo>&#x0002E;</mo></mrow></math></div>
+<p><code>P</code> is the <strong>local absolute total gas pressure</strong>, recovered from <code>C_total R T</code>.
+The reference pressure is fixed at 1 bar. This factor modifies the chemical
+rate constant inside the shrinking-core resistance expression; the ash
+diffusivity is unchanged. Gas concentration retains its existing reaction-order
+dependence. At 1 bar the additional factor is exactly one.
+Each reaction exposes its own dimensionless, nonnegative exponent:</p>
+
 <h2 id="nickel-catalysed-reforming">Nickel-catalysed reforming</h2>
 <ul>
 <li><code>reforming_xu_froment</code> (<code>reforming_xu_froment.py</code>) implements the three

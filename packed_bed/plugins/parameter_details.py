@@ -19,7 +19,7 @@ def reaction_parameter_groups(definition):
     if implementation == 'builtin:nickel_medrano':
         return coefficients({
             'ni_reduction_h2_medrano': 'H2', 'ni_reduction_co_medrano': 'CO', 'ni_oxidation_o2_medrano': 'O2',
-        }, 'R0_M', 'K0_M_PER_S', 'ACTIVATION_ENERGY_J_PER_MOL')
+        }, 'R0_M', 'K0_M_PER_S', 'ACTIVATION_ENERGY_J_PER_MOL', 'PRESSURE_EXPONENT')
     if implementation == 'builtin:copper_sio2_san_pio':
         return {
             **coefficients({

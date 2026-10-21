@@ -40,6 +40,13 @@ REACTION_ORDER = {
     "CO": 0.65,
     "O2": 0.90,
 }
+# Argyris et al. (2022), Eq. (14), Table 2: k = k(T) * (P / 1 bar)^(-q).
+PRESSURE_REFERENCE_PA = 1.0e5
+PRESSURE_EXPONENT = {
+    "H2": 0.75,
+    "CO": 0.85,
+    "O2": 1.05,
+}
 D0_M2_PER_S = {
     "H2": 1.7e-3,
     "CO": 7.4e6,
@@ -167,6 +174,16 @@ def _medrano_conversion_rate_expr(
 ):
     order = REACTION_ORDER[comp_key]
     k_reaction = k_expr(comp_key, temperature_k=temperature_k, parameters=parameters)
+    pressure_exponent = parameters["PRESSURE_EXPONENT"][comp_key]
+    if pressure_exponent != 0.0:
+        # Recover local total pressure from the ideal-gas concentration, not
+        # reactant partial pressure. Only the chemical resistance uses k.
+        pressure_bar = (
+            total_gas_concentration_molm3
+            * Constant(GAS_CONSTANT_J_PER_MOL_K / PRESSURE_REFERENCE_PA)
+            * temperature_k
+        )
+        k_reaction = k_reaction * pressure_bar**(-pressure_exponent)
     conversion_bounded = _bounded_fraction_expr(conversion)
     unreacted_available = _bounded_fraction_expr(unreacted_fraction)
     gas_fraction_available = _available_expr(gas_mole_fraction)
@@ -250,8 +267,8 @@ FAMILY = ReactionFamily(
             phase="gas_solid",
             stoichiometry={"H2": -1.0, "NiO": -1.0, "Ni": 1.0, "H2O": 1.0},
             required_species=("H2", "H2O", "Ni", "NiO"),
-            source_reference="Andrew Wright, Chemical Looping Reactor Modelling - 2D, Technical Report",
-            notes="Technical report-based Medrano shrinking-core redox kinetics using rational fractional-power approximations.",
+            source_reference="Andrew Wright, Chemical Looping Reactor Modelling - 2D, Technical Report; pressure correction: Argyris et al. (2022), doi:10.1039/D2SE00351A, Eq. (14), Table 2",
+            notes="Medrano shrinking-core redox kinetics using rational fractional-power approximations and an editable total-pressure exponent; q = 0 disables the pressure correction.",
         ),
         ReactionDefinition(
             id="ni_reduction_co_medrano",
@@ -259,8 +276,8 @@ FAMILY = ReactionFamily(
             phase="gas_solid",
             stoichiometry={"CO": -1.0, "NiO": -1.0, "Ni": 1.0, "CO2": 1.0},
             required_species=("CO", "CO2", "Ni", "NiO"),
-            source_reference="Andrew Wright, Chemical Looping Reactor Modelling - 2D, Technical Report",
-            notes="Technical report-based Medrano shrinking-core redox kinetics using rational fractional-power approximations.",
+            source_reference="Andrew Wright, Chemical Looping Reactor Modelling - 2D, Technical Report; pressure correction: Argyris et al. (2022), doi:10.1039/D2SE00351A, Eq. (14), Table 2",
+            notes="Medrano shrinking-core redox kinetics using rational fractional-power approximations and an editable total-pressure exponent; q = 0 disables the pressure correction.",
         ),
         ReactionDefinition(
             id="ni_oxidation_o2_medrano",
@@ -268,8 +285,8 @@ FAMILY = ReactionFamily(
             phase="gas_solid",
             stoichiometry={"O2": -0.5, "Ni": -1.0, "NiO": 1.0},
             required_species=("O2", "Ni", "NiO"),
-            source_reference="Andrew Wright, Chemical Looping Reactor Modelling - 2D, Technical Report",
-            notes="Technical report-based Medrano shrinking-core redox kinetics using rational fractional-power approximations.",
+            source_reference="Andrew Wright, Chemical Looping Reactor Modelling - 2D, Technical Report; pressure correction: Argyris et al. (2022), doi:10.1039/D2SE00351A, Eq. (14), Table 2",
+            notes="Medrano shrinking-core redox kinetics using rational fractional-power approximations and an editable total-pressure exponent; q = 0 disables the pressure correction.",
         ),
     ),
     kinetics_hooks={
@@ -290,4 +307,6 @@ PARAMETERS = {
     **parameter_group("R0_M", R0_M, "m", "Initial grain radius", minimum=1e-30),
     **parameter_group("K0_M_PER_S", K0_M_PER_S, "m/s", "K0 m per s", minimum=0),
     **parameter_group("ACTIVATION_ENERGY_J_PER_MOL", ACTIVATION_ENERGY_J_PER_MOL, "J/mol", "Activation energy j per mol", minimum=0),
+    **parameter_group("PRESSURE_EXPONENT", PRESSURE_EXPONENT, "dimensionless",
+                      "Total-pressure exponent q in (P / 1 bar)^(-q); 0 disables the correction", minimum=0),
 }

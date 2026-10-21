@@ -42,6 +42,23 @@ in Andrew Wright, *Chemical Looping Reactor Modelling – 2D*, with context from
 The rational, solver-oriented implementation is canonical; the older duplicate
 form is not retained.
 
+The chemical rate constant includes the total-pressure correction used by
+Argyris et al., *Sustainable Energy & Fuels* **6** (2022), 2755–2770,
+[doi:10.1039/D2SE00351A](https://doi.org/10.1039/D2SE00351A),
+Eq. (14) and Table 2:
+
+$$
+k_j(T,P)=k_{0,j}\exp\left(-\frac{E_{a,j}}{RT}\right)
+\left(\frac{P}{P_{\mathrm{ref}}}\right)^{-q_j},
+\qquad P_{\mathrm{ref}}=1\ \mathrm{bar}=10^5\ \mathrm{Pa}.
+$$
+
+`P` is the **local absolute total gas pressure**, recovered from `C_total R T`.
+The reference pressure is fixed at 1 bar. This factor modifies the chemical
+rate constant inside the shrinking-core resistance expression; the ash
+diffusivity is unchanged. Gas concentration retains its existing reaction-order
+dependence. At 1 bar the additional factor is exactly one. Each reaction exposes its own dimensionless, nonnegative exponent.
+
 ## Nickel-catalysed reforming
 
 - `reforming_xu_froment` (`reforming_xu_froment.py`) implements the three
