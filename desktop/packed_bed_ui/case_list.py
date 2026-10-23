@@ -5,7 +5,7 @@ from collections import Counter
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPixmap, QPalette, QTextCharFormat, QTextLayout
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QHeaderView, QStyle, QStyledItemDelegate, QToolButton,
+    QAbstractItemView, QHBoxLayout, QHeaderView, QMenu, QStyle, QStyledItemDelegate, QToolButton,
     QTreeWidget, QTreeWidgetItem, QWidget, QStyleOptionViewItem,
 )
 
@@ -130,6 +130,8 @@ class CaseList(QTreeWidget):
         self.setItemDelegate(CaseItemDelegate(self))
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setEditTriggers(QAbstractItemView.EditTrigger.EditKeyPressed)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._context_menu)
         self.header().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.header().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
@@ -169,6 +171,7 @@ class CaseList(QTreeWidget):
                 item = QTreeWidgetItem(parent)
             item.setData(0, Qt.ItemDataRole.UserRole, ("case", case.id))
             item.setText(1, case.name)
+            item.setToolTip(1, "Right-click for case actions. Press F2 to rename.")
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEditable)
             item.setCheckState(0, Qt.CheckState.Checked if case.metadata.get("included", True) else Qt.CheckState.Unchecked)
             self.items[case.id] = item
@@ -190,6 +193,43 @@ class CaseList(QTreeWidget):
             buttons[label] = button
         self.setItemWidget(item, 4, holder)
         return buttons
+
+    def _context_menu(self, position):
+        item = self.itemAt(position)
+        if item is None:
+            return
+        self.setCurrentItem(item, 1)
+        kind, key = item.data(0, Qt.ItemDataRole.UserRole)
+        buttons = self.buttons[key] if kind == "case" else self.group_buttons[key]
+        menu = QMenu(self)
+
+        def add_button(label, button):
+            action = menu.addAction(button.icon(), label, button.click)
+            action.setEnabled(button.isEnabled())
+
+        add_button("Edit" if kind == "case" else "Edit study", buttons["Edit"])
+        if kind == "case":
+            rename = menu.addAction("Rename\tF2", lambda: self.editItem(item, 1))
+            rename.setEnabled(bool(item.flags() & Qt.ItemFlag.ItemIsEditable))
+            if item.parent() is not None:
+                study_id = item.parent().data(0, Qt.ItemDataRole.UserRole)[1]
+                add_button("Edit study", self.group_buttons[study_id]["Edit"])
+            menu.addSeparator()
+            add_button("Run", buttons["Run"])
+            add_button("Duplicate", buttons["Duplicate"])
+        menu.addSeparator()
+        included = menu.addAction("Include in Run all")
+        included.setCheckable(True)
+        included.setChecked(item.checkState(0) == Qt.CheckState.Checked)
+        included.setEnabled(bool(item.flags() & Qt.ItemFlag.ItemIsUserCheckable))
+        included.triggered.connect(lambda checked: item.setCheckState(
+            0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked))
+        menu.addSeparator()
+        add_button("Delete" if kind == "case" else "Delete study", buttons["Delete"])
+        try:
+            menu.exec(self.viewport().mapToGlobal(position))
+        finally:
+            menu.deleteLater()
 
     def refresh(self, project, job, active):
         self.blockSignals(True)
@@ -217,6 +257,7 @@ class CaseList(QTreeWidget):
                 flags |= Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEditable
             item.setFlags(flags)
             for label, button in self.buttons[case.id].items():
+                button.setToolTip(f"{label} {case.name}")
                 button.setAccessibleName(f"{label} {case.name}")
                 button.setEnabled(not active and (label != "Run" or state["inputs"] == "Ready"))
         for study_id, group in self.groups.items():
@@ -249,6 +290,8 @@ class CaseList(QTreeWidget):
 
     def _item_changed(self, item, column):
         kind, key = item.data(0, Qt.ItemDataRole.UserRole)
+        if kind == "case":
+            self._displayed_states.pop(key, None)
         if column == 0:
             keys = [key] if kind == "case" else [item.child(i).data(0, Qt.ItemDataRole.UserRole)[1] for i in range(item.childCount())]
             self.inclusion_changed.emit(keys, item.checkState(0) == Qt.CheckState.Checked)
