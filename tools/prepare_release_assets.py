@@ -44,6 +44,11 @@ def prepare(artifacts, output, tag):
         "Install the Linux package with `sudo apt install ./MultiSolid-" + version + "-linux-x64-setup.deb`. "
         "For portable downloads, extract the entire archive and run MultiSolid inside it. "
         "All four include Python and the solver dependencies. Keep projects outside the application folder.\n\n"
+        "The Windows application and installer are unsigned. Windows may display an unknown-publisher or reputation warning.\n\n"
+        "Start with the [supplied reactor project](https://github.com/Griminir5/multisolid-CL/blob/" + tag +
+        "/examples/projects/first-reactor.msproject) and follow the "
+        "[first-run walkthrough](https://github.com/Griminir5/multisolid-CL/blob/" + tag +
+        "/README.md#i-want-to-simulate-a-reactor).\n\n"
         "SHA256SUMS.txt verifies the four downloads. GitHub's source archives are for source development.\n",
         encoding="utf-8")
     return [output / path.name for path, _ in verified]

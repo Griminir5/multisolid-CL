@@ -1,7 +1,28 @@
 # Getting started
 
-Create one complete case, run it, and inspect its results before building a
-larger project or parameter study.
+Start with the supplied reactor project to run a complete case and compare one
+operating change. The [installation guide](installation.md) describes the four
+desktop downloads.
+
+## Run the supplied project
+
+1. Download [first-reactor.msproject](../../examples/projects/first-reactor.msproject)
+   using GitHub's **Download raw file** button. Downloading needs internet;
+   importing and running the saved project work offline.
+2. On the welcome screen, choose **Import archived project** and import the file
+   into a writable project folder outside the application directory.
+3. Run its **Baseline** case. The first Compiled run may take several minutes.
+   After **Succeeded**, open **General → Requested plots → Outlet composition → Show**.
+4. Duplicate **Baseline**, name the copy **Lower flow**, and change its
+   **Program → Inlet flow** first ramp target (step **0**) from **76.2568** to
+   **60 mol/s**. Run the copy to preserve the baseline results.
+5. Compare the two **Outlet composition** plots. Use **Results…** on the project
+   screen to compare recorded quantities and export them to Excel.
+
+Continue with the [GUI guide](../GUI-GUIDE.md), or create a case from your own
+physical inputs below.
+
+## Create your own case
 
 1. On the welcome screen, choose **Create new project**, give it a name, and
    select a local folder.

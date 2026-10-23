@@ -65,7 +65,7 @@ troubleshooting are in the <a href="plugins.html">plugin guide</a>.</p>
 you can create a species entirely in the application using
 <a href="plugins.html#create-a-species-plugin">Create plugin / Add species</a>.</p>
 <p>For Lessons 2 and 3, use the
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/README.md#install-the-full-repository-from-source" title="Online resource; internet connection required">source installation <span class="online">(online)</span></a>
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/README.md#install-the-full-repository-from-source" title="Online resource; internet connection required">source installation <span class="online">(online)</span></a>
 and activate its Python environment. Run the terminal commands below from the
 repository root, the folder containing <code>pyproject.toml</code>. The supplied factories
 keep DAETools imports inside symbolic methods, so generating metadata and running
@@ -171,7 +171,7 @@ and edit its coefficients there.</p>
 <p>To share the current project copy, select the plugin and choose <strong>Export…</strong>.
 This produces a <code>.msplugin</code> archive that another user can register.</p>
 <p>You can stop here if built-in property equations meet your needs. The supplied
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/examples/plugins/nitrogen_oxides/manifest.yaml" title="Online resource; internet connection required">nitrogen oxides manifest <span class="online">(online)</span></a> follows this same
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/examples/plugins/nitrogen_oxides/manifest.yaml" title="Online resource; internet connection required">nitrogen oxides manifest <span class="online">(online)</span></a> follows this same
 pattern, adding NO and NO2 alongside the N2 variant. Quote <code>'NO'</code> in YAML:
 unquoted <code>NO</code> is read as a boolean.</p>
 <h2 id="prepare-the-python-authoring-tools">Prepare the Python authoring tools</h2>
@@ -218,7 +218,7 @@ h(T)  = h_ref + cp_inf (T − t_ref)
         + deficit t_ref² (1/T − 1/t_ref)
 </code></pre>
 <p>The second equation is the exact integral of the first, anchored at <code>h_ref</code>.
-This is the same model used in the supplied <a href="https://github.com/Griminir5/multisolid-CL/tree/application-and-ui/examples/plugins/ammonia" title="Online resource; internet connection required">ammonia example <span class="online">(online)</span></a>.</p>
+This is the same model used in the supplied <a href="https://github.com/Griminir5/multisolid-CL/tree/v1.0.0/examples/plugins/ammonia" title="Online resource; internet connection required">ammonia example <span class="online">(online)</span></a>.</p>
 <h3 id="1-describe-the-species-and-point-to-the-equation">1. Describe the species and point to the equation</h3>
 <p>Create <code>build/plugin-workshop/my_ammonia/manifest.yaml</code>:</p>
 <pre><code class="language-yaml">id: my_ammonia
@@ -327,7 +327,7 @@ returns the correlation object. The application supplies this dictionary.</li>
 <p>When adapting the example, begin with <code>_cp</code>, its integral <code>_h</code>, and the parameter
 declarations. Keep numerical and symbolic results consistent. More complex
 expressions may need separate numerical and DAETools functions; the
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/examples/plugins/enthalpy_overrides/correlation.py" title="Online resource; internet connection required">logarithmic example <span class="online">(online)</span></a> shows <code>np.log</code> and
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/examples/plugins/enthalpy_overrides/correlation.py" title="Online resource; internet connection required">logarithmic example <span class="online">(online)</span></a> shows <code>np.log</code> and
 DAETools <code>Log</code>.</p>
 <h3 id="3-generate-check-and-package-it">3. Generate, check, and package it</h3>
 <p>Run this from the repository root in your active Python environment:</p>
@@ -508,19 +508,19 @@ requires metadata regeneration and re-registration.</p>
 </thead>
 <tbody>
 <tr>
-  <td><a href="https://github.com/Griminir5/multisolid-CL/tree/application-and-ui/examples/plugins/nitrogen_oxides" title="Online resource; internet connection required">nitrogen_oxides <span class="online">(online)</span></a></td>
+  <td><a href="https://github.com/Griminir5/multisolid-CL/tree/v1.0.0/examples/plugins/nitrogen_oxides" title="Online resource; internet connection required">nitrogen_oxides <span class="online">(online)</span></a></td>
   <td>Several species using built-in equations, including an N2 variant</td>
-  <td><a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/examples/plugins/nitrogen_oxides/manifest.yaml" title="Online resource; internet connection required">manifest.yaml <span class="online">(online)</span></a></td>
+  <td><a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/examples/plugins/nitrogen_oxides/manifest.yaml" title="Online resource; internet connection required">manifest.yaml <span class="online">(online)</span></a></td>
 </tr>
 <tr>
-  <td><a href="https://github.com/Griminir5/multisolid-CL/tree/application-and-ui/examples/plugins/ammonia" title="Online resource; internet connection required">ammonia <span class="online">(online)</span></a></td>
+  <td><a href="https://github.com/Griminir5/multisolid-CL/tree/v1.0.0/examples/plugins/ammonia" title="Online resource; internet connection required">ammonia <span class="online">(online)</span></a></td>
   <td>The custom property equation and rate law built in Lessons 2–3</td>
-  <td><a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/examples/plugins/ammonia/manifest.yaml" title="Online resource; internet connection required">manifest.yaml <span class="online">(online)</span></a>, <a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/examples/plugins/ammonia/enthalpy.py" title="Online resource; internet connection required">enthalpy.py <span class="online">(online)</span></a>, <a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/examples/plugins/ammonia/kinetics.py" title="Online resource; internet connection required">kinetics.py <span class="online">(online)</span></a></td>
+  <td><a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/examples/plugins/ammonia/manifest.yaml" title="Online resource; internet connection required">manifest.yaml <span class="online">(online)</span></a>, <a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/examples/plugins/ammonia/enthalpy.py" title="Online resource; internet connection required">enthalpy.py <span class="online">(online)</span></a>, <a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/examples/plugins/ammonia/kinetics.py" title="Online resource; internet connection required">kinetics.py <span class="online">(online)</span></a></td>
 </tr>
 <tr>
-  <td><a href="https://github.com/Griminir5/multisolid-CL/tree/application-and-ui/examples/plugins/enthalpy_overrides" title="Online resource; internet connection required">enthalpy_overrides <span class="online">(online)</span></a></td>
+  <td><a href="https://github.com/Griminir5/multisolid-CL/tree/v1.0.0/examples/plugins/enthalpy_overrides" title="Online resource; internet connection required">enthalpy_overrides <span class="online">(online)</span></a></td>
   <td>Two species sharing a custom correlation with different parameter values</td>
-  <td><a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/examples/plugins/enthalpy_overrides/manifest.yaml" title="Online resource; internet connection required">manifest.yaml <span class="online">(online)</span></a>, <a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/examples/plugins/enthalpy_overrides/correlation.py" title="Online resource; internet connection required">correlation.py <span class="online">(online)</span></a></td>
+  <td><a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/examples/plugins/enthalpy_overrides/manifest.yaml" title="Online resource; internet connection required">manifest.yaml <span class="online">(online)</span></a>, <a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/examples/plugins/enthalpy_overrides/correlation.py" title="Online resource; internet connection required">correlation.py <span class="online">(online)</span></a></td>
 </tr>
 </tbody>
 </table>

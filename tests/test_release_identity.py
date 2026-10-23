@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -62,6 +63,40 @@ class ReleaseIdentityTests(unittest.TestCase):
                     patch.object(release.metadata, "version", return_value="1.0.0"), \
                     patch.object(release.subprocess, "run", side_effect=AssertionError("Git must not run")):
                 self.assertEqual(release.application_identity(), {**IDENTITY, "build_id": None, "ui_version": None})
+
+    def test_windows_checkout_stays_clean_when_git_defaults_change(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary) / "source"
+            (root / "desktop").mkdir(parents=True)
+            shutil.copy2(ROOT / ".gitattributes", root / ".gitattributes")
+            for relative in ("pyproject.toml", "desktop/pyproject.toml"):
+                (root / relative).write_bytes((ROOT / relative).read_bytes().replace(b"\r\n", b"\n"))
+            binary = b"\x00binary\r\npayload\xff"
+            (root / "binary.dat").write_bytes(binary)
+
+            def git(folder, *command):
+                subprocess.run(["git", "-C", str(folder), "-c", "core.attributesFile=", *command],
+                               check=True, capture_output=True, timeout=30)
+
+            git(root, "init", "--quiet")
+            git(root, "-c", "core.autocrlf=false", "add", ".")
+            git(root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                "commit", "-qm", "fixture")
+            checkout = Path(temporary) / "Windows checkout"
+            git(root, "-c", "core.autocrlf=true", "clone", "--no-local", str(root), str(checkout))
+            # A separate Git (MSYS2) can have a different system default and
+            # re-read file contents instead of trusting the first Git's stat cache.
+            git(checkout, "config", "core.autocrlf", "false")
+            for path in checkout.rglob("*"):
+                if path.is_file() and ".git" not in path.relative_to(checkout).parts:
+                    stat = path.stat()
+                    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+            self.assertFalse(release.source_identity(checkout)["source_dirty"])
+            self.assertEqual((checkout / "binary.dat").read_bytes(), binary)
+            self.assertNotIn(b"\r\n", (checkout / "pyproject.toml").read_bytes())
+            with (checkout / "pyproject.toml").open("ab") as source:
+                source.write(b"# real source edit\n")
+            self.assertTrue(release.source_identity(checkout)["source_dirty"])
 
     def test_unstamped_installation_reports_unknown_commit(self):
         with TemporaryDirectory() as temporary:

@@ -30,7 +30,7 @@
 <p>The command-line interface runs cases and parameter sweeps from YAML files. It
 writes NetCDF data, a provenance manifest, and any requested plots. Use it from
 the Python environment described in the
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/README.md#install-the-full-repository-from-source" title="Online resource; internet connection required">installation guide <span class="online">(online)</span></a>.</p>
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/README.md#install-the-full-repository-from-source" title="Online resource; internet connection required">installation guide <span class="online">(online)</span></a>.</p>
 <p>You can work in any folder containing your input files. The examples below use
 a folder called <code>my-case</code>; only the optional
 <a href="#repository-examples">repository examples</a> use paths inside a source checkout.
@@ -313,7 +313,7 @@ flow does not turn the configured inlet into a negative-flow boundary.
 <code>axial_heat_dispersion_w_per_m_k</code> describes axial heat spreading. Zero disables
 the corresponding term.</p>
 <p>The complete field definitions and defaults are in
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/packed_bed/config/models.py" title="Online resource; internet connection required"><code>config/models.py</code> <span class="online">(online)</span></a>. Write settings explicitly
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/packed_bed/config/models.py" title="Online resource; internet connection required"><code>config/models.py</code> <span class="online">(online)</span></a>. Write settings explicitly
 when they matter for reproducibility: omitted YAML settings retain their schema
 defaults, which differ from the desktop's new-case preset.</p>
 <h3 id="chemistry-and-solids">Chemistry and solids</h3>
@@ -413,8 +413,8 @@ conditions; Compiled then integrates the generated native model.</p>
 </table>
 <p>Availability depends on the installed solver adapters, native libraries, and
 compiler. Compiled KLU needs the managed runtime with KLU support. See the
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/README.md#install-the-full-repository-from-source" title="Online resource; internet connection required">installation guide <span class="online">(online)</span></a> and
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/desktop/BUILD_WINDOWS.md#native-bundles" title="Online resource; internet connection required">native runtime setup <span class="online">(online)</span></a>.</p>
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/README.md#install-the-full-repository-from-source" title="Online resource; internet connection required">installation guide <span class="online">(online)</span></a> and
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/desktop/BUILD_WINDOWS.md#native-bundles" title="Online resource; internet connection required">native runtime setup <span class="online">(online)</span></a>.</p>
 <p>To try Compiled with the first case, change its existing solver section to:</p>
 <pre><code class="language-yaml">solver:
   backend: compiled
@@ -846,10 +846,10 @@ can import it without starting the batch again.</p>
 <pre><code class="language-sh">python -m packed_bed examples/simulations/default_case/run.yaml --validate-only
 python -m packed_bed batch examples/simulations/default_batch_case/batch.yaml --validate-only
 </code></pre>
-<p>The <a href="https://github.com/Griminir5/multisolid-CL/tree/application-and-ui/examples/simulations/default_case" title="Online resource; internet connection required">single-case example <span class="online">(online)</span></a> demonstrates
+<p>The <a href="https://github.com/Griminir5/multisolid-CL/tree/v1.0.0/examples/simulations/default_case" title="Online resource; internet connection required">single-case example <span class="online">(online)</span></a> demonstrates
 reacting chemistry and timed operating channels. Remove <code>--validate-only</code> to
 execute it.</p>
-<p>The <a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/examples/simulations/default_batch_case/batch.yaml" title="Online resource; internet connection required">batch example <span class="online">(online)</span></a> combines
+<p>The <a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/examples/simulations/default_batch_case/batch.yaml" title="Online resource; internet connection required">batch example <span class="online">(online)</span></a> combines
 two programs, two bed geometries, and three solver configurations, for <strong>12
 cases</strong>. The solver axis includes Standard SuperLU, Compiled SuperLU, and Compiled
 Band; executing every combination needs their runtimes. Keep only the solver
@@ -951,10 +951,10 @@ create the desktop's <code>worker.log</code>.</p>
 </tr>
 </tbody>
 </table>
-<p>The implementation references are <a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/packed_bed/cli.py" title="Online resource; internet connection required">CLI arguments <span class="online">(online)</span></a>,
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/packed_bed/config/models.py" title="Online resource; internet connection required">configuration models <span class="online">(online)</span></a>,
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/packed_bed/batch.py" title="Online resource; internet connection required">batch expansion/execution <span class="online">(online)</span></a>, and
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/packed_bed/reports.py" title="Online resource; internet connection required">reports and provenance <span class="online">(online)</span></a>.</p>
+<p>The implementation references are <a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/packed_bed/cli.py" title="Online resource; internet connection required">CLI arguments <span class="online">(online)</span></a>,
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/packed_bed/config/models.py" title="Online resource; internet connection required">configuration models <span class="online">(online)</span></a>,
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/packed_bed/batch.py" title="Online resource; internet connection required">batch expansion/execution <span class="online">(online)</span></a>, and
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/packed_bed/reports.py" title="Online resource; internet connection required">reports and provenance <span class="online">(online)</span></a>.</p>
 <p><a href="index.html">Documentation index</a></p>
 </article>
       <footer>MultiSolid 1.0.0 · Bundled documentation · <a href="index.html">Help home</a></footer>

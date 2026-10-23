@@ -12,9 +12,8 @@ readme = {content-type = "text/markdown", text = """
 Desktop application for MultiSolid-CL packed-bed simulations, with project and
 case editors, parameter studies, plots, and Excel reports.
 
-See the [GUI guide](https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/docs/GUI-GUIDE.md)
-for usage and the [repository README](https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/README.md)
-for installation and development.
+See the [repository documentation](https://github.com/Griminir5/multisolid-CL#documentation)
+for usage, installation, and development.
 """}
 requires-python = ">=3.11,<3.13"
 license = "GPL-3.0-only"

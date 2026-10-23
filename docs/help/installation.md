@@ -1,7 +1,9 @@
 # Install the desktop application
 
-The first public desktop release is pending. Once published, download it from
-[GitHub Releases](https://github.com/Griminir5/multisolid-CL/releases).
+Download MultiSolid from
+[GitHub Releases](https://github.com/Griminir5/multisolid-CL/releases/latest).
+There are four application downloads: an installer and a portable archive for
+each platform below. `SHA256SUMS.txt` contains the download checksums.
 
 ## Windows
 
@@ -11,6 +13,10 @@ The Windows distribution targets **Windows 11 x64**. Choose one release asset:
 | --- | --- |
 | `MultiSolid-<version>-windows-x64-setup.exe` | Run the installer, then open MultiSolid from the Start menu. Installation is for the current user. |
 | `MultiSolid-<version>-windows-x64-portable.zip` | Extract the entire ZIP into a new folder, then run `MultiSolid/MultiSolid.exe`. Keep its files and subfolders together. |
+
+Release notes state whether the application and installer are signed. Unsigned
+builds may display an unknown-publisher or reputation warning. Download from the
+linked GitHub release and use its checksums to verify the files.
 
 ## Linux
 

@@ -1,3 +1,7 @@
+# Git for Windows checks out CI sources before MSYS2 Git reads their identity.
+# Use the same text bytes with either Git's core.autocrlf defaults.
+* text=auto eol=lf
+
 # Generated help is checked byte-for-byte by tools/build_help.py.
 # Keep its LF line endings on Windows as well as Linux.
 /desktop/packed_bed_ui/assets/help/** text eol=lf

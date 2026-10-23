@@ -10,11 +10,9 @@ The Ubuntu 24.04 installer is the separate .deb download. Install it with:
 Then open MultiSolid from the applications menu or run the multisolid command.
 It installs under /opt/multisolid. Remove it with sudo apt remove multisolid.
 
-Build on the oldest Linux distribution you intend to support. release.json
-records minimum_glibc for this particular build; a newer operating system may
-still have other differences, so consult the accompanying validation report.
-The documented build baseline is Ubuntu 24.04 x86_64. A graphical desktop and
-working graphics drivers are required. Headless acceptance testing uses Xvfb.
+The Linux distribution targets Ubuntu 24.04 x86_64. A graphical desktop and working
+graphics drivers are required. Other Linux distributions are not covered by
+this release target. release.json records the minimum glibc for this build.
 
 Create projects in a writable folder outside the application directory.
 Projects contain inputs, results, plugins, and reusable compilation caches.
@@ -31,4 +29,4 @@ licence texts. BUILD-INFO.json and release.json describe this build. Keep the
 matching source and dependency build assets with redistributed binaries.
 
 Source, build instructions and the GUI guide:
-https://github.com/Griminir5/multisolid-CL
+https://github.com/Griminir5/multisolid-CL#documentation

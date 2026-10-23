@@ -16,6 +16,10 @@ def build(wheels=None):
         identity = source_identity(root)
     finally:
         sys.path.pop(0)
+    print("Application source:", json.dumps(identity, sort_keys=True), flush=True)
+    if identity["source_dirty"]:
+        # Keep the reason in CI logs if any real changes remain after checkout.
+        subprocess.run(["git", "-C", str(root), "status", "--short"], check=True)
     from build_help import build as build_help
     build_help(check=True)
     work = root / "build/release"

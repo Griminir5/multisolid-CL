@@ -8,6 +8,9 @@ own species and reactions to extend the chemistry. Share collections of
 simulations (projects) with their case configurations and chemistry extensions
 intact.
 
+[Download MultiSolid](https://github.com/Griminir5/multisolid-CL/releases/latest)
+for **Windows 11 x64** or **Ubuntu 24.04 x86_64**, as an installer or portable application.
+
 | [I want to simulate a reactor](#i-want-to-simulate-a-reactor) | [I want to develop or extend the software](#i-want-to-develop-or-extend-the-software) |
 | --- | --- |
 | Download the app, open the example, run it, change a parameter, and compare results. | Install from source, author plugins, and explore the equations and implementation. |
@@ -21,8 +24,6 @@ change over time. This view combines the example's inlet channels into feed step
 
 1. **Download and launch MultiSolid.** Follow the
    [desktop installation instructions](#install-the-desktop-application).
-   The first public desktop release is pending; until then, use the source
-   installation or build instructions linked there.
 2. **Open the supplied project.** Download
    [first-reactor.msproject](examples/projects/first-reactor.msproject)
    using GitHub's **Download raw file** button. On the welcome screen, choose
@@ -94,32 +95,41 @@ Documentation for official scientific plugins:
 
 ## Install the desktop application
 
-The first public desktop release is pending. Once published, download it from
-[GitHub Releases](https://github.com/Griminir5/multisolid-CL/releases). Until then,
-use the source installation below, or follow
-[Build MultiSolid from a checkout](desktop/BUILDING.md) to create a Linux or
-Windows distribution. After the documented system prerequisites, run
-`python3.12 tools/build_desktop.py --headless` on Ubuntu 24.04, or
-`py -3.11 tools/build_desktop.py` in Windows PowerShell. Each creates an isolated
-build environment and a validated portable archive.
+Download MultiSolid from
+[GitHub Releases](https://github.com/Griminir5/multisolid-CL/releases/latest).
+Choose one of these four application downloads:
 
-The Windows distribution targets **Windows 11 x64**. Choose one release asset:
+| Platform | Installer | Portable |
+| --- | --- | --- |
+| Windows 11 x64 | `MultiSolid-<version>-windows-x64-setup.exe` | `MultiSolid-<version>-windows-x64-portable.zip` |
+| Ubuntu 24.04 x86_64 | `MultiSolid-<version>-linux-x64-setup.deb` | `MultiSolid-<version>-linux-x64-portable.tar.gz` |
 
-| Asset | Installation |
-| --- | --- |
-| `MultiSolid-<version>-windows-x64-setup.exe` | Run the installer, then open MultiSolid from the Start menu. Installation is for the current user. |
-| `MultiSolid-<version>-windows-x64-portable.zip` | Extract the entire ZIP into a new folder, then run `MultiSolid/MultiSolid.exe`. Keep its files and subfolders together. |
+- **Windows installer:** run the `.exe`, then open MultiSolid from the Start menu.
+  Installation is for the current user.
+- **Windows portable:** extract the entire ZIP, then run `MultiSolid/MultiSolid.exe`.
+- **Linux installer:** run `sudo apt install ./MultiSolid-<version>-linux-x64-setup.deb`,
+  then open MultiSolid from the applications menu or run `multisolid`.
+- **Linux portable:** extract the entire archive, then run `./MultiSolid/MultiSolid`.
 
-Both distributions include Python, DAETools, Graphviz, and the compiler and
+Replace `<version>` with the version in the downloaded filename. Release notes
+state whether the Windows builds are signed; unsigned builds may display an
+unknown-publisher or reputation warning.
+
+All four downloads include Python, DAETools, Graphviz, and the compiler and
 libraries needed for Compiled execution. End users do not need to install these
 separately. GitHub's automatically generated source archives are source code;
-choose the installer or portable ZIP for the ready-to-run application.
+choose an installer or portable archive for the ready-to-run application.
+Keep portable files and subfolders together. The release includes `SHA256SUMS.txt`
+for checking the downloads. Other Linux distributions are not covered by the
+Ubuntu release target.
 
 Create projects in a writable folder outside the application directory. The first
 Compiled run may take several minutes to build its model; compatible later runs
 reuse the project's cache. To update a portable installation, extract the new
 version into a new folder and open your existing project. The
 [GUI guide](docs/GUI-GUIDE.md) explains the project workflow.
+To build your own installer and portable archive, follow
+[Build MultiSolid from a checkout](desktop/BUILDING.md).
 
 ## Install the full repository from source
 
@@ -130,11 +140,11 @@ its native dependencies.
 
 ### 1. Get the source and create an environment
 
-These instructions use the `application-and-ui` branch, which contains the
-engine and desktop layout described here.
+Clone the repository's default branch for development. To install a specific
+release, check out its tag before installing the packages.
 
 ```sh
-git clone --branch application-and-ui https://github.com/Griminir5/multisolid-CL.git
+git clone https://github.com/Griminir5/multisolid-CL.git
 cd multisolid-CL
 python -m venv .venv
 ```
@@ -235,7 +245,7 @@ output directories; use separate directories to retain earlier results.
 | [`examples/plugins/`](examples/plugins/) | Illustrative plugin packages |
 | [`plugins/`](plugins/) | Additional scientific plugins |
 | [`tools/`](tools/) | Runtime staging, wheel builds, desktop freezing, and release checks |
-| [`.github/workflows/`](.github/workflows/) | Native runtime CI |
+| [`.github/workflows/`](.github/workflows/) | Application builds, example and installer checks, and draft releases |
 
 Generated runtimes, build outputs, and caches are excluded from Git. Licences and
 scientific provenance notes stay beside the components they describe.
@@ -302,6 +312,9 @@ python tools/build_help.py
 python tools/build_help.py --check
 ```
 
+The [release instructions](desktop/BUILDING.md#github-downloads-and-releases)
+describe how version tags trigger builds and prepare a draft for publication.
+
 The build validates internal page links and anchors and renders equations into
 MathML. Search and styling are local assets. Release wheel builds reject stale
 help; the frozen application collects the same files from the UI wheel.
@@ -314,21 +327,10 @@ changes to interfaces, equations, or defaults.
 ## Attribution and citation
 
 Machine-readable software citation metadata is available in
-[`CITATION.cff`](CITATION.cff). The author list will be finalized before the
-first public release; the current file retains the collective contributor
-credit used below.
-
-A **Zenodo DOI is planned for the first release**. Until it is issued, cite the
-[repository](https://github.com/Griminir5/multisolid-CL) and record the version,
-Git commit, and access date used for your work. For example, replace the fields
-in this provisional citation:
-
-> MultiSolid-CL contributors. *MultiSolid-CL* [Computer software]. Version
-> VERSION, commit COMMIT. https://github.com/Griminir5/multisolid-CL
-> (accessed DATE).
-
-Once the first release is archived, this section will provide its Zenodo citation
-and DOI. Cite the scientific sources for the kinetics and property data you use
+[`CITATION.cff`](CITATION.cff), including the authors and version. Use the metadata
+from the release you ran, and include its version and release URL or DOI in your
+citation. For development source, record the Git commit and access date as well.
+Cite the scientific sources for the kinetics and property data you use
 as well: see the [built-in kinetics references](packed_bed/kinetics/KINETICS_SOURCES.md)
 and the documentation shipped with each plugin. Run manifests record source and
 configuration provenance to help identify the implementation behind results.

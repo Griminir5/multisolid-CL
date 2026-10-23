@@ -85,7 +85,7 @@ artifact contains its installer, portable archive, and checksums. The workflow
 also installs, reinstalls, launches, and uninstalls each installer on a fresh
 runner, checking that the external simulation project survives removal. The
 Windows job uses Server 2025 so the installer can enforce its Windows 11-era
-minimum kernel version; this still requires separate Windows 11 qualification.
+minimum kernel version. Record Windows 11 test results alongside the CI records.
 
 CI reuses hash-checked downloads and pip's package cache. Windows also caches
 the native library install prefix, keyed by the runner image, installed MSYS2
@@ -102,7 +102,7 @@ reinstallation, the custom Start menu folder, and removal. It catches installer
 registration errors early; the final downloads still receive full acceptance
 checks. Its logs are under `installer-smoke/` in the check-results artifact.
 
-Pushing a version tag such as `v1.0.0` runs the same checks, then prepares a
+Pushing a tag in the form `v<version>` runs the same checks, then prepares a
 **draft GitHub Release** with all four application downloads and one combined
 `SHA256SUMS.txt`. The tag must match the package version. Open **Releases**,
 review the draft, and publish it when ready. A failed build or installer check
@@ -180,11 +180,12 @@ for every Linux distribution or Windows configuration.
 
 Update the engine version in `pyproject.toml`, the UI version in
 `desktop/pyproject.toml`, and its exact `multisolid-cl[compiled]` dependency
-together. Run `python tools/build_help.py`, then `python tools/build_help.py --check`.
-A Git tag alone does not change the application version. Use `1.0.0rc1` while
-qualifying a release candidate; change all three inputs to `1.0.0` for the final
-release and rebuild. Windows resources and the installer keep the full display
-version and use its numeric release components separately.
+together, along with the version in `CITATION.cff`. Run `python tools/build_help.py`,
+then `python tools/build_help.py --check`, and commit the source and generated
+pages before tagging that commit as `v<version>`. A Git tag alone does not change
+the application version. Windows resources and the installer keep the full
+display version, including candidate labels, and use its numeric release
+components separately.
 
 `tools/build_app_wheels.py` stamps both wheels with the source commit and dirty
 state before copying the source. The freezer requires these stamps to match the
@@ -193,3 +194,7 @@ The content-derived build identifier includes the shipped source stamps. Run
 manifests, desktop snapshots, and About diagnostics retain this identity without
 requiring Git. Build distributable releases from a clean committed checkout;
 local changes are recorded as `source_dirty: true`, not as a new commit.
+The repository keeps text files in LF form so Git for Windows and MSYS2 Git
+agree on checkout contents even when their line-ending defaults differ. Wheel
+build logs print the stamped identity and list any files responsible for a dirty
+source state.

@@ -30,7 +30,9 @@ class HelpBuildTests(unittest.TestCase):
         shutil.copytree(self.destination, repository / relative)
         shutil.copy2(build_help.ROOT / ".gitattributes", repository / ".gitattributes")
         # This control file confirms that the test actually enables Windows
-        # conversion, while the generated help is protected by its attributes.
+        # conversion. Opt it out of the repository's LF policy only in this fixture.
+        with (repository / ".gitattributes").open("ab") as attributes:
+            attributes.write(b"/ordinary.txt !text !eol\n")
         (repository / "ordinary.txt").write_bytes(b"first\nsecond\n")
 
         def git(*args, autocrlf="false"):

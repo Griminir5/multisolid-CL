@@ -3,8 +3,9 @@
 Each module owns one swappable family: its reaction definitions, symbolic
 DAETools hooks, component requirements, and local regularization constants.
 Run manifests record selected definitions, their parameter values, and the
-built-in definition fingerprint. They also record the source Git commit when
-available; packaged installations may have no Git checkout. There is no separate
+built-in definition fingerprint. They also retain the application version,
+source commit, and packaged build identifier. Release builds carry this identity
+without requiring a Git checkout. There is no separate
 kinetics version system. See [run provenance](../../docs/CLI-GUIDE.md#outputs-and-analysis).
 
 These references document provenance. They do not assert that a family is

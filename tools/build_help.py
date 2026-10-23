@@ -79,9 +79,10 @@ def render_math(text, display):
 
 
 class HelpRenderer(mistune.HTMLRenderer):
-    def __init__(self, source):
+    def __init__(self, source, source_ref):
         super().__init__(escape=True)
         self.source = source
+        self.source_ref = source_ref
         self.headings = []
         self.slugs = Counter()
 
@@ -108,7 +109,7 @@ class HelpRenderer(mistune.HTMLRenderer):
                 if not (ROOT / source).exists():
                     raise ValueError(f'{self.source}: missing link target {source}')
                 kind = 'tree' if (ROOT / source).is_dir() else 'blob'
-                url = f'https://github.com/Griminir5/multisolid-CL/{kind}/application-and-ui/{quote(source)}'
+                url = f'https://github.com/Griminir5/multisolid-CL/{kind}/{quote(self.source_ref, safe="")}/{quote(source)}'
                 if parts.fragment:
                     url += '#' + parts.fragment
                 external = True
@@ -145,7 +146,7 @@ def build_pages():
     version = tomllib.loads((ROOT / 'desktop/pyproject.toml').read_text(encoding='utf-8'))['project']['version']
     pages, titles, headings = {}, {'index.html': 'MultiSolid help'}, {}
     for source, filename in SOURCES.items():
-        renderer = HelpRenderer(source)
+        renderer = HelpRenderer(source, f'v{version}')
         markdown = mistune.create_markdown(renderer=renderer, plugins=['table', 'strikethrough', 'url', 'math'])
         body = markdown((ROOT / source).read_text(encoding='utf-8'))
         pages[filename] = body

@@ -18,10 +18,15 @@ edition, use the new installer to update and Windows Settings to uninstall.
 The first Compiled run may take several minutes while the included compiler
 builds the model. Later compatible runs reuse the project cache.
 
-The GUI guide covers cases, studies, reports and project sharing:
-https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/docs/GUI-GUIDE.md
+Press F1 for the bundled help, or find the GUI guide and other documentation at:
+https://github.com/Griminir5/multisolid-CL#documentation
 
-These initial builds are unsigned. See release.json for the exact version and
+Release notes and BUILD-INFO.json record signing status. Unsigned builds may
+display an unknown-publisher or reputation warning. Download from
+https://github.com/Griminir5/multisolid-CL/releases and use the accompanying
+SHA256SUMS.txt to verify the downloads.
+
+See release.json for the exact version and
 build ID, LICENSE.txt and licenses for notices, and the accompanying validation
 report for what was tested. Source code and build instructions are maintained
 separately from this application folder.

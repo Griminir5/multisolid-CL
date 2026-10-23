@@ -320,7 +320,7 @@ range, assumptions, and any redistribution terms with a plugin you distribute.</
 <p>Follow the <a href="plugin-examples.html">worked tutorial</a> for complete files and
 commands. This section explains the contract when you adapt them to your own
 model. Python authoring commands use the
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/README.md#install-the-full-repository-from-source" title="Online resource; internet connection required">source environment <span class="online">(online)</span></a>, with
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/README.md#install-the-full-repository-from-source" title="Online resource; internet connection required">source environment <span class="online">(online)</span></a>, with
 the repository root as the working directory.</p>
 <h3 id="files-and-names">Files and names</h3>
 <pre><code class="language-text">my_plugin/
@@ -470,7 +470,7 @@ constants. Only declared parameters appear in the application editor.</p>
 </tbody>
 </table>
 <p>Two species can share correlation code and have different parameter values.
-The <a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/examples/plugins/enthalpy_overrides/manifest.yaml" title="Online resource; internet connection required">CO2/H2O example <span class="online">(online)</span></a>
+The <a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/examples/plugins/enthalpy_overrides/manifest.yaml" title="Online resource; internet connection required">CO2/H2O example <span class="online">(online)</span></a>
 demonstrates this. Dotted declarations created with <code>parameter_group</code> resolve
 into nested parameter mappings; for example, <code>oxidation.k</code> becomes
 <code>parameters[&quot;oxidation&quot;][&quot;k&quot;]</code>.</p>
@@ -604,7 +604,7 @@ exact lock use current definitions. A descriptor does not grant local Python
 approval.</p>
 <p>For Python integration, <code>select_definitions(chemistry, solids, catalogue)</code> and
 <code>materialize_definitions(selection, catalogue)</code> in
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/packed_bed/definitions.py" title="Online resource; internet connection required"><code>packed_bed.definitions</code> <span class="online">(online)</span></a> separate metadata
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/packed_bed/definitions.py" title="Online resource; internet connection required"><code>packed_bed.definitions</code> <span class="online">(online)</span></a> separate metadata
 selection from implementation loading. Materialization returns a
 <code>DefinitionEnvironment</code> with <code>properties</code>, <code>reaction_network</code>, <code>rate_hooks</code>, and
 <code>selection</code>. Pass it through <code>load_case(..., definitions=environment)</code> or
@@ -676,9 +676,9 @@ a supplied environment does not fill missing definitions from global built-ins.
 </table>
 <p>For a larger scientific package with provenance and fitted kinetics, see the
 <a href="waste-iron.html">waste iron plugin</a>. The manifest contract is in
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/packed_bed/plugins/schema.py" title="Online resource; internet connection required"><code>schema.py</code> <span class="online">(online)</span></a>, checking and metadata generation
-in <a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/packed_bed/plugins/check.py" title="Online resource; internet connection required"><code>check.py</code> <span class="online">(online)</span></a>, and packaging in
-<a href="https://github.com/Griminir5/multisolid-CL/blob/application-and-ui/packed_bed/plugins/storage.py" title="Online resource; internet connection required"><code>storage.py</code> <span class="online">(online)</span></a>.</p>
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/packed_bed/plugins/schema.py" title="Online resource; internet connection required"><code>schema.py</code> <span class="online">(online)</span></a>, checking and metadata generation
+in <a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/packed_bed/plugins/check.py" title="Online resource; internet connection required"><code>check.py</code> <span class="online">(online)</span></a>, and packaging in
+<a href="https://github.com/Griminir5/multisolid-CL/blob/v1.0.0/packed_bed/plugins/storage.py" title="Online resource; internet connection required"><code>storage.py</code> <span class="online">(online)</span></a>.</p>
 <p><a href="index.html">Documentation index</a></p>
 </article>
       <footer>MultiSolid 1.0.0 · Bundled documentation · <a href="index.html">Help home</a></footer>
