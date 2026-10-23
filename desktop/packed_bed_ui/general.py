@@ -72,8 +72,9 @@ class GeneralPage(QWidget):
         output_layout.setContentsMargins(0, 0, 0, 0)
         self.reports = SelectionList({key: (key.replace("_", " ").capitalize(), spec.description)
                                       for key, spec in REPORT_REGISTRY.items()}, "reports")
-        self.plots = SelectionList({key: (key.replace("_", " ").capitalize(), spec.description
-                                         + "\nRequires reports: " + ", ".join(spec.required_reports))
+        self.plots = SelectionList({key: (spec.label, spec.description
+                                         + ("\nRequires reports: " + ", ".join(spec.required_reports)
+                                            if spec.required_reports else "\nUses all selected reports (at least one)."))
                                     for key, spec in PLOT_REGISTRY.items()}, "plots", show=True)
         for title, widget, key, stretch in (("Requested reports", self.reports, "requested_reports", 162),
                                             ("Requested plots", self.plots, "requested_plots", 100)):

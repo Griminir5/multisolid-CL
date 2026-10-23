@@ -17,6 +17,7 @@ import numpy as np
 
 from .structure import band_layout
 from .bundle import asset, bundle_root, manifest
+from ..solver_support import MAX_CONVERGENCE_FAILURES
 
 P = C.c_void_p
 D = C.c_double
@@ -209,6 +210,7 @@ class NativeIDA:
         fn("ida", "IDASetUserData", I, P, P)
         fn("ida", "IDASetSuppressAlg", I, P, I)
         fn("ida", "IDASetMaxNonlinIters", I, P, I)
+        fn("ida", "IDASetMaxConvFails", I, P, I)
         fn("ida", "IDASetNonlinConvCoef", I, P, D)
         fn("ida", "IDASetMaxOrd", I, P, I)
         fn("ida", "IDASetMaxNumSteps", I, P, L)
@@ -358,6 +360,7 @@ class NativeIDA:
             self.check(self.IDASetNonlinearSolver(self.mem, self.nonlinear))
         self.check(self.IDASetSuppressAlg(self.mem, int(suppress_algebraic_errors)))
         self.check(self.IDASetMaxNonlinIters(self.mem, max_nonlin_iters))
+        self.check(self.IDASetMaxConvFails(self.mem, MAX_CONVERGENCE_FAILURES))
         self.check(self.IDASetNonlinConvCoef(self.mem, nonlinear_coef))
         self.check(self.IDASetMaxOrd(self.mem, max_order))
         self.check(self.IDASetMaxNumSteps(self.mem, 10000))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..reactions import KineticsContext, ReactionDefinition, ReactionFamily
+from .regularization import smooth_positive
 from .runtime import Constant, Exp, K, Pa, Sqrt, m, mol, s
 
 
@@ -56,13 +57,7 @@ def _partial_pressure_bar(context: KineticsContext, species_id: str):
 
 
 def _positive_pressure(partial_pressure_bar):
-    return Constant(0.5) * (
-        partial_pressure_bar
-        + Sqrt(
-            partial_pressure_bar**2
-            + Constant((2.0 * MIN_PARTIAL_PRESSURE_BAR) ** 2)
-        )
-    )
+    return smooth_positive(partial_pressure_bar, MIN_PARTIAL_PRESSURE_BAR)
 
 
 def _arrhenius(coefficient: float, activation_energy: float, temperature_k):

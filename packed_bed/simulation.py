@@ -118,6 +118,8 @@ def configure_threads(threads: int) -> None:
 def configure_idas(solver_config) -> None:
     """Apply per-case IDAS nonlinear and algebraic-error controls."""
 
+    from .solver_support import MAX_CONVERGENCE_FAILURES
+
     daetools_config = daeGetConfig()
     daetools_config.SetBoolean(
         "daetools.IDAS.SuppressAlg",
@@ -132,6 +134,7 @@ def configure_idas(solver_config) -> None:
         solver_config.nonlinear_convergence_coefficient,
     )
     daetools_config.SetInteger("daetools.IDAS.MaxOrd", getattr(solver_config, "maximum_order", 5))
+    daetools_config.SetInteger("daetools.IDAS.MaxConvFails", MAX_CONVERGENCE_FAILURES)
 
 
 def _configure_aztecoo(linear_solver):

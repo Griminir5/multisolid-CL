@@ -305,6 +305,8 @@ def _report_errors(run, *, has_reactions=True, report_registry=None, plot_regist
             "run.outputs.requested_plots contains unknown ids: "
             f"{', '.join(unknown_plots)}."
         )
+    if run.outputs.requested_plots and not requested_reports:
+        errors.append("run.outputs.requested_plots requires at least one requested report.")
     for plot_id in run.outputs.requested_plots:
         if plot_id not in plot_registry:
             continue

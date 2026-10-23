@@ -14,11 +14,15 @@ def main(argv=None) -> int:
     parser.add_argument("project", nargs="?", type=Path, help="Project folder or project.json")
     parser.add_argument("--worker", type=Path, metavar="RUN_FOLDER", help=argparse.SUPPRESS)
     parser.add_argument("--project-worker", type=Path, metavar="EXECUTION_FILE", help=argparse.SUPPRESS)
+    parser.add_argument("--render-plot", nargs=3, metavar=("RESULTS", "PLOT_ID", "DESTINATION"), help=argparse.SUPPRESS)
     parser.add_argument('--check-plugin', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--check-compiled', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--self-test', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--diagnostics-script', type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.render_plot is not None:
+        from .plot_worker import main as render_plot
+        return render_plot(*args.render_plot)
     if args.self_test is not None:
         if args.diagnostics_script is None:
             parser.error('--self-test requires an explicit external --diagnostics-script')

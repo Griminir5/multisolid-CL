@@ -15,6 +15,11 @@ class PlotSpec:
     required_reports: tuple[str, ...]
     filename: str
     render: Callable[[Any, Path], None]
+    title: str = ""
+
+    @property
+    def label(self) -> str:
+        return self.title or self.id.replace("_", " ").capitalize()
 
 
 def pyplot():

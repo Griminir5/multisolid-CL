@@ -320,6 +320,7 @@ def integrate(simulation):
     from daetools.pyDAE import cnDifferential
 
     from ..reports import _scheduled_time
+    from ..solver_support import MAX_CONVERGENCE_FAILURES
 
     case = simulation.case
     settings = case.run.solver
@@ -366,6 +367,7 @@ def integrate(simulation):
     compiled.metadata["nonlinear_refresh_interval"] = (
         settings.nonlinear_refresh_interval
     )
+    compiled.metadata["max_convergence_failures"] = MAX_CONVERGENCE_FAILURES
     if settings.scale_residuals:
         # Apply the same fixed positive factors to F and its Jacobian. This
         # normalizes initial matrix rows without changing the state error weights.

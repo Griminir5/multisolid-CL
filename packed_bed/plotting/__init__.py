@@ -8,14 +8,17 @@ from types import MappingProxyType
 from typing import Mapping
 
 from .axial_profiles import PLOT as AXIAL_PROFILES
+from .average_solid_composition import PLOT as AVERAGE_SOLID_COMPOSITION
 from .definitions import PlotSpec
 from .outlet_composition import PLOT as OUTLET_COMPOSITION
 from .outlet_conditions import PLOT as OUTLET_CONDITIONS
+from .pca_trajectory import PLOT as PCA_TRAJECTORY
 
 
 PLOT_REGISTRY: Mapping[str, PlotSpec] = MappingProxyType({
     plot.id: plot
-    for plot in (OUTLET_COMPOSITION, OUTLET_CONDITIONS, AXIAL_PROFILES)
+    for plot in (OUTLET_COMPOSITION, OUTLET_CONDITIONS, AXIAL_PROFILES,
+                 AVERAGE_SOLID_COMPOSITION, PCA_TRAJECTORY)
 })
 
 

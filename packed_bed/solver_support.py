@@ -2,6 +2,10 @@
 
 from importlib.util import find_spec
 
+# Depleted reactants can require more than IDA's default ten step reductions
+# before Newton converges. Retrying retains the requested error tolerances.
+MAX_CONVERGENCE_FAILURES = 30
+
 DESKTOP_SOLVERS = {
     "daetools": (
         "superlu", "klu",

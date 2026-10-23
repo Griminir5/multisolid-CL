@@ -22,7 +22,7 @@ def _documents():
                       "ambient_temperature_k": 300., "heat_transfer_coefficient_w_per_m2_k": 0.},
             "solver": {"backend": "daetools", "name": "superlu", "threads": 1, "relative_tolerance": 1e-5},
             "outputs": {"directory": "output", "artifacts_directory": "output/artifacts",
-                        "requested_reports": ["temperature", "pressure", "gas_mole_fraction", "gas_flux"], "requested_plots": []}},
+                        "requested_reports": ["temperature", "pressure", "gas_mole_fraction", "gas_flux", "solid_mole_fraction"], "requested_plots": []}},
         "chemistry": {"gas_species": ["N2"], "reaction_families": [], "reaction_ids": []},
         "program": {"inlet_flow": {"initial": 1e-8, "steps": []},
                     "inlet_temperature": {"initial": 300., "steps": []},
@@ -156,6 +156,11 @@ def check(destination):
                 assert b'<svg' in target.read_bytes()
                 assert QSvgRenderer(str(target)).isValid()
             passed('pre-made SVG plots from retained results')
+            preview = destination / 'pca-preview.svg'
+            subprocess.run(_command('--render-plot', project.cases[0].run_folder / 'output/results.nc',
+                                    'pca_trajectory', preview), check=True, timeout=60)
+            assert QSvgRenderer(str(preview)).isValid()
+            passed('separate plot-preview process')
             from packed_bed_ui.project_archive import export_project, import_project
             archive = destination / "project.msproject"
             export_project(project, archive)

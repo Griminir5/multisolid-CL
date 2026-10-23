@@ -798,6 +798,12 @@ error estimates does not remove the algebraic equations. Compiled residual
 scaling likewise changes numerical conditioning while retaining the residual
 zeros.
 
+Both backends allow up to 30 consecutive nonlinear convergence failures while
+reducing a time step, instead of IDA's default of ten. This lets sharply varying
+rates near reactant depletion recover at a smaller step without relaxing the
+case's error tolerances or accepting an unconverged solution. A persistent
+failure still stops the run.
+
 `reporting_interval_s` sets saved output times, not a fixed integration step.
 The reporting schedule includes zero and the final horizon, adding a shorter
 last reporting interval if needed. Selecting plots does not change the balances.

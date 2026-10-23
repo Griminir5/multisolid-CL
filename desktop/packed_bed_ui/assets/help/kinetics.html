@@ -56,6 +56,12 @@ positive-pressure regularization, using the SiO2-specific parameter defaults.</p
 <p>The source states that CuO-to-Cu reduction is independent of the support and
 extends that base model with CuAl2O4/CuAlO2 chemistry for the Al2O3 carrier.
 The zero-order hydrogen reductions retain a local smooth gas-availability gate.</p>
+<p>Both copper families evaluate the smooth positive pressure
+<code>(p + sqrt(p*p + 4*epsilon*epsilon))/2</code>, with <code>epsilon = 1e-12 bar</code>,
+using an algebraically equivalent rationalized form in <code>regularization.py</code>.
+This preserves the small positive tail and its derivative for negative trial
+pressures without subtracting nearly equal numbers. The rate laws and
+regularization scale are unchanged.</p>
 <h2 id="nickel-redox--medrano-form">Nickel redox — Medrano form</h2>
 <p><code>nickel_medrano</code> (<code>nickel_medrano.py</code>) follows the Medrano-style form documented
 in Andrew Wright, <em>Chemical Looping Reactor Modelling – 2D</em>, with context from
@@ -71,9 +77,7 @@ Eq. (14) and Table 2:</p>
 The reference pressure is fixed at 1 bar. This factor modifies the chemical
 rate constant inside the shrinking-core resistance expression; the ash
 diffusivity is unchanged. Gas concentration retains its existing reaction-order
-dependence. At 1 bar the additional factor is exactly one.
-Each reaction exposes its own dimensionless, nonnegative exponent:</p>
-
+dependence. At 1 bar the additional factor is exactly one. Each reaction exposes its own dimensionless, nonnegative exponent.</p>
 <h2 id="nickel-catalysed-reforming">Nickel-catalysed reforming</h2>
 <ul>
 <li><code>reforming_xu_froment</code> (<code>reforming_xu_froment.py</code>) implements the three

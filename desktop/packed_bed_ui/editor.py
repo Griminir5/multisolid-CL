@@ -3,10 +3,8 @@
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from packed_bed.file_io import TemporaryDirectory
 
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
-from PyQt6.QtSvgWidgets import QSvgWidget
 from PyQt6.QtWidgets import (
     QApplication, QAbstractButton, QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QLabel, QLineEdit,
     QHBoxLayout, QPlainTextEdit, QPushButton, QMessageBox, QScrollArea, QSizePolicy, QSpinBox, QTabWidget, QTreeWidget, QVBoxLayout, QWidget,
@@ -476,33 +474,22 @@ class CaseEditor(InputEditor):
         path = self.case.run_folder / "output" / RESULTS_FILENAME
         if not path.is_file():
             return
+        from .plot_viewer import PlotDialog, result_revision
+        from .case_list import result_label
         try:
-            # Read retained data independently of the current draft, including stale results.
-            import xarray as xr
-            with xr.open_dataset(path, engine="scipy") as source:
-                dataset = source.load()
-            spec = PLOT_REGISTRY[plot_id]
-            with TemporaryDirectory(prefix="multisolid-plot-") as folder:
-                destination = Path(folder) / spec.filename
-                spec.render(dataset, destination)
-                svg = destination.read_bytes()
+            request = (path, result_revision(path), plot_id)
+            for dialog in self.plot_windows:
+                if dialog.request == request:
+                    dialog.showNormal()
+                    dialog.raise_()
+                    dialog.activateWindow()
+                    return
+            # Capture the retained run now; changing cases while the process
+            # works must not relabel the plot with the newly selected case.
+            dialog = PlotDialog(path, plot_id, self.case.name, result_label(self.case.state()), self)
         except Exception as exc:
             QMessageBox.warning(self, "Plot unavailable", f"This plot could not be drawn from the retained results.\n{exc}")
             return
-        dialog = QDialog(self)
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.setWindowTitle(f"{self.case.name} · {plot_id.replace('_', ' ')}")
-        dialog.resize(950, 720)
-        layout = QVBoxLayout(dialog)
-        from .case_list import result_label
-        status = QLabel("Retained run · " + result_label(self.case.state()))
-        layout.addWidget(status)
-        plot = QSvgWidget()
-        plot.load(svg)
-        layout.addWidget(plot, 1)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(dialog.close)
-        layout.addWidget(buttons)
         self.plot_windows.append(dialog)
         dialog.destroyed.connect(lambda: self.plot_windows.remove(dialog))
         dialog.show()

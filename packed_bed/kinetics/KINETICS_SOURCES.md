@@ -34,6 +34,13 @@ The source states that CuO-to-Cu reduction is independent of the support and
 extends that base model with CuAl2O4/CuAlO2 chemistry for the Al2O3 carrier.
 The zero-order hydrogen reductions retain a local smooth gas-availability gate.
 
+Both copper families evaluate the smooth positive pressure
+`(p + sqrt(p*p + 4*epsilon*epsilon))/2`, with `epsilon = 1e-12 bar`,
+using an algebraically equivalent rationalized form in `regularization.py`.
+This preserves the small positive tail and its derivative for negative trial
+pressures without subtracting nearly equal numbers. The rate laws and
+regularization scale are unchanged.
+
 ## Nickel redox — Medrano form
 
 `nickel_medrano` (`nickel_medrano.py`) follows the Medrano-style form documented

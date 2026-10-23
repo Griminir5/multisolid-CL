@@ -737,8 +737,30 @@ directory.</p>
   <td><code>temperature</code>, <code>pressure</code></td>
   <td><code>axial_profiles_vs_time.svg</code></td>
 </tr>
+<tr>
+  <td><code>average_solid_composition</code></td>
+  <td><code>solid_mole_fraction</code></td>
+  <td><code>average_solid_composition_vs_time.svg</code></td>
+</tr>
+<tr>
+  <td><code>pca_trajectory</code></td>
+  <td>All selected reports (at least one)</td>
+  <td><code>pca_trajectory.svg</code></td>
+</tr>
 </tbody>
 </table>
+<p><code>average_solid_composition</code> averages each solid species' local mole fraction
+over the uniform bed cells at each reporting time. Empty cells contribute zero.
+It is a spatial average, not a ratio of the bed's total species inventories.</p>
+<p><code>pca_trajectory</code> flattens every numeric, time-dependent report output into one
+feature per species/location. It centers and standardizes each feature across
+time, omits constant features, and fits one PCA basis to the saved run. Time and
+spatial coordinates are excluded. The plot connects one point per reporting time
+in PC1/PC2 order, colors points by time, marks Start/End, and labels each axis
+with explained variance. A missing second component is zero; an entirely
+constant run sits at the origin. Nonfinite report values produce a plot error
+without dropping samples. Reports with more spatial/species entries contribute
+more features, and PCA axes are specific to the run and selected reports.</p>
 <p>Validation rejects missing plot dependencies. Changing a report selection after
 a run does not add data to the existing NetCDF file. A plot failure leaves the
 simulation results available, records the error, and makes the CLI return a

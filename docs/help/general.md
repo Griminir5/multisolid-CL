@@ -70,6 +70,9 @@ available. Check grid and tolerance sensitivity for your particular problem.
 **Requested reports** chooses what the simulation records. **Requested plots**
 chooses predefined plots; **Show** opens an available plot from the retained run.
 If results are stale, that plot still belongs to the earlier run.
+Plots open in a separate window while they are prepared in the background, so
+you can continue using the application. Closing a loading plot cancels its
+preparation. Saved plots are reused when they match the retained results.
 
 | Report option | What it records |
 | --- | --- |
@@ -91,6 +94,24 @@ If results are stale, that plot still belongs to the earlier run.
 | Outlet composition | Inlet and outlet gas mole fractions over time; requires Gas mole fraction. |
 | Outlet conditions | Outlet temperature, pressure drop, and total outlet flow; requires Temperature, Pressure, and Gas flux. |
 | Axial profiles | Temperature and pressure over time and bed position; requires Temperature and Pressure. |
+| Average solid composition | One mole-fraction curve per solid species, averaged over all bed cells; requires Solid mole fraction. |
+| PCA trajectory | A two-dimensional trajectory using all selected reports, with points colored by time and Start/End markers; requires at least one report. |
+
+**Average solid composition** takes the arithmetic mean of each species' local
+mole fraction across the uniform bed cells at each reporting time. Cells with
+no solids contribute zero, matching the Solid mole fraction report. This is a
+spatial average of local fractions, rather than the fraction of total bed moles.
+
+**PCA trajectory** uses each numeric report output, including every species and
+cell or face, as separate inputs. Each input is centered and scaled to unit
+standard deviation across the saved times before fitting a single PCA basis for
+the run. Time and position coordinates are not inputs. Constant inputs are
+ignored; reports with more species or spatial points contribute more inputs.
+The axes show the first two principal-component scores and their percentages of
+explained variance. Points are connected in reporting-time order. If the data
+vary in only one direction, PC2 is zero; a constant run sits at the origin.
+Nonfinite report values prevent PCA rendering instead of silently omitting times.
+The PCA basis is fitted separately for each run, so axes can differ between runs.
 
 Choose the required quantities before running. Editing a Report worksheet later
 cannot produce data that the simulation did not record.

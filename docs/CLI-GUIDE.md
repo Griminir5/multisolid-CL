@@ -661,6 +661,22 @@ Reports select what is saved; plots consume those quantities. An empty
 | `outlet_composition` | `gas_mole_fraction` | `outlet_composition_vs_time.svg` |
 | `outlet_conditions` | `temperature`, `pressure`, `gas_flux` | `outlet_conditions_vs_time.svg` |
 | `axial_profiles` | `temperature`, `pressure` | `axial_profiles_vs_time.svg` |
+| `average_solid_composition` | `solid_mole_fraction` | `average_solid_composition_vs_time.svg` |
+| `pca_trajectory` | All selected reports (at least one) | `pca_trajectory.svg` |
+
+`average_solid_composition` averages each solid species' local mole fraction
+over the uniform bed cells at each reporting time. Empty cells contribute zero.
+It is a spatial average, not a ratio of the bed's total species inventories.
+
+`pca_trajectory` flattens every numeric, time-dependent report output into one
+feature per species/location. It centers and standardizes each feature across
+time, omits constant features, and fits one PCA basis to the saved run. Time and
+spatial coordinates are excluded. The plot connects one point per reporting time
+in PC1/PC2 order, colors points by time, marks Start/End, and labels each axis
+with explained variance. A missing second component is zero; an entirely
+constant run sits at the origin. Nonfinite report values produce a plot error
+without dropping samples. Reports with more spatial/species entries contribute
+more features, and PCA axes are specific to the run and selected reports.
 
 Validation rejects missing plot dependencies. Changing a report selection after
 a run does not add data to the existing NetCDF file. A plot failure leaves the
