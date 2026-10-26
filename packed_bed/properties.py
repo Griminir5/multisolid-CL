@@ -25,14 +25,30 @@ def wilke_mixture_viscosity(mole_fractions, viscosities, molecular_weights):
     """
     if not (len(mole_fractions) == len(viscosities) == len(molecular_weights) > 0):
         raise ValueError("Wilke mixing requires nonempty, matching species arrays.")
+
+    # For positive viscosities, sqrt(mu_i / mu_j) = sqrt(mu_i) / sqrt(mu_j).
+    # Share these species terms across pairs and their Jacobian expressions.
+    sqrt_viscosities = []
+    for viscosity in viscosities:
+        if isinstance(viscosity, (int, float, np.number, np.ndarray)):
+            sqrt_viscosities.append(viscosity**0.5)
+        else:
+            # Keep numeric property evaluation independent of DAETools. Explicit
+            # Sqrt also avoids general powers in the compiled residual/Jacobian.
+            from daetools.pyDAE import Sqrt
+
+            sqrt_viscosities.append(Sqrt(viscosity))
+    inverse_sqrt_viscosities = [1.0 / root for root in sqrt_viscosities]
+
     terms = []
     for i, (y_i, mu_i, mw_i) in enumerate(zip(mole_fractions, viscosities, molecular_weights)):
         # phi_ii = 1 exactly; do not divide by mole fractions, which may be zero.
         denominator = y_i
-        for j, (y_j, mu_j, mw_j) in enumerate(zip(mole_fractions, viscosities, molecular_weights)):
+        for j, (y_j, mw_j) in enumerate(zip(mole_fractions, molecular_weights)):
             if i == j:
                 continue
-            phi_ij = (1.0 + (mu_i / mu_j)**0.5 * (mw_j / mw_i)**0.25)**2 / math.sqrt(
+            viscosity_ratio_root = sqrt_viscosities[i] * inverse_sqrt_viscosities[j]
+            phi_ij = (1.0 + viscosity_ratio_root * (mw_j / mw_i)**0.25)**2 / math.sqrt(
                 8.0 * (1.0 + mw_i / mw_j)
             )
             denominator = denominator + y_j * phi_ij
