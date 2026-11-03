@@ -378,15 +378,31 @@ PROPERTY_REGISTRY = PropertyRegistry(
         ),
         "Al2O3": SpeciesProperties(
             "Aluminium Oxide", "solid", 101.961e-3,
-            _polynomial_enthalpy(-1675700.0, 7.9100e01, 0.0, 0.0, 0.0),
+            _polynomial_enthalpy(-1675692.0, 7.9038e01, 2.08145e-01, -4.7023817e-04, 6.09909584e-07, -4.005748e-10, 1.0342513e-13),
         ),
+        # Copper aluminates: fits to Mostafa group estimates over 500-1500 K.
+        # Quartic Cp in (T - 298.15 K) integrates to fifth-degree enthalpy.
         "CuAlO2": SpeciesProperties(
             "Copper(I) Aluminate", "solid", 122.526e-3,
-            _polynomial_enthalpy(-923200.0, 1.0000e02, 0.0, 0.0, 0.0),
+            _polynomial_enthalpy(
+                -923200.0,
+                7.142163547888e+01,
+                1.104531616727e-01,
+                -1.408984958042e-04,
+                1.124260047518e-07,
+                -3.555851519375e-11,
+            ),
         ),
         "CuAl2O4": SpeciesProperties(
             "Copper(II) Aluminate", "solid", 181.508e-3,
-            _polynomial_enthalpy(-1831800.0, 1.4000e02, 0.0, 0.0, 0.0),
+            _polynomial_enthalpy(
+                -1824400.0,
+                1.265956135162e+02,
+                2.143435424156e-01,
+                -3.307093314708e-04,
+                2.578432897287e-07,
+                -8.155163527923e-11,
+            ),
         ),
         "Fe": SpeciesProperties(
             "Iron", "solid", 55.845e-3,
