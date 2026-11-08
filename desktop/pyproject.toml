@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multisolid-cl-ui"
-version = "1.0.0"
+version = "1.0.1"
 description = "A small desktop application for MultiSolid packed-bed simulations"
 readme = {content-type = "text/markdown", text = """
 # MultiSolid desktop
